@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from functools import partial
 
+from slimbots.http import is_token_revoked
 from slimbots.limits import ValidationError, require_len
 from slimbots.voice import VoiceError
 
@@ -17,14 +19,18 @@ import session_registry
 from stream_session import StreamError, WatchSession
 
 PLAYABLE = ("Movie", "Episode")
+_starting: set[str] = set()
 
 
 async def _refuse_if_busy(ctx, voice_channel_id):
     """One party per call: the bot is one participant there, so a second share would read as the same person's."""
     running = session_registry.session_for_channel(voice_channel_id)
-    if running is None:
+    if running is None and voice_channel_id not in _starting:
         return False
     name = session_registry.channel_name(ctx.bot, voice_channel_id)
+    if running is None:
+        await ctx.reply(f"a watch party is already starting in {name} - give it a moment.")
+        return True
     await ctx.reply(f"already watching **{running.title}** in {name} - `{ctx.bot.prefix}stop` it first. another call can have its own stream.")
     return True
 
@@ -94,6 +100,14 @@ async def launch(ctx, full_item, start_seconds):
         return
     if await _refuse_if_busy(ctx, voice_channel_id):
         return
+    _starting.add(voice_channel_id)
+    try:
+        await _join_and_start(ctx, full_item, start_seconds, voice_channel_id)
+    finally:
+        _starting.discard(voice_channel_id)
+
+
+async def _join_and_start(ctx, full_item, start_seconds, voice_channel_id):
     voice_channel_name = session_registry.channel_name(ctx.bot, voice_channel_id)
     try:
         voice_session = await ctx.bot.voice.join(voice_channel_id)
@@ -107,8 +121,12 @@ async def launch(ctx, full_item, start_seconds):
     session = WatchSession(ctx.bot, ctx.channel_id, voice_channel_id, full_item, ctx.author.id, voice_session)
     try:
         await session.start(start_seconds)
-    except (StreamError, VoiceError) as err:
+    except Exception as err:
         await voice_session.leave()
+        if is_token_revoked(err):
+            raise
+        if not isinstance(err, (StreamError, VoiceError)):
+            print(f"{type(err).__name__} starting a watch party: {err}", file=sys.stderr)
         await ctx.reply(f"could not start streaming: {err}")
         return
     session.jellyfin_user_id = await accounts.user_for(ctx.bot, ctx.author.id)

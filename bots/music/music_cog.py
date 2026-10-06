@@ -1,7 +1,9 @@
 """bot-music's `play`/`queue`/`skip`/`pause`/`resume`/`stop`/`np` commands; one session per voice channel."""
 
 import asyncio
+import sys
 
+from slimbots.http import is_token_revoked
 from slimbots.limits import ValidationError, require_len
 from slimbots.voice import VoiceError
 
@@ -63,8 +65,12 @@ async def _start_session(ctx, voice_channel_id, track):
     session = MusicSession(ctx.bot, voice_channel_id, ctx.channel_id, voice_session, _forget)
     try:
         await session.start(track)
-    except (PlayerError, VoiceError) as err:
+    except Exception as err:
         await voice_session.leave()
+        if is_token_revoked(err):
+            raise
+        if not isinstance(err, (PlayerError, VoiceError)):
+            print(f"{type(err).__name__} starting playback: {err}", file=sys.stderr)
         await ctx.reply(f"could not start playing: {err}")
         return
     _sessions[voice_channel_id] = session

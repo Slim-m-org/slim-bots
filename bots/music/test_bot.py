@@ -227,6 +227,24 @@ def test_play_searches_jellyfin_with_the_whole_multiword_query():
     assert replies(client)[0] == "playing **Daft Punk - Around the World** in #voice-room."
 
 
+def test_a_start_failure_that_is_not_a_player_error_still_leaves_the_call_and_replies():
+    client = setup()
+    original = FakeLocalParticipant.publish_track
+
+    async def timed_out(self, track, options):
+        raise RuntimeError("engine: publish track timed out")
+
+    FakeLocalParticipant.publish_track = timed_out
+    try:
+        scenario(client, f"~play {PUBLIC_URL}")
+    finally:
+        FakeLocalParticipant.publish_track = original
+    voices = music.bot.voice.sessions
+    assert voices and all(v.left for v in voices), "bot is still in the call"
+    assert any("could not start playing" in text for text in replies(client))
+    assert music_cog.active_sessions() == {}
+
+
 def test_play_plays_into_the_invokers_call_as_a_microphone_track_and_leaves_when_done():
     client = setup()
 
