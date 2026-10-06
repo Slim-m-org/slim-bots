@@ -68,10 +68,10 @@ class VoiceSession:
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
         video_max_bitrate: int | None = None, video_max_framerate: float | None = None,
-        audio_max_bitrate: int | None = None,
+        audio_max_bitrate: int | None = None, simulcast: bool = False,
     ) -> tuple[Any, Any]:
         """Publishes a video+audio pair tagged SCREEN_SHARE/SCREEN_SHARE_AUDIO - what a person's own share also uses.
-        A `None` ceiling keeps the library default; degradation favors resolution, since blur reads worse than a stutter."""
+        A `None` ceiling keeps the library default; resolution beats framerate; simulcast is off - see docs/framework.md."""
         if not self.can_publish:
             raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
         rtc = self.rtc
@@ -89,7 +89,7 @@ class VoiceSession:
             video_track,
             rtc.TrackPublishOptions(
                 source=rtc.TrackSource.SOURCE_SCREENSHARE, video_encoding=video_encoding,
-                degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION,
+                degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION, simulcast=simulcast,
             ),
         )
         audio_source = rtc.AudioSource(sample_rate, num_channels)

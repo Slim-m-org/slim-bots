@@ -67,9 +67,9 @@ def fake_rtc_module(room: FakeRoom) -> SimpleNamespace:
         ),
         # No AudioEncoding on purpose: real livekit (1.1.20) re-exports VideoEncoding but not AudioEncoding.
         DegradationPreference=FakeDegradationPreference,
-        TrackPublishOptions=lambda source=None, video_encoding=None, audio_encoding=None, degradation_preference=None: SimpleNamespace(
+        TrackPublishOptions=lambda source=None, video_encoding=None, audio_encoding=None, degradation_preference=None, simulcast=None: SimpleNamespace(
             source=source, video_encoding=video_encoding, audio_encoding=audio_encoding,
-            degradation_preference=degradation_preference,
+            degradation_preference=degradation_preference, simulcast=simulcast,
         ),
         TrackSource=FakeTrackSource,
     )
@@ -119,6 +119,21 @@ def test_publish_screen_share_tags_both_tracks_with_the_screen_share_sources(mon
         video_options, _audio_options = (options for _track, options in room.local_participant.published)
         assert video_options.video_encoding is None
         assert video_options.degradation_preference == FakeDegradationPreference.MAINTAIN_RESOLUTION
+        assert video_options.simulcast is False
+        session._heartbeat_task.cancel()
+
+    asyncio.run(run())
+
+
+def test_publish_screen_share_passes_an_explicit_simulcast_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    bot, client, room = make_bot()
+    monkeypatch.setattr(voice_module, "load_rtc", lambda: fake_rtc_module(room))
+
+    async def run() -> None:
+        session = await bot.voice.join("c1")
+        await session.publish_screen_share(width=1280, height=720, simulcast=True)
+        video_options, _audio_options = (options for _track, options in room.local_participant.published)
+        assert video_options.simulcast is True
         session._heartbeat_task.cancel()
 
     asyncio.run(run())

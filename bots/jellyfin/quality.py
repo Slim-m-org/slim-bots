@@ -7,6 +7,15 @@ from dataclasses import dataclass
 import jellyfin_core
 
 HEAVY_WIDTH = 1920
+VP8_EIGHT_THREAD_AREA = 1920 * 1080
+FULL_HD_CLASS_MAX_HEIGHT = 1088
+
+
+def below_vp8_thread_jump(width, height):
+    """Trims a 1080p-class height to stay under libwebrtc's 8-thread VP8 cutoff, which stalls on a busy host; see README.md."""
+    if width * height < VP8_EIGHT_THREAD_AREA or height > FULL_HD_CLASS_MAX_HEIGHT:
+        return width, height
+    return width, (VP8_EIGHT_THREAD_AREA - 1) // width // 8 * 8
 
 
 @dataclass(frozen=True)
@@ -28,6 +37,11 @@ class Quality:
     def is_heavy(self):
         return self.width >= HEAVY_WIDTH
 
+    @property
+    def frame_size(self):
+        """The size actually decoded and published, which differs from the preset's only for a 1080p-class one."""
+        return below_vp8_thread_jump(self.width, self.height)
+
 
 PRESETS = {
     "low": Quality("low", 854, 480, 1_500_000),
@@ -35,10 +49,7 @@ PRESETS = {
     "high": Quality("high", 1920, 1080, 8_000_000),
 }
 
-HEAVY_WARNING = (
-    "1080p is much heavier on the bot's host: in the README's measurement the software encode went "
-    "from about 20% to about 87% of a core."
-)
+HEAVY_WARNING = "1080p costs the bot's host about twice the CPU of 720p - see the README's Stream quality section."
 
 
 def configured_default():
