@@ -109,6 +109,17 @@ class Space:
                 return channel
         return None
 
+    async def find_channel_by_path(self, path: str) -> str | None:
+        """Refreshes the channels and returns the id of `category/channel` (or a bare `channel`), by name without case; None when nothing matches."""
+        category_name, _, channel_name = path.rpartition("/")
+        await self.refresh_channels()
+        candidates = [c for c in self.channels.values() if c.name.lower() == channel_name.lower()]
+        if not category_name:
+            return candidates[0].id if candidates else None
+        categories = await self._client.call("GET", "/categories") or []
+        wanted = {c["id"] for c in categories if c.get("name", "").lower() == category_name.lower()}
+        return next((c.id for c in candidates if c.category_id in wanted), None)
+
     def get_role(self, id_or_name: str) -> Role | None:
         role = self.roles.get(id_or_name)
         if role:
