@@ -13,6 +13,7 @@ from slimbots import Embed
 
 import jellyfin_core
 import playback_progress
+from pump_sync import StartLine, reap
 from quality import Quality, configured_default
 from watch_sync import WatchSync
 
@@ -51,15 +52,6 @@ def build_audio_args(url, headers):
         "-map", "0:a:0", "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE),
         "-f", "s16le", "pipe:1",
     ]
-
-
-async def reap(process):
-    """Kills an ffmpeg and drains its pipe: on Python 3.12 `wait()` never returns while unread output is still queued."""
-    if process.returncode is None:
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
-    with contextlib.suppress(ProcessLookupError):
-        await process.communicate()
 
 
 def frame_byte_size(width, height):
@@ -124,6 +116,7 @@ class WatchSession:
         self._video_task = None
         self._audio_task = None
         self._monitor_task = None
+        self._start_line = StartLine()
         self._wake_monitor = asyncio.Event()
 
     def _set_item(self, item):
@@ -196,6 +189,7 @@ class WatchSession:
         self._video_process, self._audio_process = processes
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
+        self._start_line = StartLine()
         self._video_task = asyncio.create_task(self._pump_video(self._video_process), name="jellyfin-video-pump")
         self._audio_task = asyncio.create_task(self._pump_audio(self._audio_process), name="jellyfin-audio-pump")
 
@@ -207,17 +201,23 @@ class WatchSession:
         frame_size = frame_byte_size(width, height)
         frame_interval = 1.0 / jellyfin_core.JELLYFIN_STREAM_FPS
         frame_index = 0
-        start = time.monotonic()
+        start = None
+        start_line = self._start_line
         while True:
             if self.paused:
                 await asyncio.sleep(0.1)
-                start = time.monotonic() - frame_index * frame_interval
+                if start is not None:
+                    start = time.monotonic() - frame_index * frame_interval
                 continue
             try:
                 chunk = await process.stdout.readexactly(frame_size)
             except asyncio.IncompleteReadError:
+                start_line.video_gone()
                 self.bot.background(self._video_ended(process), name=f"jellyfin-video-ended-{self.voice_channel_id}")
                 return
+            if start is None:
+                await start_line.video_ready()
+                start = self._segment_started_at = time.monotonic()
             frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
             self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
             frame_index += 1
@@ -230,6 +230,8 @@ class WatchSession:
         chunk_bytes = audio_chunk_bytes()
         chunk_samples = audio_chunk_samples()
         rtc = self.voice_session.rtc
+        start_line = self._start_line
+        started = False
         while True:
             if self.paused:
                 await asyncio.sleep(0.1)
@@ -237,7 +239,11 @@ class WatchSession:
             try:
                 chunk = await process.stdout.readexactly(chunk_bytes)
             except asyncio.IncompleteReadError:
+                start_line.audio_gone()
                 return
+            if not started:
+                await start_line.audio_ready()
+                started = True
             frame = rtc.AudioFrame(chunk, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, chunk_samples)
             await self._audio_source.capture_frame(frame)
 

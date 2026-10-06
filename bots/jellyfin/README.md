@@ -148,6 +148,12 @@ hash-locked CI requirements since the test suite never spawns it) into
 raw I420 frames letterboxed to `JELLYFIN_STREAM_WIDTH`x`JELLYFIN_STREAM_HEIGHT`
 and PCM audio, published through `bot.voice`'s `SOURCE_SCREENSHARE`/
 `SOURCE_SCREENSHARE_AUDIO` tracks - see `stream_session.py`.
+Picture and sound start together: each pump holds its first chunk until
+the other has one (`pump_sync.StartLine`), since Jellyfin takes a second
+or more to start a transcode and a picture paced from launch raced
+through that second and stayed ahead of the sound. The audio queue is
+kept at 100 ms and cleared on every restart, so a seek or a pause does
+not leave old sound playing over the new picture.
 
 Those raw frames are then re-encoded a second time by LiveKit's own
 WebRTC publish, which used to get no explicit bitrate/framerate ceiling

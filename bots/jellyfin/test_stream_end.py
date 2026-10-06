@@ -29,6 +29,8 @@ case " $* " in *" -vn "*) audio=1;; esac
 case "$STAND_IN_MODE" in
 dead) exit 1;;
 endless) exec cat /dev/zero;;
+slowstart) sleep 0.6; exec cat /dev/zero;;
+lateaudio) [ $audio = 1 ] && sleep 0.6; exec cat /dev/zero;;
 noaudio) [ $audio = 1 ] && exit 1; exec sleep 30;;
 *)
   [ $audio = 1 ] && exec sleep 30
@@ -180,6 +182,44 @@ def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():
         assert rig.voice.left, "stop never got as far as leaving the call"
     finally:
         rig.close()
+
+
+def capture_times(mode, seconds=1.5):
+    """When the first video frame and audio chunk went out, and how many frames went out in the first 300 ms."""
+    rig = Rig(mode)
+    video, audio = [], []
+
+    async def scenario():
+        await rig.session._publish()
+        real_video, real_audio = rig.session._video_source, rig.session._audio_source
+        rig.session._video_source.capture_frame = lambda *a, **k: (video.append(time.monotonic()), real_video.frame_count)
+        original_audio = real_audio.capture_frame
+
+        async def timed_audio(*a, **k):
+            audio.append(time.monotonic())
+            await original_audio(*a, **k)
+
+        real_audio.capture_frame = timed_audio
+        await rig.session._start_pipeline(0.0)
+        await asyncio.sleep(seconds)
+        await rig.session._teardown_pipeline()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        rig.close()
+    burst = sum(1 for t in video if t - video[0] < 0.3)
+    return video[0], audio[0], burst
+
+
+def test_a_slow_transcode_start_does_not_fast_forward_the_first_frames():
+    _, _, burst = capture_times("slowstart")
+    assert burst <= 0.3 * jellyfin_core.JELLYFIN_STREAM_FPS + 2, f"{burst} frames in the first 300 ms"
+
+
+def test_picture_waits_for_sound_that_arrives_later():
+    first_video, first_audio, _ = capture_times("lateaudio")
+    assert abs(first_video - first_audio) < 0.1, f"picture started {first_audio - first_video:.2f}s before the sound"
 
 
 if __name__ == "__main__":
