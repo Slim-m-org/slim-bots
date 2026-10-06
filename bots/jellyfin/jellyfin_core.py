@@ -36,6 +36,9 @@ HELP_TEXT = (
 
 # What `!watch`/`!subs` need beyond FIELDS: total runtime, and the audio/subtitle track list.
 STREAM_FIELDS = "RunTimeTicks,MediaStreams"
+# Jellyfin downmixes to stereo itself; left to the source it encoded 5.1 at 640 kbps for the bot to throw away, at 0.75 of a core.
+STREAM_AUDIO_CHANNELS = 2
+STREAM_AUDIO_BITRATE = 256_000
 
 # Populated once by configure(); a bot script calls it right after building Bot().
 JELLYFIN_URL = ""
@@ -522,6 +525,7 @@ def build_stream_url(
     # Jellyfin keys a transcode by item, device and PlaySessionId, so a restart without a fresh one replays the old stream.
     params = {
         "Static": "false", "VideoCodec": "h264", "AudioCodec": "aac", "Container": "mkv",
+        "AudioChannels": STREAM_AUDIO_CHANNELS, "AudioBitrate": STREAM_AUDIO_BITRATE,
         "MaxWidth": max_width or JELLYFIN_STREAM_WIDTH, "VideoBitrate": video_bitrate or JELLYFIN_STREAM_MAX_BITRATE,
         "StartTimeTicks": int(start_seconds * 10_000_000),
     }

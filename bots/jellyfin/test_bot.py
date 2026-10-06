@@ -393,6 +393,13 @@ def test_build_stream_url_carries_seek_and_subtitle_params():
     assert "SubtitleMethod=Encode" in url
 
 
+def test_build_stream_url_asks_jellyfin_for_stereo_audio():
+    jellyfin.jellyfin_core.JELLYFIN_URL = "https://fake-jellyfin.invalid"
+    url = jellyfin.jellyfin_core.build_stream_url("item-1")
+    assert "AudioChannels=2" in url
+    assert "AudioBitrate=256000" in url
+
+
 def test_find_subtitle_stream_matches_language_or_display_title():
     item = {"MediaStreams": [
         {"Type": "Subtitle", "Index": 3, "Language": "eng", "DisplayTitle": "English"},
