@@ -13,6 +13,7 @@ DAILY_COOLDOWN_SECONDS = 20 * 3600
 FLIP_PAYOUT_NUM = 19  # win returns 1.9x the stake, floored to a whole chip
 FLIP_PAYOUT_DEN = 10
 MAX_AMOUNT = 1_000_000_000_000  # well under sqlite's 64-bit ceiling; see README.md
+MAX_AMOUNT_DIGITS = 18  # keeps int() clear of Python's string-to-int digit limit
 PROCESSED_REQUEST_RETENTION_SECONDS = 30 * 24 * 3600
 PRUNE_INTERVAL_SECONDS = 3600
 
@@ -153,7 +154,9 @@ def format_duration(seconds):
 def parse_amount_spec(spec):
     if spec.lower() == "all":
         return "all"
-    if spec.isdigit():
+    if spec.isascii() and spec.isdecimal():
+        if len(spec) > MAX_AMOUNT_DIGITS:
+            raise BadArgument(f"keep a single amount under {MAX_AMOUNT} chips")
         return spec
     raise BadArgument("amount must be a whole number of chips, or `all`")
 
