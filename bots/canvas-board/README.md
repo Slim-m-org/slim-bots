@@ -108,6 +108,10 @@ Two things that turned out to matter:
 - **More than 20 items, or more than one board per channel.** `!board add`
   refuses once every slot is full rather than growing the column - an
   unbounded column would need an unbounded viewport query to reconcile.
+- **Reconciling a rectangle too busy to read in one page.** The read asks for
+  the server's largest page; if other people's objects still overflow it, the
+  server answers `has_more`, and the bot adds what it saw but removes nothing,
+  since a note missing from a partial read may just be on the page it did not get.
 - **Moving a note to an arbitrary canvas position.** `!board move` only
   retargets within the board's own slot column, never to a free-form `x,y`.
   A note moved outside that rectangle would fall outside the query this bot

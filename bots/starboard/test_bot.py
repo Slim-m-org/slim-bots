@@ -13,7 +13,7 @@ import bot as starboard  # noqa: E402
 from slimbots import Message, Store  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
 from slimbots.events import ReactionsChanged  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
+from slimbots.http import ApiError, is_token_revoked  # noqa: E402
 from slimbots.space import Space  # noqa: E402
 from slimbots.testing import FakeAsyncClient  # noqa: E402
 
@@ -356,6 +356,50 @@ def test_prune_forgets_old_seen_but_keeps_starred():
     asyncio.run(starboard.bot.store.run(starboard.prune_seen, 100))
     assert db("SELECT * FROM seen") == []
     assert len(db("SELECT * FROM starred")) == 1
+
+
+def run_maintenance_briefly():
+    saved = starboard.MAINTENANCE_SECONDS
+    starboard.MAINTENANCE_SECONDS = 0.02
+    starboard.bot._fatal_error = None
+    starboard.bot._main_task = None
+
+    async def go():
+        task = starboard.bot.background(starboard._maintenance(), name="starboard-maintenance")
+        await asyncio.sleep(0.3)
+        died = task.done()
+        task.cancel()
+        return died
+
+    try:
+        return asyncio.run(go())
+    finally:
+        starboard.MAINTENANCE_SECONDS = saved
+
+
+def arm_a_due_digest(client, failure):
+    created("m1", "first")
+    react(3, "m1")
+    asyncio.run(starboard.bot.store.run(starboard.meta_set, "last_digest", int(time.time()) - 8 * 86400))
+    client.respond("POST", "/channels/hl/messages", failure)
+
+
+def test_maintenance_survives_a_digest_send_that_fails_and_still_prunes():
+    client = setup()
+    arm_a_due_digest(client, ApiError(403, {"error": "forbidden"}))
+    asyncio.run(starboard.bot.store.run(lambda conn: conn.execute("UPDATE seen SET seen_at = 0")))
+    died = run_maintenance_briefly()
+    assert not died and starboard.bot._fatal_error is None, f"maintenance died: {starboard.bot._fatal_error!r}"
+    assert db("SELECT * FROM seen") == []
+    assert db("SELECT value FROM meta WHERE key = 'last_digest'") != [], "a failed digest must stay due, not be marked sent"
+    assert int(db("SELECT value FROM meta WHERE key = 'last_digest'")[0][0]) < time.time() - 7 * 86400
+
+
+def test_maintenance_still_stops_on_a_revoked_token():
+    client = setup()
+    arm_a_due_digest(client, ApiError(401, {"error": "unauthorized"}))
+    died = run_maintenance_briefly()
+    assert died and is_token_revoked(starboard.bot._fatal_error)
 
 
 if __name__ == "__main__":

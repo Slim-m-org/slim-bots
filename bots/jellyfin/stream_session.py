@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import shutil
-import tempfile
+import sys
 import time
 import uuid
 
@@ -21,6 +20,8 @@ AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 2
 AUDIO_CHUNK_MS = 20
 ROSTER_POLL_SECONDS = 20
+END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
+EXIT_WAIT_SECONDS = 5
 
 
 class StreamError(Exception):
@@ -34,20 +35,20 @@ def ffmpeg_binary():
     return path
 
 
-def build_video_args(url, headers, fifo_path, *, width, height, fps):
+def build_video_args(url, headers, *, width, height, fps):
     """Letterboxes Jellyfin's own aspect-preserving transcode into an exact WxH - the size `VideoSource` publishes."""
     filters = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
     return [
         ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-headers", headers, "-i", url,
-        "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "-y", fifo_path,
+        "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
     ]
 
 
-def build_audio_args(url, headers, fifo_path):
+def build_audio_args(url, headers):
     return [
         ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-headers", headers, "-i", url,
         "-map", "0:a:0", "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE),
-        "-f", "s16le", "-y", fifo_path,
+        "-f", "s16le", "pipe:1",
     ]
 
 
@@ -113,7 +114,6 @@ class WatchSession:
         self._video_task = None
         self._audio_task = None
         self._monitor_task = None
-        self._tmpdir = None
         self._wake_monitor = asyncio.Event()
 
     def _set_item(self, item):
@@ -158,13 +158,8 @@ class WatchSession:
 
     async def _launch_pipeline(self, start_seconds):
         """Starts both ffmpeg processes on a fresh transcode without touching the running pipeline; raises if it cannot."""
-        tmpdir = tempfile.mkdtemp(prefix="slimm-jellyfin-")
         processes = []
         try:
-            video_fifo = os.path.join(tmpdir, "video.raw")
-            audio_fifo = os.path.join(tmpdir, "audio.raw")
-            os.mkfifo(video_fifo)
-            os.mkfifo(audio_fifo)
             url = jellyfin_core.build_stream_url(
                 self.item_id, start_seconds=start_seconds, audio_stream_index=self.audio_stream_index,
                 subtitle_stream_index=self.subtitle_stream_index, max_width=self.quality.width,
@@ -172,79 +167,93 @@ class WatchSession:
             )
             headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
             width, height = self.quality.frame_size
-            video_args = build_video_args(url, headers, video_fifo, width=width, height=height, fps=jellyfin_core.JELLYFIN_STREAM_FPS)
-            audio_args = build_audio_args(url, headers, audio_fifo)
+            video_args = build_video_args(url, headers, width=width, height=height, fps=jellyfin_core.JELLYFIN_STREAM_FPS)
+            audio_args = build_audio_args(url, headers)
             for args in (video_args, audio_args):
                 processes.append(await asyncio.create_subprocess_exec(
-                    *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 ))
         except BaseException:
             for process in processes:
                 process.kill()
-            shutil.rmtree(tmpdir, ignore_errors=True)
             raise
-        return tmpdir, processes, video_fifo, audio_fifo
+        return processes
 
     async def _start_pipeline(self, start_seconds):
         """Replaces the running pipeline only once the new one has launched, so a failed launch leaves playback alone."""
-        tmpdir, processes, video_fifo, audio_fifo = await self._launch_pipeline(start_seconds)
+        processes = await self._launch_pipeline(start_seconds)
         await self._teardown_pipeline()
-        self._tmpdir = tmpdir
         self._video_process, self._audio_process = processes
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
-        self._video_task = asyncio.create_task(self._pump_video(video_fifo), name="jellyfin-video-pump")
-        self._audio_task = asyncio.create_task(self._pump_audio(audio_fifo), name="jellyfin-audio-pump")
+        self._video_task = asyncio.create_task(self._pump_video(self._video_process), name="jellyfin-video-pump")
+        self._audio_task = asyncio.create_task(self._pump_audio(self._audio_process), name="jellyfin-audio-pump")
 
-    async def _pump_video(self, fifo_path):
-        """Reads fixed-size I420 frames and paces them to `JELLYFIN_STREAM_FPS`; pausing just stops reading the fifo,
+    async def _pump_video(self, process):
+        """Reads fixed-size I420 frames and paces them to `JELLYFIN_STREAM_FPS`; pausing just stops reading the pipe,
         so ffmpeg blocks on its own full pipe buffer instead of needing a separate pause signal."""
         rtc = self.voice_session.rtc
         width, height = self.quality.frame_size
         frame_size = frame_byte_size(width, height)
         frame_interval = 1.0 / jellyfin_core.JELLYFIN_STREAM_FPS
-        handle = await asyncio.to_thread(open, fifo_path, "rb")
-        ended_naturally = False
-        try:
-            frame_index = 0
-            start = time.monotonic()
-            while True:
-                if self.paused:
-                    await asyncio.sleep(0.1)
-                    start = time.monotonic() - frame_index * frame_interval
-                    continue
-                chunk = await asyncio.to_thread(handle.read, frame_size)
-                if len(chunk) < frame_size:
-                    ended_naturally = True
-                    return
-                frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
-                self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
-                frame_index += 1
-                delay = (start + frame_index * frame_interval) - time.monotonic()
-                if delay > 0:
-                    await asyncio.sleep(delay)
-        finally:
-            handle.close()
-            if ended_naturally:
-                self.bot.background(self._handle_finished(), name=f"jellyfin-finished-{self.voice_channel_id}")
+        frame_index = 0
+        start = time.monotonic()
+        while True:
+            if self.paused:
+                await asyncio.sleep(0.1)
+                start = time.monotonic() - frame_index * frame_interval
+                continue
+            try:
+                chunk = await process.stdout.readexactly(frame_size)
+            except asyncio.IncompleteReadError:
+                self.bot.background(self._video_ended(process), name=f"jellyfin-video-ended-{self.voice_channel_id}")
+                return
+            frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
+            self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
+            frame_index += 1
+            delay = (start + frame_index * frame_interval) - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
 
-    async def _pump_audio(self, fifo_path):
+    async def _pump_audio(self, process):
+        """Ends quietly when the audio ffmpeg does: a title with no audio stream plays on in silence."""
         chunk_bytes = audio_chunk_bytes()
         chunk_samples = audio_chunk_samples()
         rtc = self.voice_session.rtc
-        handle = await asyncio.to_thread(open, fifo_path, "rb")
+        while True:
+            if self.paused:
+                await asyncio.sleep(0.1)
+                continue
+            try:
+                chunk = await process.stdout.readexactly(chunk_bytes)
+            except asyncio.IncompleteReadError:
+                return
+            frame = rtc.AudioFrame(chunk, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, chunk_samples)
+            await self._audio_source.capture_frame(frame)
+
+    async def _video_ended(self, process):
+        """The video pipe closing is the title ending only if ffmpeg exited cleanly near the runtime; anything else dropped."""
+        if self.finished or process is not self._video_process:
+            return
+        if await self._exit_code(process) == 0 and self._near_the_end():
+            await self._handle_finished()
+            return
+        await self._end_after_drop()
+
+    async def _exit_code(self, process):
         try:
-            while True:
-                if self.paused:
-                    await asyncio.sleep(0.1)
-                    continue
-                chunk = await asyncio.to_thread(handle.read, chunk_bytes)
-                if len(chunk) < chunk_bytes:
-                    return
-                frame = rtc.AudioFrame(chunk, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, chunk_samples)
-                await self._audio_source.capture_frame(frame)
-        finally:
-            handle.close()
+            return await asyncio.wait_for(process.wait(), timeout=EXIT_WAIT_SECONDS)
+        except asyncio.TimeoutError:
+            return None
+
+    def _near_the_end(self):
+        """A title with no runtime on record cannot be checked, so a clean exit alone counts."""
+        return not self.duration_seconds or self.duration_seconds - self.position_seconds <= END_TOLERANCE_SECONDS
+
+    async def _end_after_drop(self):
+        """Reports the position it really reached, never `finished`, so a dropped stream neither wipes resume nor marks it watched."""
+        print(f"jellyfin stream for {self.title!r} ended at {format_hms(self.position_seconds)} of {format_hms(self.duration_seconds)}", file=sys.stderr)
+        await self.stop(reason="the stream dropped")
 
     async def _teardown_pipeline(self):
         for task in (self._video_task, self._audio_task):
@@ -259,11 +268,8 @@ class WatchSession:
                 process.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await process.wait()
-        if self._tmpdir is not None:
-            shutil.rmtree(self._tmpdir, ignore_errors=True)
         self._video_task = self._audio_task = None
         self._video_process = self._audio_process = None
-        self._tmpdir = None
 
     def pause(self):
         if self.paused or self.finished:

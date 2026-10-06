@@ -8,6 +8,8 @@ from collections import defaultdict, deque
 
 from slimbots import ApiError, Bot, Member, Permissions
 
+from link_rules import link_domains, strip_punctuation, visible_text
+
 bot = Bot(prefix="!", default_data_path="automod.db")
 
 FLOOD_MESSAGES = bot.setting("AUTOMOD_FLOOD_MESSAGES", 0, type=int)
@@ -34,28 +36,6 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _strip_punctuation(token):
-    return token.strip("<>()[]{}\"'.,;:!?")
-
-
-def link_domains(text):
-    """Host of every http(s):// or www. token in `text`, lowercased, without a leading `www.` or a port."""
-    hosts = []
-    for token in text.split():
-        token = _strip_punctuation(token)
-        lowered = token.lower()
-        if lowered.startswith(("http://", "https://")):
-            rest = token.split("://", 1)[1]
-        elif lowered.startswith("www."):
-            rest = token
-        else:
-            continue
-        host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0].rsplit("@", 1)[-1].split(":", 1)[0].lower()
-        if host:
-            hosts.append(host[4:] if host.startswith("www.") else host)
-    return hosts
-
-
 def domain_listed(host, listed):
     return any(host == d or host.endswith("." + d) for d in listed)
 
@@ -66,7 +46,7 @@ def mention_count(text):
 
 def words_hit(text):
     """The first listed word that appears as a whole word, or None; punctuation around a word does not hide it."""
-    tokens = {_strip_punctuation(t) for t in text.lower().split()}
+    tokens = {strip_punctuation(t) for t in visible_text(text).lower().split()}
     return next((w for w in WORDS if w in tokens), None)
 
 

@@ -256,6 +256,24 @@ def test_on_ready_starts_maintenance_as_a_supervised_background_task():
     asyncio.run(run())
 
 
+def test_a_non_ascii_digit_amount_is_refused_and_later_commands_still_work():
+    client = setup()
+    process(client, message("u1", "!flip \u00b2 heads", "m1"))
+    assert "whole number" in client.sent[-1]["content"]
+    assert not casino.bot.store.connection.in_transaction
+    process(client, message("u1", "!daily", "m2"))
+    assert "claimed 500 chips" in client.sent[-1]["content"], client.sent[-1]
+
+
+def test_an_absurdly_long_amount_is_refused_and_later_commands_still_work():
+    client = setup()
+    process(client, message("u1", "!flip " + "9" * 5000 + " heads", "m1"))
+    assert "under" in client.sent[-1]["content"]
+    assert not casino.bot.store.connection.in_transaction
+    process(client, message("u1", "!daily", "m2"))
+    assert "claimed 500 chips" in client.sent[-1]["content"], client.sent[-1]
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

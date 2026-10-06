@@ -64,6 +64,10 @@ DST-safe weekly recomputation via `zoneinfo`.
   that starts with `!`.
 - **Pruning.** A resolved (sent or cancelled) reminder is deleted after
   `REMINDER_RETENTION_SECONDS`; a pending one never is.
+- **One reminder that cannot be delivered does not stop the rest.** A send to a
+  deleted channel or one the bot may no longer post in (404 or 403) closes that
+  reminder; any other failure leaves it due and it is tried again on the next
+  pass. Only a revoked token stops the bot.
 
 ## Output
 

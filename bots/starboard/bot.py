@@ -7,6 +7,7 @@ import uuid
 
 from slimbots import Bot
 from slimbots.http import ApiError
+from slimbots.lifecycle import guard_dispatch
 from slimbots.migrations import ensure_columns
 
 
@@ -354,8 +355,8 @@ async def post_digest_if_due(now):
 async def _maintenance():
     while True:
         now = int(time.time())
-        await bot.store.run(prune_seen, now - SEEN_RETENTION_DAYS * DAY)
-        await post_digest_if_due(now)
+        await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
+        await guard_dispatch(post_digest_if_due, now)
         await asyncio.sleep(MAINTENANCE_SECONDS)
 
 

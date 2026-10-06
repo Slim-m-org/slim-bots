@@ -12,8 +12,12 @@ if TYPE_CHECKING:
 
 
 async def bootstrap(client: AsyncClient, conn: sqlite3.Connection, channel_id: str, table: str = "cursors") -> None:
-    if cursor.get(conn, channel_id, table) is not None:
-        return
+    if cursor.get(conn, channel_id, table) is None:
+        await jump_to_latest(client, conn, channel_id, table)
+
+
+async def jump_to_latest(client: AsyncClient, conn: sqlite3.Connection, channel_id: str, table: str = "cursors") -> None:
+    """Moves the cursor to the channel's newest message, for a backlog the server says is too long to replay."""
     latest = await client.call("GET", f"/channels/{channel_id}/messages?limit=1")
     cursor.set(conn, channel_id, latest[0]["seq"] if latest else 0, table)
 

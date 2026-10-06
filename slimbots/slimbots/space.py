@@ -73,6 +73,11 @@ class Space:
         self.members[user_id] = member
         return member
 
+    def reapply_roles(self) -> None:
+        """Recomputes every cached member's permissions from the current `.roles`, after a role's bits changed."""
+        for member in self.members.values():
+            member._apply_roles(member.role_ids, self._base_permissions(member.role_ids))
+
     async def find_member(self, user_id: str) -> Member | None:
         """The cached member for `user_id`, else one fetched directly; None when the server has no such user."""
         member = self.members.get(user_id)

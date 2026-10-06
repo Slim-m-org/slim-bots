@@ -13,6 +13,7 @@ NOTE_W = 220.0
 NOTE_H = 140.0
 GAP = 20.0
 MAX_SLOTS = 20
+VIEWPORT_LIMIT = 2000  # the server's ceiling; a busier rectangle answers has_more, which reconcile treats as incomplete
 # A note is a fixed 220x140 box; text past this overflows it regardless of what the canvas itself allows.
 MAX_TEXT_LENGTH = 240
 
@@ -109,7 +110,7 @@ def free_slot(conn):
     return None
 
 
-def _txn_reconcile(conn, objects, me_id):
+def _txn_reconcile(conn, objects, me_id, complete=True):
     seen_ids = set()
     for obj in objects:
         if obj["kind"] != "note" or obj.get("author_id") != me_id:
@@ -122,7 +123,7 @@ def _txn_reconcile(conn, objects, me_id):
             "ON CONFLICT(id) DO UPDATE SET slot = excluded.slot, seq = excluded.seq, active = 1",
             (obj["id"], slot, text, obj["seq"]),
         )
-    stale = [row[0] for row in active_items(conn) if row[0] not in seen_ids]
+    stale = [row[0] for row in active_items(conn) if row[0] not in seen_ids] if complete else []
     for item_id in stale:
         conn.execute("UPDATE items SET active = 0 WHERE id = ?", (item_id,))
     conn.commit()
@@ -130,8 +131,8 @@ def _txn_reconcile(conn, objects, me_id):
 
 async def reconcile():
     """Re-reads the board's rectangle and makes it ground truth; see README.md."""
-    viewport = await canvas.viewport(min_x=BOARD_X - 1, min_y=BOARD_Y - 1, max_x=BOARD_X + NOTE_W + 1, max_y=slot_y(MAX_SLOTS) + 1, limit=MAX_SLOTS + 5)
-    await bot.store.run(_txn_reconcile, viewport["objects"], bot.me_id)
+    viewport = await canvas.viewport(min_x=BOARD_X - 1, min_y=BOARD_Y - 1, max_x=BOARD_X + NOTE_W + 1, max_y=slot_y(MAX_SLOTS) + 1, limit=VIEWPORT_LIMIT)
+    await bot.store.run(_txn_reconcile, viewport["objects"], bot.me_id, not viewport.get("has_more"))
 
 
 def _insert_item(conn, item_id, slot, text, seq, added_by):

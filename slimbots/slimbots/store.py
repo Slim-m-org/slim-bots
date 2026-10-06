@@ -43,7 +43,17 @@ class Store:
     async def run(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Runs `fn(connection, *args, **kwargs)` in the worker thread and returns its result, one call at a time."""
         async with self._lock:
-            return await asyncio.to_thread(fn, self._conn, *args, **kwargs)
+            return await asyncio.to_thread(self._run_sync, fn, args, kwargs)
+
+    def _run_sync(self, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        """A raise between BEGIN and COMMIT would leave the shared connection in a transaction for every later call."""
+        assert self._conn is not None, "run() needs an open store"
+        try:
+            return fn(self._conn, *args, **kwargs)
+        except BaseException:
+            if self._conn.in_transaction:
+                self._conn.rollback()
+            raise
 
     async def close(self) -> None:
         async with self._lock:

@@ -425,6 +425,25 @@ class Bot:
         elif kind in _VISIBILITY_FRAMES and (kind != "member.role_changed" or frame.get("user_id") == self.me_id):
             await self._refresh_channels_guarded()
 
+    async def _track_roles(self, kind: str, frame: dict[str, Any]) -> None:
+        """Keeps the cached roles and members current, so a `requires=` check never trusts a revoked or missing role."""
+        if self.space is None:
+            return
+        if kind == "role.changed":
+            await guard_dispatch(self._reload_roles)
+        elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
+            await guard_dispatch(self.space.fetch_member, frame["user_id"])
+
+    async def _reload_roles(self) -> None:
+        assert self.space is not None
+        try:
+            await self.space.refresh_roles()
+        except ApiError as err:
+            if not is_forbidden(err):
+                raise
+            return
+        self.space.reapply_roles()
+
     async def _apply_channel_frame(self, frame: dict[str, Any]) -> None:
         assert self.space is not None
         self.space.apply_channel_frame(frame)
@@ -466,6 +485,7 @@ class Bot:
         kind: str = frame.get("type") or ""
         await guard_dispatch(self._dispatch_event, "on_frame", frame)
         await self._track_channels(kind, frame)
+        await self._track_roles(kind, frame)
         if kind == "message.created":
             channel_id = frame.get("channel_id")
             if not await self._accepts_channel(channel_id, kind):
@@ -516,21 +536,33 @@ class Bot:
             cursor.set(self._cursor_conn, channel_id, seq)
 
     async def _catch_up(self) -> None:
-        """Replays any `/sync` backlog for `channels` through `process_message`, persisting the cursor as it goes."""
+        """Replays the `/sync` backlog for `channels` through `process_message`, page by page, persisting the cursor as it goes."""
         assert self.client is not None, "_catch_up needs start() to have run"
         if not self.channels or self._cursor_conn is None:
             return
         for channel_id in self.channels:
             await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
-        scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in self.channels]
-        for scope in await catchup.sync(self.client, scopes):
-            channel_id = scope["channel_id"]
-            for message in scope["messages"]:
-                await guard_dispatch(self.process_message, message)
-            if scope["messages"]:
-                cursor.set(self._cursor_conn, channel_id, scope["messages"][-1]["seq"])
-            elif scope["reset"]:
-                await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+        pending = list(self.channels)
+        while pending:
+            scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in pending]
+            more, starved = [], []
+            for scope in await catchup.sync(self.client, scopes):
+                channel_id = scope["channel_id"]
+                if scope["messages"]:
+                    await self._replay_page(channel_id, scope["messages"])
+                elif scope["reset"]:
+                    await catchup.jump_to_latest(self.client, self._cursor_conn, channel_id)
+                    continue
+                if scope.get("has_more"):
+                    (more if scope["messages"] else starved).append(channel_id)
+            # A scope the shared response budget left empty can only get a page once another scope has used one.
+            pending = more + (starved if more else [])
+
+    async def _replay_page(self, channel_id: str, messages: list[dict[str, Any]]) -> None:
+        assert self._cursor_conn is not None
+        for message in messages:
+            await guard_dispatch(self.process_message, message)
+        cursor.set(self._cursor_conn, channel_id, messages[-1]["seq"])
 
     async def _connect_once(self, reset_delay: Callable[[], None]) -> None:
         assert self.client is not None and self.space is not None, "_connect_once needs start() to have run"

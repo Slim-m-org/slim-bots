@@ -234,6 +234,40 @@ def test_a_message_from_an_author_the_server_cannot_resolve_is_left_alone():
     assert len(deleted(client)) == 1
 
 
+CLIENT_LINKIFIED = (
+    "[click](https://evil.example)", "a,https://evil.example", "see:https://evil.example/x", "https://evil.example./p",
+    "(https://evil.example/p)", "plain https://evil.example/p", "<https://evil.example>", "x\u200bhttps://evil.example",
+    "https://evil.example:8443/p", "https://user@evil.example/p", "https://EVIL.example/p", "ok.https://evil.example", "https://evil.\u200bexample/p",
+)
+
+
+def test_a_deny_list_catches_every_way_of_writing_a_url_the_client_still_links():
+    for text in CLIENT_LINKIFIED:
+        client = setup(LINK_POLICY="deny", LINK_DOMAINS=["evil.example"])
+        say(text)
+        assert len(deleted(client)) == 1, f"not caught: {text!r} -> hosts {automod.link_domains(text)}"
+
+
+def test_an_allow_list_treats_a_trailing_dot_host_as_the_listed_one():
+    client = setup(LINK_POLICY="allow", LINK_DOMAINS=["good.example"])
+    say("https://good.example./fine")
+    assert deleted(client) == []
+    say("a,https://other.example/x")
+    assert len(deleted(client)) == 1
+
+
+def test_a_url_that_is_not_a_link_in_the_client_is_not_one_here_either():
+    assert automod.link_domains("nothttps://evil.example and no link at all") == []
+    assert automod.link_domains("see https://good.example/a?next=https://evil.example") == ["good.example"]
+
+
+def test_a_hidden_character_inside_a_listed_word_does_not_hide_it():
+    client = setup(WORDS=["badword"])
+    say("that is bad\u200bword")
+    say("bad\u2060word.")
+    assert len(deleted(client)) == 2
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

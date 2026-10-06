@@ -31,6 +31,7 @@ Every rule is off by default.
 - **mention spam**: `AUTOMOD_MENTION_LIMIT` (0 = off), `AUTOMOD_MENTION_TIMEOUT` (default 300).
   More than N `@name` tokens in one message deletes it and times the member out.
 - **links**: `AUTOMOD_LINK_POLICY` is `off` (default), `deny` (block listed domains) or `allow` (block every domain not listed), with `AUTOMOD_LINK_DOMAINS` as a comma-separated list.
+  A link is found the way the app finds one, so `[x](https://host)`, `a,https://host` and `https://host.` count; an invisible character in a link or a listed word is ignored.
   A listed domain also covers its subdomains.
   A blocked message is deleted and the member is told why in the channel.
 - **new-member links**: `AUTOMOD_NEW_MEMBER_LINK_HOURS` (0 = off).

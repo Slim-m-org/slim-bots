@@ -59,12 +59,14 @@ async def poll_once():
     if not items:
         return
     excluded = [item for item in items if jellyfin_core.is_excluded(item)]
+    postable = [item for item in items if not jellyfin_core.is_excluded(item)]
+    posts = jellyfin_core.build_posts(postable)
+    by_id = {item["Id"]: item for item in postable}
     if excluded:
         await bot.store.run(jellyfin_core.mark_posted, [item["Id"] for item in excluded], quiet=True)
-        await bot.store.run(jellyfin_core.advance_cursor, max(item["DateCreated"] for item in excluded))
-    postable = [item for item in items if not jellyfin_core.is_excluded(item)]
-    by_id = {item["Id"]: item for item in postable}
-    for entry in jellyfin_core.build_posts(postable):
+        newest = max(item["DateCreated"] for item in excluded)
+        await bot.store.run(jellyfin_core.advance_cursor, jellyfin_core.cursor_below_unsent(newest, postable))
+    for index, entry in enumerate(posts):
         try:
             await send_post(entry)
         except ApiError as err:
@@ -73,7 +75,8 @@ async def poll_once():
             print(f"send failed, will retry next cycle: {err}", file=sys.stderr)
             break
         await bot.store.run(jellyfin_core.mark_posted, entry["item_ids"], items=[by_id[i] for i in entry["item_ids"] if i in by_id])
-        await bot.store.run(jellyfin_core.advance_cursor, entry["max_created"])
+        still_unsent = [by_id[i] for later in posts[index + 1:] for i in later["item_ids"] if i in by_id]
+        await bot.store.run(jellyfin_core.advance_cursor, jellyfin_core.cursor_below_unsent(entry["max_created"], still_unsent))
 
 
 async def poll_loop():

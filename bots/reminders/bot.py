@@ -2,10 +2,13 @@
 """bot-reminders: `!remind in/at/every ...`, `!reminders`, `!timezone`; see README.md."""
 
 import asyncio
+import sys
 import time
 import uuid
 
 from slimbots import Bot, Duration, Embed, RateLimiter, TimeOfDay
+from slimbots.http import ApiError, is_rate_limited, is_token_revoked
+from slimbots.lifecycle import guard_dispatch
 from slimbots.limits import ValidationError, require_len, require_range
 from slimbots.migrations import ensure_columns
 
@@ -359,24 +362,46 @@ async def timezone_cmd(ctx, tz_name: str = None):
     await ctx.reply(f"timezone set to `{tz_name}`")
 
 
+async def deliver_reminder(row):
+    (reminder_id, channel_id, request_message_id, text, due_at,
+     recur_kind, interval_seconds, weekday, hour, minute, tz_name) = row
+    embed = Embed(title="Reminder", footer=format_recurrence(recur_kind, interval_seconds, weekday, hour, minute).strip() or None)
+    await bot.client.send(
+        channel_id, f"reminder: {render_reminder_text(text)}", message_id=delivery_id(reminder_id, due_at),
+        reply_to_id=request_message_id, embeds=[embed.to_wire()], fallback_content=f"reminder: {render_reminder_text(text)}",
+    )
+    now = int(time.time())
+    if recur_kind == "interval":
+        await bot.store.run(reschedule, reminder_id, recurrence.next_interval(due_at, interval_seconds, now))
+    elif recur_kind == "weekly":
+        await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(due_at, weekday, hour, minute, tz_name))
+    else:
+        await bot.store.run(mark_sent, reminder_id)
+
+
+async def park_undeliverable(row, err):
+    """A refusal (a gone channel, lost permission, content the server rejects) never heals on a retry every few seconds, so the row is closed; a 429, a 5xx or a network error retries."""
+    reminder_id = row[0]
+    print(f"reminder {reminder_id} not delivered: {type(err).__name__}: {err}", file=sys.stderr)
+    if is_refusal(err):
+        await bot.store.run(mark_sent, reminder_id)
+
+
+def is_refusal(err):
+    if not isinstance(err, ApiError) or is_rate_limited(err) or is_token_revoked(err):
+        return False
+    return 400 <= err.status < 500
+
+
+async def deliver_due_reminders():
+    for row in await bot.store.run(due_reminders, int(time.time())):
+        await guard_dispatch(deliver_reminder, row, on_error=lambda err, row=row: park_undeliverable(row, err))
+
+
 async def due_checker():
     while True:
         await asyncio.sleep(DUE_CHECK_SECONDS)
-        for row in await bot.store.run(due_reminders, int(time.time())):
-            (reminder_id, channel_id, request_message_id, text, due_at,
-             recur_kind, interval_seconds, weekday, hour, minute, tz_name) = row
-            embed = Embed(title="Reminder", footer=format_recurrence(recur_kind, interval_seconds, weekday, hour, minute).strip() or None)
-            await bot.client.send(
-                channel_id, f"reminder: {render_reminder_text(text)}", message_id=delivery_id(reminder_id, due_at),
-                reply_to_id=request_message_id, embeds=[embed.to_wire()], fallback_content=f"reminder: {render_reminder_text(text)}",
-            )
-            now = int(time.time())
-            if recur_kind == "interval":
-                await bot.store.run(reschedule, reminder_id, recurrence.next_interval(due_at, interval_seconds, now))
-            elif recur_kind == "weekly":
-                await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(due_at, weekday, hour, minute, tz_name))
-            else:
-                await bot.store.run(mark_sent, reminder_id)
+        await guard_dispatch(deliver_due_reminders)
 
 
 async def _maintenance():

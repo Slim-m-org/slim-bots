@@ -112,3 +112,19 @@ async def test_store_migrate_opens_the_store_during_start(monkeypatch, db_path):
     assert bot.store.path == db_path
     assert bot.store.connection is None  # start()'s shutdown already closed it
     assert os.path.exists(db_path)  # but the migration ran and left the file behind
+
+
+def begin_then_fail(conn):
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("INSERT INTO widgets (id, count) VALUES ('half', 1)")
+    raise ValueError("raised between BEGIN and COMMIT")
+
+
+async def test_a_run_that_raises_inside_a_transaction_does_not_leave_it_open(db_path):
+    store = await Store(db_path, migrate=migrate).open()
+    with pytest.raises(ValueError):
+        await store.run(begin_then_fail)
+    assert not store.connection.in_transaction
+    assert store.connection.execute("SELECT COUNT(*) FROM widgets").fetchone()[0] == 0
+    await store.run(insert_widget, "next")
+    await store.close()
