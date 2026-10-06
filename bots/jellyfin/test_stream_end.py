@@ -164,10 +164,15 @@ def test_a_title_with_no_audio_stream_keeps_playing_its_video():
 
 
 def test_one_ffmpeg_reads_the_transcode_for_both_tracks():
-    args = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30, audio_fd=7)
+    saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
+    try:
+        args = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30, audio_fd=7)
+        video_only = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30)
+    finally:
+        stream_session.ffmpeg_binary = saved
     assert args.count("-i") == 1
     assert args[-1] == "pipe:7" and "pipe:1" in args
-    assert "pipe:7" not in stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30)
+    assert "pipe:7" not in video_only
 
 
 def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():

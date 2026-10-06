@@ -20,7 +20,7 @@ from slimbots import Permissions, Store  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
 from slimbots.models import Channel  # noqa: E402
 from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient, FakeVoice, FakeVoiceSession  # noqa: E402
+from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVideoSource, FakeVoice, FakeVoiceSession  # noqa: E402
 from slimbots.voice import VoiceError  # noqa: E402
 
 MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}]
@@ -331,8 +331,8 @@ def movie_for_watch(item_id="m1", name="Inception", runtime_seconds=7200):
 
 
 async def _fake_start(self, start_seconds=0.0):
-    self._video_source = object()
-    self._audio_source = object()
+    self._video_source = FakeVideoSource()
+    self._audio_source = FakeAudioSource()
 
 
 async def _fake_start_pipeline(self, start_seconds):

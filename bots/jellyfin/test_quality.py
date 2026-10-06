@@ -11,7 +11,7 @@ import quality  # noqa: E402
 import stream_session  # noqa: E402
 import session_registry  # noqa: E402
 import watch_cog  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
+from slimbots.testing import FakeAudioSource, FakeVideoSource, FakeVoiceSession  # noqa: E402
 from test_bot import _fake_start_pipeline, jellyfin, message, movie_for_watch, process, setup_with_voice  # noqa: E402
 
 
@@ -19,7 +19,7 @@ def running_session(voice_session=None):
     session = stream_session.WatchSession(
         jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", voice_session or FakeVoiceSession("c1"),
     )
-    session._video_source = session._audio_source = object()
+    session._video_source, session._audio_source = FakeVideoSource(), FakeAudioSource()
     session_registry.add(session)
     return session
 
@@ -156,6 +156,15 @@ def test_the_stream_url_and_np_embed_follow_the_preset():
         session_registry.clear()
 
 
+def _args_without_ffmpeg(**kwargs):
+    """CI has no ffmpeg on PATH; the arguments do not need one."""
+    saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
+    try:
+        return stream_session.build_args("http://jf/x", "", **kwargs)
+    finally:
+        stream_session.ffmpeg_binary = saved
+
+
 def _with_rate(rate):
     return {"Id": "m1", "Name": "film", "MediaStreams": [{"Type": "Audio"}, {"Type": "Video", "RealFrameRate": rate}]}
 
@@ -173,13 +182,13 @@ def test_playback_fps_keeps_the_titles_own_rate_or_a_whole_fraction_of_it():
 
 def test_a_film_is_decoded_and_paced_at_its_own_rate():
     session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", _with_rate(23.976025), "u1", FakeVoiceSession("c1"))
-    args = stream_session.build_args("http://jf/x", "", width=1280, height=720, fps=session.fps)
+    args = _args_without_ffmpeg(width=1280, height=720, fps=session.fps)
     assert session.fps == Fraction(24000, 1001)
     assert args[args.index("-vf") + 1].endswith(",fps=24000/1001")
 
 
 def test_the_video_decode_runs_on_a_fixed_small_thread_count():
-    args = stream_session.build_args("http://jf/x", "", width=1920, height=1072, fps=24)
+    args = _args_without_ffmpeg(width=1920, height=1072, fps=24)
     assert args.index("-threads") < args.index("-i"), "a -threads after -i sets the encoder, not the decoder"
     assert args[args.index("-threads") + 1] == str(stream_session.DECODE_THREADS)
 
