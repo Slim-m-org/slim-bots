@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """bot-canvas-board: a todo board on a channel's Voice Canvas - `!board add/done/move/clear/list`; see README.md."""
 
+import asyncio
 import sys
 
 from slimbots import Bot
@@ -143,16 +144,20 @@ def _insert_item(conn, item_id, slot, text, seq, added_by):
     conn.commit()
 
 
+board_lock = asyncio.Lock()
+
+
 async def add_item(ctx, text):
     if len(text) > MAX_TEXT_LENGTH:
         await ctx.reply(f"that's {len(text)} characters, {MAX_TEXT_LENGTH} max - a note is a fixed-size box.")
         return
-    slot = await bot.store.run(free_slot)
-    if slot is None:
-        await ctx.reply(f"board is full ({MAX_SLOTS} items)")
-        return
-    placed = await canvas.place("note", x=BOARD_X, y=slot_y(slot), w=NOTE_W, h=NOTE_H, props={"text": text})
-    await bot.store.run(_insert_item, placed["id"], slot, text, placed["seq"], ctx.author.id)
+    async with board_lock:
+        slot = await bot.store.run(free_slot)
+        if slot is None:
+            await ctx.reply(f"board is full ({MAX_SLOTS} items)")
+            return
+        placed = await canvas.place("note", x=BOARD_X, y=slot_y(slot), w=NOTE_W, h=NOTE_H, props={"text": text})
+        await bot.store.run(_insert_item, placed["id"], slot, text, placed["seq"], ctx.author.id)
     await ctx.reply(f"added as #{slot + 1}: {text}")
 
 
@@ -211,13 +216,14 @@ async def move_item(ctx, n, to):
     if not (1 <= to <= MAX_SLOTS):
         await ctx.reply(f"slot must be 1-{MAX_SLOTS}")
         return
-    result = await bot.store.run(_check_move, n, to)
-    if isinstance(result, str):
-        await ctx.reply(result)
-        return
-    item_id, text = result
-    await canvas.move(item_id, x=BOARD_X, y=slot_y(to - 1), w=NOTE_W, h=NOTE_H)
-    await bot.store.run(_set_slot, item_id, to - 1)
+    async with board_lock:
+        result = await bot.store.run(_check_move, n, to)
+        if isinstance(result, str):
+            await ctx.reply(result)
+            return
+        item_id, text = result
+        await canvas.move(item_id, x=BOARD_X, y=slot_y(to - 1), w=NOTE_W, h=NOTE_H)
+        await bot.store.run(_set_slot, item_id, to - 1)
     await ctx.reply(f"moved #{n} to #{to}: {text}")
 
 
