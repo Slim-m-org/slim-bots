@@ -3,7 +3,7 @@
 import uuid
 
 from arrkit import arr, history, store
-from arrkit.service import AuthError, Service  # noqa: F401 - re-exported for the cog and bot
+from arrkit.service import Service
 
 NAMESPACE = uuid.UUID("736f6e61-7272-4000-8000-626f74000000")
 SERVICE = Service("sonarr", "/api/v3")
