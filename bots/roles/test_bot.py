@@ -139,6 +139,49 @@ def test_roles_status_reports_grantable_and_missing():
     assert "`helper`: missing MANAGE_MESSAGES" in reply
 
 
+def test_a_refused_revoke_names_the_missing_manage_roles():
+    from slimbots.http import ApiError
+
+    client = setup(my_permissions=0)
+    client.respond("DELETE", "/members/u1/roles/r-member", ApiError(403, {"error": "forbidden"}))
+    process(client, message("u1", "!role remove member"))
+    assert "MANAGE_ROLES" in client.sent[-1]["content"]
+
+
+def test_a_missing_role_on_grant_is_called_misconfigured():
+    from slimbots.http import ApiError
+
+    client = setup()
+    client.respond("PUT", "/members/u1/roles/r-member", ApiError(404, {"error": "not found"}))
+    process(client, message("u1", "!role member"))
+    assert "misconfigured" in client.sent[-1]["content"]
+
+
+def test_on_connect_refreshes_permissions_and_forgets_the_cached_role_bits():
+    client = setup(my_permissions=0)
+    roles._role_permissions_cache["r-member"] = 123
+    client.respond("GET", "/me", {"id": "bot-1", "permissions": 32})
+    asyncio.run(roles.on_connect())
+    assert roles.bot.my_permissions == 32 and roles._role_permissions_cache == {}
+
+
+def test_the_listing_is_posted_when_the_old_one_is_gone_and_other_errors_propagate():
+    from slimbots.http import ApiError
+
+    client = setup()
+    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(404, {"error": "not found"}))
+    client.respond("POST", "/channels/c1/messages", {"id": roles.listing_message_id()})
+    asyncio.run(roles.post_listing())
+    assert "Self-service roles" in client.sent[-1]["content"]
+    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(500, {"error": "boom"}))
+    try:
+        asyncio.run(roles.post_listing())
+    except ApiError as err:
+        assert err.status == 500
+    else:
+        raise AssertionError("a non-404 edit failure must propagate")
+
+
 def test_another_bot_is_ignored_by_default():
     client = setup()
     client.respond(
