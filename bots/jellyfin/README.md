@@ -335,11 +335,33 @@ e2e stack above with a bandwidth or quality probe attached.
   encoder toward. A movie is mostly static shots and dialogue - losing
   a few frames under congestion reads far better than the whole frame
   going blurry or blocky.
-- Simulcast stays off. It exists to give differently-bandwidth-limited
-  subscribers different quality tiers from one publish; a LAN watch
-  party has no such subscribers, so a second/third encode layer would
-  only spend CPU nobody needs. Dynacast (pausing unwatched simulcast
-  layers) does not apply with simulcast off.
+- Simulcast is off as of the slimbots release that added `publish_screen_share(simulcast=)`.
+  Before it, this section said simulcast "stays off", but nothing set it, and livekit's default is on: every `!watch` published two VP8 layers.
+  The second layer of a screen share is encoded at about 3 fps (960x540 under a 1080p share, 640x360 under 720p), and a client with adaptive stream is sent the smallest layer that covers its tile.
+  So a viewer whose tile was at most about 600 physical pixels tall saw a 3 fps slideshow at 1080p, where the same tile got the full 30 fps layer at 720p.
+
+## 1080p cost, measured (2026-10-06)
+
+Measured on the prod host (Ryzen 5 7600, 12 threads), livekit 1.1.20, with this bot's exact ffmpeg and publish settings replayed in a throwaway container, a second participant subscribing, and per-thread CPU read from `/proc`.
+Percentages are of one core.
+
+| Setup | Bot process (encode) | Decoding ffmpeg | Delivered fps |
+| --- | --- | --- | --- |
+| 1280x720, simulcast on (old default) | 39% | 15% | 30 |
+| 1920x1080, simulcast on (old `high`) | 184% | 26% | 30 |
+| 1920x1080, simulcast off | 92% | 24% | 30 |
+| 1920x1072, simulcast off (new `high`) | 66% | 25% | 30 |
+| 1920x1080, simulcast on, 6 of 12 threads busy elsewhere | 382% | 25% | 7 to 10 |
+| 1920x1072, simulcast off, 6 of 12 threads busy elsewhere | 130% | 27% | 29 |
+| 1280x720, simulcast on, 6 of 12 threads busy elsewhere | 70% | 18% | 30 |
+
+- The jump at 1080p is libwebrtc's own VP8 thread heuristic: at 1920x1080 or more on a machine with more than 8 cores it encodes with 8 threads, below that with 3.
+  libvpx's threads spin while they wait on each other, so 8 of them cost more than the encode itself, and on a busy host they starve each other: the encoder drops to 7-10 fps and reports `LIMITATION_CPU`.
+  That is the 1080p lag, and why 720p never showed it.
+- `Quality.frame_size` therefore publishes a 1080p-class preset 8 rows short (1920x1072), which keeps libwebrtc on 3 threads.
+  A 1.85:1 film is 1920x1040 out of Jellyfin, so it is only letterboxed by a few rows less.
+- Jellyfin itself already transcodes on the GPU (`h264_nvenc` from a CUDA decode), so its share is a short burst while it runs ahead of playback, not a steady cost.
+- Publishing through NVENC instead (`video_codec=H264`, encoder backend NVENC, the GPU passed into the container) measured 15% in the bot process at 1080p, idle or loaded, but needs a compose change and every client to decode H.264.
 
 ## What this deliberately does not do
 

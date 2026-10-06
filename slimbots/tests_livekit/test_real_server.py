@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import time
+from typing import Any
 
 import pytest
 
@@ -72,3 +73,21 @@ def test_unpublish_screen_share_removes_both_tracks_and_allows_a_republish() -> 
             await room.disconnect()
 
     assert asyncio.run(run()) == [2, 0, 2]
+
+
+def test_a_screen_share_publishes_one_layer_unless_simulcast_is_asked_for() -> None:
+    rtc = load_rtc()
+
+    async def simulcasted(identity: str, **kwargs: Any) -> bool:
+        room = rtc.Room()
+        await room.connect(URL, mint_token(identity, "bot"), options=rtc.RoomOptions(auto_subscribe=False))
+        try:
+            session = VoiceSession(Bot(prefix="!"), "c1", room, True, rtc)
+            await session.publish_screen_share(width=1920, height=1080, **kwargs)
+            video = next(p for p in room.local_participant.track_publications.values() if p.kind == rtc.TrackKind.KIND_VIDEO)
+            return video.simulcasted
+        finally:
+            await room.disconnect()
+
+    assert asyncio.run(simulcasted("slimbots-ci-single-layer")) is False
+    assert asyncio.run(simulcasted("slimbots-ci-simulcast", simulcast=True)) is True

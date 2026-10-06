@@ -3,6 +3,11 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.9.5
+
+- `publish_screen_share` publishes without simulcast by default, with `simulcast=True` to ask for it. livekit defaulted it on, and a screen share's low layer runs at 3 fps, so a small tile at 1080p got a slideshow.
+- `bot-jellyfin` publishes 1080p class sizes at 1920x1072, under libwebrtc's 8 thread vp8 cutoff, which takes one 1080p stream from about 1.8 cores to about 0.7.
+
 ## 0.9.4
 
 - `AsyncClient.get_watch_session`, `set_watch_session`, `tick_watch_session` and `end_watch_session` talk to the server's durable watch session. The writes do not retry on their own: the server allows a burst of 4 then one write per 2 seconds, and a retried write only deepens a 429.

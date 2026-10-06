@@ -57,5 +57,6 @@ def test_publish_screen_share_builds_and_publishes_both_tracks_with_every_ceilin
     assert isinstance(audio_track, rtc.LocalAudioTrack)
     assert video_options.source == rtc.TrackSource.SOURCE_SCREENSHARE
     assert video_options.video_encoding.max_bitrate == 1_500_000
+    assert video_options.HasField("simulcast") and video_options.simulcast is False
     assert audio_options.source == rtc.TrackSource.SOURCE_SCREENSHARE_AUDIO
     assert audio_options.audio_encoding.max_bitrate == 96_000
