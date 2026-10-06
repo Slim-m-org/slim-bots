@@ -216,6 +216,50 @@ def test_another_bot_is_ignored_by_default():
     assert client.sent == []
 
 
+def canvas_note(object_id, slot, author_id, seq):
+    return {"id": object_id, "kind": "note", "author_id": author_id, "x": 0.0, "y": slot * 160.0, "seq": seq, "props": {"text": object_id}}
+
+
+def seed_three_own_notes():
+    conn = board.bot.store.connection
+    for i in range(3):
+        board._insert_item(conn, f"mine{i}", i, f"n{i}", i + 1, "u1")
+    return conn
+
+
+def test_reconcile_keeps_the_notes_it_could_not_see_when_the_read_was_truncated():
+    client = setup()
+    conn = seed_three_own_notes()
+    others = [canvas_note(f"o{i}", 3 + (i % 17), "someone-else", 100 + i) for i in range(25)]
+    client.respond("GET", "/channels/c1/canvas/objects", {"objects": others, "has_more": True, "latest_seq": 200})
+    asyncio.run(board.reconcile())
+    assert {row[0] for row in board.active_items(conn)} == {"mine0", "mine1", "mine2"}
+
+
+def test_a_truncated_reconcile_still_records_the_notes_it_did_see():
+    client = setup()
+    conn = board.bot.store.connection
+    client.respond("GET", "/channels/c1/canvas/objects", {"objects": [canvas_note("seen", 4, "bot-1", 9)], "has_more": True, "latest_seq": 9})
+    asyncio.run(board.reconcile())
+    assert {row[0] for row in board.active_items(conn)} == {"seen"}
+
+
+def test_a_complete_reconcile_still_drops_a_note_that_is_gone():
+    client = setup()
+    conn = seed_three_own_notes()
+    kept = canvas_note("mine1", 1, "bot-1", 2)
+    client.respond("GET", "/channels/c1/canvas/objects", {"objects": [kept], "has_more": False, "latest_seq": 9})
+    asyncio.run(board.reconcile())
+    assert {row[0] for row in board.active_items(conn)} == {"mine1"}
+
+
+def test_reconcile_asks_the_server_for_its_largest_page():
+    client = setup()
+    client.respond("GET", "/channels/c1/canvas/objects", {"objects": [], "has_more": False, "latest_seq": 1})
+    asyncio.run(board.reconcile())
+    assert client.calls[-1][3]["limit"] == 2000
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:
