@@ -19,7 +19,7 @@ async def bot(client):
     b = Bot(prefix="!")
     b.client = client
     b.space = Space(client)
-    b.authors = AuthorFilter(client, space=b.space, ignore_bots=True)
+    b.authors = AuthorFilter(client, space=b.space)
     b.me_id = "bot-1"
     client.respond("GET", "/members", [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}])
     await b.space.refresh_members()

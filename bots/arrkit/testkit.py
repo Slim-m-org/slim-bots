@@ -79,7 +79,7 @@ class Harness:
         client.edit_message = record_edit
         bot.client = client
         bot.space = Space(client)
-        bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+        bot.authors = AuthorFilter(client, space=bot.space)
         bot.me_id = "bot-1"
         asyncio.run(bot.space.refresh_members())
         if roles:

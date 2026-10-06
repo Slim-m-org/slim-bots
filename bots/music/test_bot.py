@@ -111,7 +111,7 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     client.respond("GET", "/members", MEMBERS)
     music.bot.client = client
     music.bot.space = Space(client)
-    music.bot.authors = AuthorFilter(client, space=music.bot.space, ignore_bots=True)
+    music.bot.authors = AuthorFilter(client, space=music.bot.space)
     music.bot.me_id = "bot-1"
     asyncio.run(music.bot.space.refresh_members())
     for channel in VOICE_CHANNELS:

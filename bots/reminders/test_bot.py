@@ -32,7 +32,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     reminders.bot.client = client
     reminders.bot.space = Space(client)
-    reminders.bot.authors = AuthorFilter(client, space=reminders.bot.space, ignore_bots=True)
+    reminders.bot.authors = AuthorFilter(client, space=reminders.bot.space)
     reminders.bot.me_id = "bot-1"
     asyncio.run(reminders.bot.space.refresh_members())
     return client

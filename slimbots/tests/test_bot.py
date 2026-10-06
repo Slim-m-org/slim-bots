@@ -20,7 +20,7 @@ async def bot(client):
     b = Bot(prefix="!")
     b.client = client
     b.space = Space(client)
-    b.authors = AuthorFilter(client, space=b.space, ignore_bots=True)
+    b.authors = AuthorFilter(client, space=b.space)
     b.me_id = "bot-1"
     client.respond(
         "GET",
@@ -99,7 +99,7 @@ async def test_ignore_bots_can_be_disabled(client):
     bot = Bot(prefix="!", ignore_bots=False)
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=False)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
     client.respond(
         "GET",
@@ -142,7 +142,7 @@ async def test_permission_gate_allows_a_role_holder(client):
     bot = Bot(prefix="!")
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
     client.respond("GET", "/roles", [{"id": "r1", "name": "mod", "permissions": int(Permissions.MANAGE_ROLES), "is_everyone": False}])
     client.respond(
@@ -217,7 +217,7 @@ async def test_channel_scoping_ignores_frames_outside_the_set(client):
     bot = Bot(prefix="!", channels={"c1"})
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
     client.respond(
         "GET",
@@ -281,7 +281,7 @@ async def test_channel_scoped_canvas_event_only_fires_in_scope():
     bot = Bot(prefix="!", channels={"c1"})
     bot.client = FakeAsyncClient()
     bot.space = Space(bot.client)
-    bot.authors = AuthorFilter(bot.client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(bot.client, space=bot.space)
     bot.me_id = "bot-1"
 
     seen = []

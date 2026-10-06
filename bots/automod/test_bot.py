@@ -43,7 +43,7 @@ def setup(**config):
     automod.bot.me_id = "bot-1"
     automod.bot.client = client
     automod.bot.space = Space(client)
-    automod.bot.authors = AuthorFilter(client, space=automod.bot.space, ignore_bots=True)
+    automod.bot.authors = AuthorFilter(client, space=automod.bot.space)
     automod.bot.store = None
     automod.bot.data_path = os.path.join(tempfile.mkdtemp(), "automod.db")
     asyncio.run(automod.bot.space.refresh_channels())

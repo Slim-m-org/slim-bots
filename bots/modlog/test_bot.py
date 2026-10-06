@@ -34,7 +34,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     modlog.bot.client = client
     modlog.bot.space = Space(client)
-    modlog.bot.authors = AuthorFilter(client, space=modlog.bot.space, ignore_bots=True)
+    modlog.bot.authors = AuthorFilter(client, space=modlog.bot.space)
     modlog.bot.me_id = "bot-1"
     asyncio.run(modlog.bot.space.refresh_members())
     return client

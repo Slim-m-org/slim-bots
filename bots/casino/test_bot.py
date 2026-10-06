@@ -34,7 +34,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     casino.bot.client = client
     casino.bot.space = Space(client)
-    casino.bot.authors = AuthorFilter(client, space=casino.bot.space, ignore_bots=True)
+    casino.bot.authors = AuthorFilter(client, space=casino.bot.space)
     casino.bot.me_id = "bot-1"
     asyncio.run(casino.bot.space.refresh_members())
     return client

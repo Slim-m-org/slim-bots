@@ -13,7 +13,6 @@ import seerr_core as core
 GUARD = Guard(core.SERVICE)
 CHOOSER = Chooser("seerrpick:", "request", lambda item: core.result_title(item)[:80], "request")
 NAME_MAX = 100
-RESERVED = ("link", "unlink", "account", "help")
 
 
 async def _tell(ctx, text, fallback):

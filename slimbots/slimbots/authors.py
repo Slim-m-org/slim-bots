@@ -13,10 +13,9 @@ if TYPE_CHECKING:
 class AuthorFilter:
     """Caches each author id's automated-or-not verdict for the process lifetime."""
 
-    def __init__(self, client: AsyncClient, *, space: Space | None = None, ignore_bots: bool = True) -> None:
+    def __init__(self, client: AsyncClient, *, space: Space | None = None) -> None:
         self._client = client
         self._space = space
-        self.ignore_bots = ignore_bots
         self._automated: dict[str, bool] = {}
 
     async def is_automated(self, user_id: str) -> bool:

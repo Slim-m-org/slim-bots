@@ -15,7 +15,7 @@ async def make_bot(monkeypatch, **kwargs):
     client = FakeAsyncClient()
     bot = Bot(**kwargs)
     bot.client, bot.space, bot.me_id, bot.username = client, Space(client), "bot-1", "jellyfin"
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     client.respond("GET", "/members", [MEMBER])
     await bot.space.refresh_members()
     bot.space.channels = {

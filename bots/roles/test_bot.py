@@ -36,7 +36,7 @@ def setup(*, my_permissions=32):  # MANAGE_ROLES
     client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", None)
     roles.bot.client = client
     roles.bot.space = Space(client)
-    roles.bot.authors = AuthorFilter(client, space=roles.bot.space, ignore_bots=True)
+    roles.bot.authors = AuthorFilter(client, space=roles.bot.space)
     roles.bot.me_id = "bot-1"
     asyncio.run(roles.bot.space.refresh_members())
     return client

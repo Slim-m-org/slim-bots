@@ -37,7 +37,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     board.bot.client = client
     board.bot.space = Space(client)
-    board.bot.authors = AuthorFilter(client, space=board.bot.space, ignore_bots=True)
+    board.bot.authors = AuthorFilter(client, space=board.bot.space)
     board.bot.me_id = "bot-1"
     board.canvas = Canvas(client, "c1")
     board.canvas_channel_name = "voice-room"

@@ -663,7 +663,7 @@ class Bot:
         base, token = self._resolve_config(url, token)
         self.client = AsyncClient(base, token, self.user_agent)
         self.space = Space(self.client)
-        self.authors = AuthorFilter(self.client, space=self.space, ignore_bots=self.ignore_bots)
+        self.authors = AuthorFilter(self.client, space=self.space)
         self._open_cursor_if_scoped()
         if self._store_migrate is not None:
             await self.open_store(migrate=self._store_migrate)

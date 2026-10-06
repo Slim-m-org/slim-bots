@@ -139,7 +139,7 @@ def setup():
     client.edit_message = record_edit
     jellyfin.bot.client = client
     jellyfin.bot.space = Space(client)
-    jellyfin.bot.authors = AuthorFilter(client, space=jellyfin.bot.space, ignore_bots=True)
+    jellyfin.bot.authors = AuthorFilter(client, space=jellyfin.bot.space)
     jellyfin.bot.me_id = "bot-1"
     asyncio.run(jellyfin.bot.space.refresh_members())
     return client

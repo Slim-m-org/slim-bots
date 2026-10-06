@@ -108,7 +108,7 @@ async def test_catch_up_replays_backlog_and_advances_the_cursor(monkeypatch, tmp
     bot = Bot(channels={"c1"}, cursor_path=str(tmp_path / "cursor.db"))
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
 
     import sqlite3

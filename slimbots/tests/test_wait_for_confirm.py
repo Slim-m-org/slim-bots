@@ -20,7 +20,7 @@ async def bot(client):
     b = Bot(prefix="!", channels={"c1"})
     b.client = client
     b.space = Space(client)
-    b.authors = AuthorFilter(client, space=b.space, ignore_bots=True)
+    b.authors = AuthorFilter(client, space=b.space)
     b.me_id = "bot-1"
     client.respond(
         "GET", "/members",
