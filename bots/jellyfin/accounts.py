@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import http.client
 import time
 
 from slimbots import ApiError
@@ -35,6 +36,15 @@ def set_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name):
         (slimm_user_id, jellyfin_user_id, jellyfin_name, int(time.time())),
     )
     conn.commit()
+
+
+def claim_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name):
+    """One store call, so the owner check and the write cannot be split by another member's link; False if someone else holds it."""
+    taken_by = owner_of(conn, jellyfin_user_id)
+    if taken_by not in (None, slimm_user_id):
+        return False
+    set_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name)
+    return True
 
 
 def remove_link(conn, slimm_user_id):
@@ -82,17 +92,15 @@ async def run_link(ctx, name):
         return
     try:
         user = await asyncio.to_thread(find_user, name)
-    except jellyfin_core.JellyfinAuthError:
+    except (jellyfin_core.JellyfinAuthError, OSError, http.client.HTTPException):
         await ctx.reply("jellyfin is unavailable right now.")
         return
     if user is None:
         await _tell(ctx, f'there is no enabled jellyfin user called "{name}".', "no such jellyfin user.")
         return
-    taken_by = await ctx.bot.store.run(owner_of, user["Id"])
-    if taken_by not in (None, ctx.author.id):
+    if not await ctx.bot.store.run(claim_link, ctx.author.id, user["Id"], user["Name"]):
         await _tell(ctx, f'"{user["Name"]}" is already linked to someone else.', "that jellyfin user is already linked.")
         return
-    await ctx.bot.store.run(set_link, ctx.author.id, user["Id"], user["Name"])
     p = ctx.bot.prefix
     await _tell(
         ctx, f'linked you to the jellyfin user "{user["Name"]}". `{p}watch` now uses their resume position and continue watching, and `{p}jellyfin unlink` undoes it.',
