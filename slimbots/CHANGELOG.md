@@ -3,6 +3,12 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.9.7
+
+- `publish_screen_share` takes `audio_queue_ms`, `video_codec` and `video_encoder`, each keeping the library default when left out. A short audio queue keeps the sound with the picture after a seek or pause; `video_codec="h264"` with `video_encoder="nvenc"` encodes on an nvidia gpu when the container has one.
+- `FakeAudioSource.clear_queue()` matches the real source, so a bot that clears its audio on a restart can be tested.
+- `bot-jellyfin` needs `slim-m>=0.9.7` for the above; `scripts/check_bot_pr.py` enforces it. Its own fixes ride along in the template: a seek or stop no longer hangs on python 3.12, the picture no longer runs ahead of the sound, films play at their own frame rate, Jellyfin sends stereo instead of 5.1, and one ffmpeg feeds both tracks.
+
 ## 0.9.6
 
 - The catch-up after a restart pages through `/sync` instead of stopping at one page, so a bot that was down through a busy stretch replays everything it missed, and a scope the server resets jumps to the latest message instead of replaying old history.
