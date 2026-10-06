@@ -77,13 +77,25 @@ def test_already_posted_items_are_filtered_before_grouping():
     jellyfin.jellyfin_core.init_db(conn)
     jellyfin.jellyfin_core.advance_cursor(conn, "2000-01-01T00:00:00.0000000Z")
     jellyfin.jellyfin_core.mark_posted(conn, ["m1"])
-    original = jellyfin.jellyfin_core.items_since
-    jellyfin.jellyfin_core.items_since = lambda cursor: [movie("m1", "Old"), movie("m2", "New")]
-    try:
-        fresh = jellyfin.jellyfin_core.fetch_new_items(conn)
-    finally:
-        jellyfin.jellyfin_core.items_since = original
+    fresh = jellyfin.jellyfin_core.unseen_items(conn, [movie("m1", "Old"), movie("m2", "New")])
     assert [item["Id"] for item in fresh] == ["m2"]
+
+
+def test_a_cold_start_marks_the_newest_instant_posted_and_watches_from_there():
+    core = jellyfin.jellyfin_core
+    conn = sqlite3.connect(":memory:")
+    core.init_db(conn)
+    newest = {**movie("m9", "Newest"), "DateCreated": "2024-06-01T00:00:00.0000000Z"}
+    saved = core.newest_item, core.items_since
+    core.newest_item, core.items_since = lambda: newest, lambda cursor: [newest]
+    try:
+        plan = core.bootstrap_plan()
+    finally:
+        core.newest_item, core.items_since = saved
+    core.apply_bootstrap(conn, plan)
+    assert core.get_cursor(conn) == "2024-06-01T00:00:00.0000000Z" and core.already_posted(conn, "m9")
+    core.apply_bootstrap(conn, None)
+    assert core.get_cursor(conn) == "2024-06-01T00:00:00.0000000Z"
 
 
 def test_excluded_genre_is_dropped():
@@ -228,8 +240,8 @@ def test_poll_loop_propagates_a_terminal_jellyfin_auth_error():
 def test_on_connect_registers_poll_loop_as_a_supervised_background_task():
     setup()
     jellyfin._background_started = False
-    original = jellyfin.jellyfin_core.bootstrap_cursor
-    jellyfin.jellyfin_core.bootstrap_cursor = lambda conn: None
+    original = jellyfin.jellyfin_core.bootstrap_plan
+    jellyfin.jellyfin_core.bootstrap_plan = lambda: None
 
     async def run():
         await jellyfin.on_connect()
@@ -244,7 +256,7 @@ def test_on_connect_registers_poll_loop_as_a_supervised_background_task():
     try:
         asyncio.run(run())
     finally:
-        jellyfin.jellyfin_core.bootstrap_cursor = original
+        jellyfin.jellyfin_core.bootstrap_plan = original
 
 
 def test_upload_poster_returns_the_uploaded_attachments_id():
