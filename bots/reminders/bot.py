@@ -7,7 +7,7 @@ import time
 import uuid
 
 from slimbots import Bot, Duration, Embed, RateLimiter, TimeOfDay
-from slimbots.http import is_forbidden, is_not_found
+from slimbots.http import ApiError, is_rate_limited, is_token_revoked
 from slimbots.lifecycle import guard_dispatch
 from slimbots.limits import ValidationError, require_len, require_range
 from slimbots.migrations import ensure_columns
@@ -380,11 +380,17 @@ async def deliver_reminder(row):
 
 
 async def park_undeliverable(row, err):
-    """A gone channel or lost send permission never heals, so the row is closed instead of failing every pass; anything else retries."""
+    """A refusal (a gone channel, lost permission, content the server rejects) never heals on a retry every few seconds, so the row is closed; a 429, a 5xx or a network error retries."""
     reminder_id = row[0]
     print(f"reminder {reminder_id} not delivered: {type(err).__name__}: {err}", file=sys.stderr)
-    if is_not_found(err) or is_forbidden(err):
+    if is_refusal(err):
         await bot.store.run(mark_sent, reminder_id)
+
+
+def is_refusal(err):
+    if not isinstance(err, ApiError) or is_rate_limited(err) or is_token_revoked(err):
+        return False
+    return 400 <= err.status < 500
 
 
 async def deliver_due_reminders():

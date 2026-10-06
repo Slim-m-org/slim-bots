@@ -286,6 +286,26 @@ def test_due_checker_keeps_a_reminder_it_could_not_send_for_a_transient_reason()
     assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["flaky"]
 
 
+def test_due_checker_closes_a_reminder_the_server_refuses_instead_of_retrying_it_for_ever():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "bad", "c1", "u1", "m0", int(time.time()) - 1, "rejected")
+    client.respond("POST", "/channels/c1/messages", ApiError(400, {"error": "content rejected"}))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None, f"due_checker died: {reminders.bot._fatal_error!r}"
+    assert reminders.due_reminders(conn, int(time.time())) == [], "a refused row stays due and is resent every pass"
+
+
+def test_due_checker_keeps_a_reminder_that_was_rate_limited():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "busy", "c1", "u1", "m0", int(time.time()) - 1, "later")
+    client.respond("POST", "/channels/c1/messages", ApiError(429, {"error": "slow down"}))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None, f"due_checker died: {reminders.bot._fatal_error!r}"
+    assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["busy"]
+
+
 def test_due_checker_still_stops_on_a_revoked_token():
     client = setup()
     conn = reminders.bot.store.connection
