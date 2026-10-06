@@ -132,8 +132,23 @@ def pending_for_user(conn, channel_id, user_id):
     ).fetchall()
 
 
+LISTING_TTL_SECONDS = 600
+_listed: dict[tuple[str, str], tuple[float, list[str]]] = {}
+
+
+def remember_listing(channel_id, user_id, rows):
+    _listed[(channel_id, user_id)] = (time.time(), [row[0] for row in rows])
+
+
 def _nth_id(conn, channel_id, user_id, n):
-    """1-based, ordered the same way `!reminders` lists them; None if out of range."""
+    """1-based against the last `!reminders` listing this user saw (so a shifted list never redirects it), else the live list; None if out of range or already gone."""
+    listed = _listed.get((channel_id, user_id))
+    if listed is not None and time.time() - listed[0] <= LISTING_TTL_SECONDS:
+        ids = listed[1]
+        if n < 1 or n > len(ids):
+            return None
+        still_pending = conn.execute("SELECT 1 FROM reminders WHERE id = ? AND sent = 0 AND cancelled = 0", (ids[n - 1],)).fetchone()
+        return ids[n - 1] if still_pending else None
     rows = pending_for_user(conn, channel_id, user_id)
     if n < 1 or n > len(rows):
         return None
@@ -301,7 +316,9 @@ async def remind_every(ctx, spec: str, rest: str):
 
 
 def _txn_list_pending(conn, channel_id, user_id):
-    return pending_for_user(conn, channel_id, user_id), get_timezone(conn, user_id)
+    rows = pending_for_user(conn, channel_id, user_id)
+    remember_listing(channel_id, user_id, rows)
+    return rows, get_timezone(conn, user_id)
 
 
 @bot.group(name="reminders", help="List your pending reminders, or manage one by its listed number")
