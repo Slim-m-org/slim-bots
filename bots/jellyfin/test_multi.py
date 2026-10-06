@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jellyfin_core  # noqa: E402
 import session_registry  # noqa: E402
 import stream_session  # noqa: E402
+from slimbots.testing import FakeAudioSource, FakeVideoSource  # noqa: E402
 from slimbots.models import Channel  # noqa: E402
 from slimbots.testing import FakeVoiceSession  # noqa: E402
 from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice  # noqa: E402
@@ -38,7 +39,7 @@ def two_calls():
 
 def watching():
     async def fake_start(self, start_seconds=0.0):
-        self._video_source = self._audio_source = object()
+        self._video_source, self._audio_source = FakeVideoSource(), FakeAudioSource()
 
     return Patched(
         (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),

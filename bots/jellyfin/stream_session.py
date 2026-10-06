@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import shutil
 import sys
 import time
@@ -13,15 +14,18 @@ from slimbots import Embed
 
 import jellyfin_core
 import playback_progress
-from quality import Quality, configured_default
+from pump_sync import AudioPipe, StartLine, reap
+from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
 
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 2
 AUDIO_CHUNK_MS = 20
+AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 ms default left audio a second off the picture
 ROSTER_POLL_SECONDS = 20
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
+DECODE_THREADS = 2  # ffmpeg's one-thread-per-core default held 291 MB at 1080p for the same CPU as two threads at 173 MB
 
 
 class StreamError(Exception):
@@ -35,21 +39,25 @@ def ffmpeg_binary():
     return path
 
 
-def build_video_args(url, headers, *, width, height, fps):
-    """Letterboxes Jellyfin's own aspect-preserving transcode into an exact WxH - the size `VideoSource` publishes."""
+def build_args(url, headers, *, width, height, fps, audio_fd=None):
+    """One ffmpeg for both tracks: letterboxed WxH I420 on stdout, and s16le PCM on `audio_fd` when the title has audio.
+    Two processes read and demuxed the same transcode twice over HTTPS, for one extra process's memory and nothing else."""
     filters = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
-    return [
-        ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-headers", headers, "-i", url,
-        "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
+    args = [
+        ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-threads", str(DECODE_THREADS),
+        "-headers", headers, "-i", url, "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
     ]
+    if audio_fd is not None:
+        args += [
+            "-map", "0:a:0", "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", f"pipe:{audio_fd}",
+        ]
+    return args
 
 
-def build_audio_args(url, headers):
-    return [
-        ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-headers", headers, "-i", url,
-        "-map", "0:a:0", "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE),
-        "-f", "s16le", "pipe:1",
-    ]
+def has_audio(item):
+    """False only when Jellyfin lists the title's streams and none is audio; ffmpeg fails outright on a missing mapped stream."""
+    streams = item.get("MediaStreams")
+    return not streams or any(s.get("Type") == "Audio" for s in streams)
 
 
 def frame_byte_size(width, height):
@@ -110,10 +118,11 @@ class WatchSession:
         self._video_source = None
         self._audio_source = None
         self._video_process = None
-        self._audio_process = None
+        self._audio_pipe = None
         self._video_task = None
         self._audio_task = None
         self._monitor_task = None
+        self._start_line = StartLine()
         self._wake_monitor = asyncio.Event()
 
     def _set_item(self, item):
@@ -121,6 +130,7 @@ class WatchSession:
         self.item_id = item["Id"]
         self.title = item.get("Name") or "Unknown title"
         self.duration_seconds = (item.get("RunTimeTicks") or 0) / 10_000_000
+        self.fps = playback_fps(item, jellyfin_core.JELLYFIN_STREAM_FPS)
         self.audio_stream_index = None
         self.subtitle_stream_index = None
         self.subtitle_label = None
@@ -142,7 +152,8 @@ class WatchSession:
             sample_rate=AUDIO_SAMPLE_RATE, num_channels=AUDIO_CHANNELS,
             video_max_bitrate=self.quality.publish_bitrate,
             video_max_framerate=float(jellyfin_core.JELLYFIN_STREAM_FPS),
-            audio_max_bitrate=jellyfin_core.JELLYFIN_STREAM_AUDIO_MAX_BITRATE,
+            audio_max_bitrate=jellyfin_core.JELLYFIN_STREAM_AUDIO_MAX_BITRATE, audio_queue_ms=AUDIO_QUEUE_MS,
+            video_codec=jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, video_encoder=jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER,
         )
 
     async def start(self, start_seconds=0.0):
@@ -157,57 +168,66 @@ class WatchSession:
             self.sync.changed(seeked=seeked)
 
     async def _launch_pipeline(self, start_seconds):
-        """Starts both ffmpeg processes on a fresh transcode without touching the running pipeline; raises if it cannot."""
-        processes = []
+        """Starts the ffmpeg on a fresh transcode without touching the running pipeline; raises if it cannot."""
+        url = jellyfin_core.build_stream_url(
+            self.item_id, start_seconds=start_seconds, audio_stream_index=self.audio_stream_index,
+            subtitle_stream_index=self.subtitle_stream_index, max_width=self.quality.width,
+            video_bitrate=self.quality.video_bitrate, play_session_id=uuid.uuid4().hex,
+        )
+        headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
+        width, height = self.quality.frame_size
+        read_fd, write_fd = os.pipe() if has_audio(self.item) else (None, None)
         try:
-            url = jellyfin_core.build_stream_url(
-                self.item_id, start_seconds=start_seconds, audio_stream_index=self.audio_stream_index,
-                subtitle_stream_index=self.subtitle_stream_index, max_width=self.quality.width,
-                video_bitrate=self.quality.video_bitrate, play_session_id=uuid.uuid4().hex,
+            args = build_args(url, headers, width=width, height=height, fps=self.fps, audio_fd=write_fd)
+            process = await asyncio.create_subprocess_exec(
+                *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                pass_fds=() if write_fd is None else (write_fd,),
             )
-            headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
-            width, height = self.quality.frame_size
-            video_args = build_video_args(url, headers, width=width, height=height, fps=jellyfin_core.JELLYFIN_STREAM_FPS)
-            audio_args = build_audio_args(url, headers)
-            for args in (video_args, audio_args):
-                processes.append(await asyncio.create_subprocess_exec(
-                    *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-                ))
         except BaseException:
-            for process in processes:
-                process.kill()
+            if read_fd is not None:
+                os.close(read_fd)
             raise
-        return processes
+        finally:
+            if write_fd is not None:
+                os.close(write_fd)
+        return process, None if read_fd is None else await AudioPipe.open(read_fd)
 
     async def _start_pipeline(self, start_seconds):
         """Replaces the running pipeline only once the new one has launched, so a failed launch leaves playback alone."""
-        processes = await self._launch_pipeline(start_seconds)
+        process, audio_pipe = await self._launch_pipeline(start_seconds)
         await self._teardown_pipeline()
-        self._video_process, self._audio_process = processes
+        self._video_process, self._audio_pipe = process, audio_pipe
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
+        self._start_line = StartLine()
         self._video_task = asyncio.create_task(self._pump_video(self._video_process), name="jellyfin-video-pump")
-        self._audio_task = asyncio.create_task(self._pump_audio(self._audio_process), name="jellyfin-audio-pump")
+        self._audio_task = asyncio.create_task(self._pump_audio(self._audio_pipe), name="jellyfin-audio-pump")
 
     async def _pump_video(self, process):
-        """Reads fixed-size I420 frames and paces them to `JELLYFIN_STREAM_FPS`; pausing just stops reading the pipe,
+        """Reads fixed-size I420 frames and paces them to the title's frame rate; pausing just stops reading the pipe,
         so ffmpeg blocks on its own full pipe buffer instead of needing a separate pause signal."""
         rtc = self.voice_session.rtc
         width, height = self.quality.frame_size
         frame_size = frame_byte_size(width, height)
-        frame_interval = 1.0 / jellyfin_core.JELLYFIN_STREAM_FPS
+        frame_interval = 1.0 / float(self.fps)
         frame_index = 0
-        start = time.monotonic()
+        start = None
+        start_line = self._start_line
         while True:
             if self.paused:
                 await asyncio.sleep(0.1)
-                start = time.monotonic() - frame_index * frame_interval
+                if start is not None:
+                    start = time.monotonic() - frame_index * frame_interval
                 continue
             try:
                 chunk = await process.stdout.readexactly(frame_size)
             except asyncio.IncompleteReadError:
+                start_line.video_gone()
                 self.bot.background(self._video_ended(process), name=f"jellyfin-video-ended-{self.voice_channel_id}")
                 return
+            if start is None:
+                await start_line.video_ready()
+                start = self._segment_started_at = time.monotonic()
             frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
             self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
             frame_index += 1
@@ -215,19 +235,28 @@ class WatchSession:
             if delay > 0:
                 await asyncio.sleep(delay)
 
-    async def _pump_audio(self, process):
-        """Ends quietly when the audio ffmpeg does: a title with no audio stream plays on in silence."""
+    async def _pump_audio(self, pipe):
+        """Ends quietly when the audio pipe does: a title with no audio stream plays on in silence."""
         chunk_bytes = audio_chunk_bytes()
         chunk_samples = audio_chunk_samples()
         rtc = self.voice_session.rtc
+        start_line = self._start_line
+        started = False
+        if pipe is None:
+            start_line.audio_gone()
+            return
         while True:
             if self.paused:
                 await asyncio.sleep(0.1)
                 continue
             try:
-                chunk = await process.stdout.readexactly(chunk_bytes)
+                chunk = await pipe.stdout.readexactly(chunk_bytes)
             except asyncio.IncompleteReadError:
+                start_line.audio_gone()
                 return
+            if not started:
+                await start_line.audio_ready()
+                started = True
             frame = rtc.AudioFrame(chunk, AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, chunk_samples)
             await self._audio_source.capture_frame(frame)
 
@@ -263,13 +292,14 @@ class WatchSession:
             if task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-        for process in (self._video_process, self._audio_process):
-            if process is not None and process.returncode is None:
-                process.kill()
-                with contextlib.suppress(ProcessLookupError):
-                    await process.wait()
+        if self._video_process is not None:
+            await reap(self._video_process)
+        if self._audio_pipe is not None:
+            self._audio_pipe.close()
+        if self._audio_source is not None:
+            self._audio_source.clear_queue()
         self._video_task = self._audio_task = None
-        self._video_process = self._audio_process = None
+        self._video_process = self._audio_pipe = None
 
     def pause(self):
         if self.paused or self.finished:

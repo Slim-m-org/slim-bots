@@ -91,3 +91,29 @@ def test_a_screen_share_publishes_one_layer_unless_simulcast_is_asked_for() -> N
 
     assert asyncio.run(simulcasted("slimbots-ci-single-layer")) is False
     assert asyncio.run(simulcasted("slimbots-ci-simulcast", simulcast=True)) is True
+
+
+def test_a_screen_share_publishes_in_the_codec_asked_for_with_a_short_audio_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    rtc = load_rtc()
+    built: list[Any] = []
+    real_options = rtc.TrackPublishOptions
+    monkeypatch.setattr(rtc, "TrackPublishOptions", lambda **kwargs: built.append(real_options(**kwargs)) or built[-1])
+
+    async def run() -> tuple[int, float]:
+        room = rtc.Room()
+        await room.connect(URL, mint_token("slimbots-ci-codec", "bot"), options=rtc.RoomOptions(auto_subscribe=False))
+        try:
+            session = VoiceSession(Bot(prefix="!"), "c1", room, True, rtc)
+            _video, audio = await session.publish_screen_share(
+                width=640, height=360, video_codec="h264", video_encoder="software", audio_queue_ms=100,
+            )
+            audio.clear_queue()
+            return len(room.local_participant.track_publications), audio.queued_duration
+        finally:
+            await room.disconnect()
+
+    published, queued = asyncio.run(run())
+    assert published == 2
+    assert queued == 0
+    assert built[0].video_codec == rtc.VideoCodec.H264
+    assert built[0].video_encoder == built[0].DESCRIPTOR.fields_by_name["video_encoder"].enum_type.values_by_name["ENCODER_BACKEND_SOFTWARE"].number

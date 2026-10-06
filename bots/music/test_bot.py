@@ -289,6 +289,22 @@ def test_stop_clears_the_queue_and_leaves():
     assert "music stopped (stopped by Nick)." in replies(client)
 
 
+def test_stop_while_paused_still_leaves():
+    client = setup()
+
+    async def paused_with_output_queued():
+        await until(lambda: music_cog.active_sessions()["v1"].current is not None)
+        await music.bot.process_message(message("~pause"))
+        await asyncio.sleep(0.5)
+
+    async def stop_within_a_deadline():
+        await asyncio.wait_for(music.bot.process_message(message("~stop")), timeout=5)
+
+    scenario(client, "~play https://93.184.216.34/long.mp3", paused_with_output_queued, stop_within_a_deadline)
+    assert music.bot.voice.sessions[0].left
+    assert "music stopped (stopped by Nick)." in replies(client)
+
+
 def test_controls_answer_only_for_someone_in_the_playing_call():
     client = setup(member_channels={"u1": "v1", "u2": "v2"})
 

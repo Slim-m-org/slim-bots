@@ -146,8 +146,14 @@ Video is Jellyfin's own server-side transcode
 local `ffmpeg` (a system binary - not pip-installed, and not in the
 hash-locked CI requirements since the test suite never spawns it) into
 raw I420 frames letterboxed to `JELLYFIN_STREAM_WIDTH`x`JELLYFIN_STREAM_HEIGHT`
-and PCM audio, published through `bot.voice`'s `SOURCE_SCREENSHARE`/
+and PCM audio (one ffmpeg, video on stdout and audio on a second pipe), published through `bot.voice`'s `SOURCE_SCREENSHARE`/
 `SOURCE_SCREENSHARE_AUDIO` tracks - see `stream_session.py`.
+Picture and sound start together: each pump holds its first chunk until
+the other has one (`pump_sync.StartLine`), since Jellyfin takes a second
+or more to start a transcode and a picture paced from launch raced
+through that second and stayed ahead of the sound. The audio queue is
+kept at 100 ms and cleared on every restart, so a seek or a pause does
+not leave old sound playing over the new picture.
 
 Those raw frames are then re-encoded a second time by LiveKit's own
 WebRTC publish, which used to get no explicit bitrate/framerate ceiling
@@ -167,9 +173,11 @@ what actually limits going past 720p; see below.
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |
 | `JELLYFIN_STREAM_WIDTH` | `1280` | The published video width; Jellyfin's own aspect ratio is letterboxed into this. |
 | `JELLYFIN_STREAM_HEIGHT` | `720` | The published video height. |
-| `JELLYFIN_STREAM_FPS` | `30` | The published frame rate. |
+| `JELLYFIN_STREAM_FPS` | `30` | The highest published frame rate. A title plays at its own rate, or the largest whole fraction of it under this (a 23.976 fps film at 23.976, 50 fps at 25), so no frame is shown twice. |
 | `JELLYFIN_STREAM_MAX_BITRATE` | `8000000` | The `VideoBitrate` Jellyfin is asked to transcode at, in bits/second. |
 | `JELLYFIN_STREAM_WEBRTC_MAX_BITRATE` | `JELLYFIN_STREAM_MAX_BITRATE` | The ceiling on LiveKit's own re-encode of the decoded frames, in bits/second. Defaults to whatever `JELLYFIN_STREAM_MAX_BITRATE` resolves to, so raising one without the other no longer throws away the extra quality. |
+| `JELLYFIN_STREAM_VIDEO_CODEC` | unset (VP8) | `h264` publishes H.264 instead of VP8. Only worth it with a hardware encoder: livekit's software H.264 costs more than VP8. Every viewer must decode H.264 (Chrome, Safari, the desktop and mobile apps do; Firefox needs its OpenH264 plugin). |
+| `JELLYFIN_STREAM_VIDEO_ENCODER` | unset (livekit picks) | `nvenc`, `vaapi`, `hardware` or `software`. `nvenc` needs the GPU passed into the bot's container (`runtime: nvidia`, `NVIDIA_DRIVER_CAPABILITIES=video,compute,utility`). |
 | `JELLYFIN_STREAM_AUDIO_MAX_BITRATE` | `128000` | The ceiling on LiveKit's Opus re-encode of the decoded PCM audio, in bits/second. The unset default is speech-call-tuned and noticeably worse for movie audio. |
 
 ## Other settings

@@ -11,7 +11,7 @@ from slimbots.voice import load_rtc
 from test_voice import FakeRoom, fake_rtc_module
 
 FAKE = fake_rtc_module(FakeRoom())
-NAMESPACED = ("LocalVideoTrack", "LocalAudioTrack", "TrackSource", "DegradationPreference")
+NAMESPACED = ("LocalVideoTrack", "LocalAudioTrack", "TrackSource", "DegradationPreference", "VideoCodec")
 
 
 def public_names(obj: Any) -> list[str]:

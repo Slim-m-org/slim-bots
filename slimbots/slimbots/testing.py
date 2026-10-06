@@ -135,7 +135,8 @@ class FakeVoiceSession:
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
         video_max_bitrate: int | None = None, video_max_framerate: float | None = None,
-        audio_max_bitrate: int | None = None, simulcast: bool = False,
+        audio_max_bitrate: int | None = None, simulcast: bool = False, audio_queue_ms: int | None = None,
+        video_codec: str | None = None, video_encoder: str | None = None,
     ) -> tuple[Any, Any]:
         if not self.can_publish:
             raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
@@ -143,7 +144,8 @@ class FakeVoiceSession:
         self.published = {
             "width": width, "height": height, "sample_rate": sample_rate, "num_channels": num_channels,
             "video_max_bitrate": video_max_bitrate, "video_max_framerate": video_max_framerate,
-            "audio_max_bitrate": audio_max_bitrate, "simulcast": simulcast,
+            "audio_max_bitrate": audio_max_bitrate, "simulcast": simulcast, "audio_queue_ms": audio_queue_ms,
+            "video_codec": video_codec, "video_encoder": video_encoder,
         }
         return FakeVideoSource(), FakeAudioSource()
 
@@ -167,13 +169,17 @@ class FakeVideoSource:
 
 
 class FakeAudioSource:
-    """Stands in for a real `AudioSource`: `capture_frame` (async, like the real one) just counts frames."""
+    """Stands in for a real `AudioSource`: `capture_frame` (async, like the real one) counts frames, `clear_queue` counts clears."""
 
     def __init__(self) -> None:
         self.frame_count = 0
+        self.clear_count = 0
 
     async def capture_frame(self, *_args: Any, **_kwargs: Any) -> None:
         self.frame_count += 1
+
+    def clear_queue(self) -> None:
+        self.clear_count += 1
 
 
 class FakeVoice:

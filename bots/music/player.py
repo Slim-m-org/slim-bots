@@ -133,6 +133,7 @@ class MusicSession:
         self.ended = True  # before the kill, so the runner it unblocks cannot start its own leave and cancel this stop
         self.queue.clear()
         self._interrupted = True
+        await self._cancel_runner()
         await self._kill_process()
         await self._leave()
         with contextlib.suppress(Exception):
@@ -183,13 +184,21 @@ class MusicSession:
         await self._source.capture_frame(frame)
         self._chunks_sent += 1
 
+    async def _cancel_runner(self):
+        """Stops the pump before the kill, so draining the pipe never races a read still in flight."""
+        task = self._runner_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
     async def _kill_process(self):
         process, self._process = self._process, None
         if process is not None and process.returncode is None:
             process.kill()
         if process is not None:
             with contextlib.suppress(ProcessLookupError):
-                await process.wait()
+                await process.communicate()  # wait() hangs on Python 3.12 while unread output is still queued
 
     async def _leave(self):
         self.ended = True

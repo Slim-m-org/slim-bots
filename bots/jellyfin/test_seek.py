@@ -31,6 +31,9 @@ class FakeProcess:
     async def wait(self):
         return self.returncode
 
+    async def communicate(self):
+        return b"", b""
+
 
 class FakeJellyfin:
     """Jellyfin names a progressive transcode by item, device and play session, never by start time, and serves an existing one as is."""
@@ -112,21 +115,26 @@ def with_rig(test):
     return wrapper
 
 
-def _both_streams_share_a_url(rig):
-    video, audio = rig.jf.launches[-2:]
-    assert video == audio
-
-
 @with_rig
 def test_plus_thirty_restarts_the_stream_at_the_new_position(rig):
     async def scenario():
         await rig.start()
         await rig.press("fwd")
     rig.run(scenario())
-    assert [round(s) for s in rig.served()[::2]] == [0, 30]
-    assert [round(s) for s in rig.served()[1::2]] == [0, 30]
-    _both_streams_share_a_url(rig)
+    assert [round(s) for s in rig.served()] == [0, 30], "one ffmpeg per start reads both tracks"
     assert round(rig.session.position_seconds) == 30
+
+
+@with_rig
+def test_a_seek_drops_the_queued_audio_from_before_it(rig):
+    async def scenario():
+        await rig.start()
+        source = rig.session._audio_source
+        await rig.press("fwd")
+        return source
+    source = rig.run(scenario())
+    assert rig.voice.published["audio_queue_ms"] == stream_session.AUDIO_QUEUE_MS
+    assert source.clear_count >= 1, "old audio still queued would play over the new position"
 
 
 @with_rig
@@ -135,7 +143,7 @@ def test_quality_change_resumes_the_stream_at_the_current_position(rig):
         await rig.start(600.0)
         await rig.press("q:low")
     rig.run(scenario())
-    assert [round(s) for s in rig.served()] == [600, 600, 600, 600]
+    assert [round(s) for s in rig.served()] == [600, 600]
     assert rig.session.quality is quality.PRESETS["low"]
 
 
@@ -147,7 +155,7 @@ def test_subtitle_change_resumes_the_stream_at_the_current_position(rig):
         await rig.start(900.0)
         await rig.press("subs")
     rig.run(scenario())
-    assert [round(s) for s in rig.served()] == [900, 900, 900, 900]
+    assert [round(s) for s in rig.served()] == [900, 900]
     assert "SubtitleStreamIndex=3" in rig.jf.launches[-1]
 
 
@@ -157,7 +165,7 @@ def test_two_rapid_plus_thirty_presses_add_sixty(rig):
         await rig.start()
         await asyncio.gather(rig.press("fwd"), rig.press("fwd"))
     rig.run(scenario())
-    assert [round(s) for s in rig.served()[::2]] == [0, 30, 60]
+    assert [round(s) for s in rig.served()] == [0, 30, 60]
     assert round(rig.session.position_seconds) == 60
 
 
@@ -199,7 +207,7 @@ def test_seek_beyond_the_end_stops_cleanly(rig):
         await rig.press("fwd")
     rig.run(scenario())
     assert rig.session.finished and rig.voice.left
-    assert len(rig.jf.launches) == 2
+    assert len(rig.jf.launches) == 1
     assert all(p.returncode == -9 for p in rig.jf.processes)
 
 
@@ -207,7 +215,7 @@ def test_seek_beyond_the_end_stops_cleanly(rig):
 def test_a_failed_seek_keeps_the_old_stream_playing(rig):
     async def scenario():
         await rig.start(100.0)
-        rig.jf.fail_launch_after = 2
+        rig.jf.fail_launch_after = 1
         try:
             await rig.press("fwd")
         except stream_session.StreamError:

@@ -3,6 +3,7 @@
 
 import os
 import sys
+from fractions import Fraction
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -10,7 +11,7 @@ import quality  # noqa: E402
 import stream_session  # noqa: E402
 import session_registry  # noqa: E402
 import watch_cog  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
+from slimbots.testing import FakeAudioSource, FakeVideoSource, FakeVoiceSession  # noqa: E402
 from test_bot import _fake_start_pipeline, jellyfin, message, movie_for_watch, process, setup_with_voice  # noqa: E402
 
 
@@ -18,7 +19,7 @@ def running_session(voice_session=None):
     session = stream_session.WatchSession(
         jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", voice_session or FakeVoiceSession("c1"),
     )
-    session._video_source = session._audio_source = object()
+    session._video_source, session._audio_source = FakeVideoSource(), FakeAudioSource()
     session_registry.add(session)
     return session
 
@@ -153,6 +154,70 @@ def test_the_stream_url_and_np_embed_follow_the_preset():
         assert fields["quality"] == "medium (1280x720, up to 4000 kbps)"
     finally:
         session_registry.clear()
+
+
+def _args_without_ffmpeg(**kwargs):
+    """CI has no ffmpeg on PATH; the arguments do not need one."""
+    saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
+    try:
+        return stream_session.build_args("http://jf/x", "", **kwargs)
+    finally:
+        stream_session.ffmpeg_binary = saved
+
+
+def _with_rate(rate):
+    return {"Id": "m1", "Name": "film", "MediaStreams": [{"Type": "Audio"}, {"Type": "Video", "RealFrameRate": rate}]}
+
+
+def test_playback_fps_keeps_the_titles_own_rate_or_a_whole_fraction_of_it():
+    assert quality.playback_fps(_with_rate(23.976025), 30) == Fraction(24000, 1001)
+    assert quality.playback_fps(_with_rate(25.0), 30) == 25
+    assert quality.playback_fps(_with_rate(29.97003), 30) == Fraction(30000, 1001)
+    assert quality.playback_fps(_with_rate(50.0), 30) == 25
+    assert quality.playback_fps(_with_rate(59.94006), 30) == Fraction(30000, 1001)
+    assert quality.playback_fps(_with_rate(60.0), 30) == 30
+    assert quality.playback_fps({"MediaStreams": []}, 30) == 30
+    assert quality.playback_fps(_with_rate(None), 24) == 24
+
+
+def test_a_film_is_decoded_and_paced_at_its_own_rate():
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", _with_rate(23.976025), "u1", FakeVoiceSession("c1"))
+    args = _args_without_ffmpeg(width=1280, height=720, fps=session.fps)
+    assert session.fps == Fraction(24000, 1001)
+    assert args[args.index("-vf") + 1].endswith(",fps=24000/1001")
+
+
+def test_the_video_decode_runs_on_a_fixed_small_thread_count():
+    args = _args_without_ffmpeg(width=1920, height=1072, fps=24)
+    assert args.index("-threads") < args.index("-i"), "a -threads after -i sets the encoder, not the decoder"
+    assert args[args.index("-threads") + 1] == str(stream_session.DECODE_THREADS)
+
+
+def test_an_h264_stream_keeps_the_full_1080_and_asks_livekit_for_the_codec():
+    import asyncio
+    voice = FakeVoiceSession("c1")
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", voice)
+    session.quality = quality.PRESETS["high"]
+    saved = stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER
+    stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER = "h264", "nvenc"
+    try:
+        asyncio.run(session._publish())
+    finally:
+        stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER = saved
+    assert (voice.published["width"], voice.published["height"]) == (1920, 1080)
+    assert (voice.published["video_codec"], voice.published["video_encoder"]) == ("h264", "nvenc")
+
+
+def test_codec_and_encoder_settings_take_only_known_names():
+    core = stream_session.jellyfin_core
+    assert core.parse_choice("", core.VIDEO_CODECS, "X") is None
+    assert core.parse_choice(" H264 ", core.VIDEO_CODECS, "X") == "h264"
+    try:
+        core.parse_choice("hevc", core.VIDEO_CODECS, "JELLYFIN_STREAM_VIDEO_CODEC")
+    except RuntimeError as err:
+        assert "JELLYFIN_STREAM_VIDEO_CODEC" in str(err)
+    else:
+        raise AssertionError("an unknown codec was accepted")
 
 
 if __name__ == "__main__":

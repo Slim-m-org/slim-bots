@@ -24,15 +24,15 @@ FRAME_BYTES = stream_session.frame_byte_size(WIDTH, HEIGHT)
 FRAMES = 5
 
 STAND_IN = """#!/bin/sh
-audio=0
-case " $* " in *" -vn "*) audio=1;; esac
+audio=/dev/null
+for out; do case "$out" in pipe:1) ;; pipe:*) audio=/dev/fd/${out#pipe:};; esac; done
 case "$STAND_IN_MODE" in
 dead) exit 1;;
-noaudio) [ $audio = 1 ] && exit 1; exec sleep 30;;
+endless) cat /dev/zero > "$audio" & exec cat /dev/zero;;
+slowstart) sleep 0.6; cat /dev/zero > "$audio" & exec cat /dev/zero;;
+lateaudio) (sleep 0.6; exec cat /dev/zero > "$audio") & exec cat /dev/zero;;
 *)
-  [ $audio = 1 ] && exec sleep 30
-  for out; do :; done
-  if [ "$out" = pipe:1 ]; then head -c $((FRAME_BYTES * FRAMES)) /dev/zero; else head -c $((FRAME_BYTES * FRAMES)) /dev/zero > "$out"; fi
+  head -c $((FRAME_BYTES * FRAMES)) /dev/zero
   [ "$STAND_IN_MODE" = clean ] && exit 0
   exit 1;;
 esac
@@ -144,20 +144,94 @@ def test_a_clean_exit_at_the_end_of_the_title_still_finishes_it():
 
 
 def test_a_title_with_no_audio_stream_keeps_playing_its_video():
-    rig = Rig("noaudio")
+    rig = Rig("endless")
+    rig.session.item["MediaStreams"] = [{"Type": "Video", "RealFrameRate": 30}]
 
     async def scenario():
         await rig.session._publish()
         await rig.session._start_pipeline(0.0)
         await asyncio.sleep(0.5)
         alive = not rig.session.finished
+        frames = rig.session._video_source.frame_count
         await rig.session._teardown_pipeline()
-        return alive
+        return alive, frames
 
     try:
-        assert asyncio.run(scenario())
+        alive, frames = asyncio.run(scenario())
+        assert alive and frames > 0, (alive, frames)
     finally:
         rig.close()
+
+
+def test_one_ffmpeg_reads_the_transcode_for_both_tracks():
+    saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
+    try:
+        args = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30, audio_fd=7)
+        video_only = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30)
+    finally:
+        stream_session.ffmpeg_binary = saved
+    assert args.count("-i") == 1
+    assert args[-1] == "pipe:7" and "pipe:1" in args
+    assert "pipe:7" not in video_only
+
+
+def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():
+    rig = Rig("endless")
+
+    async def scenario():
+        await rig.session._publish()
+        await rig.session._start_pipeline(0.0)
+        await asyncio.sleep(0.5)
+        old = (rig.session._video_process,)
+        await asyncio.wait_for(rig.session.seek(60.0), timeout=5)
+        await asyncio.sleep(0.5)
+        await asyncio.wait_for(rig.session.stop(), timeout=5)
+        return old
+
+    try:
+        old = asyncio.run(scenario())
+        assert all(process.returncode is not None for process in old), "a seek left the old ffmpeg running"
+        assert rig.voice.left, "stop never got as far as leaving the call"
+    finally:
+        rig.close()
+
+
+def capture_times(mode, seconds=1.5):
+    """When the first video frame and audio chunk went out, and how many frames went out in the first 300 ms."""
+    rig = Rig(mode)
+    video, audio = [], []
+
+    async def scenario():
+        await rig.session._publish()
+        real_video, real_audio = rig.session._video_source, rig.session._audio_source
+        rig.session._video_source.capture_frame = lambda *a, **k: (video.append(time.monotonic()), real_video.frame_count)
+        original_audio = real_audio.capture_frame
+
+        async def timed_audio(*a, **k):
+            audio.append(time.monotonic())
+            await original_audio(*a, **k)
+
+        real_audio.capture_frame = timed_audio
+        await rig.session._start_pipeline(0.0)
+        await asyncio.sleep(seconds)
+        await rig.session._teardown_pipeline()
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        rig.close()
+    burst = sum(1 for t in video if t - video[0] < 0.3)
+    return video[0], audio[0], burst
+
+
+def test_a_slow_transcode_start_does_not_fast_forward_the_first_frames():
+    _, _, burst = capture_times("slowstart")
+    assert burst <= 0.3 * jellyfin_core.JELLYFIN_STREAM_FPS + 2, f"{burst} frames in the first 300 ms"
+
+
+def test_picture_waits_for_sound_that_arrives_later():
+    first_video, first_audio, _ = capture_times("lateaudio")
+    assert abs(first_video - first_audio) < 0.1, f"picture started {first_audio - first_video:.2f}s before the sound"
 
 
 if __name__ == "__main__":

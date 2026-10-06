@@ -36,6 +36,9 @@ HELP_TEXT = (
 
 # What `!watch`/`!subs` need beyond FIELDS: total runtime, and the audio/subtitle track list.
 STREAM_FIELDS = "RunTimeTicks,MediaStreams"
+# Jellyfin downmixes to stereo itself; left to the source it encoded 5.1 at 640 kbps for the bot to throw away, at 0.75 of a core.
+STREAM_AUDIO_CHANNELS = 2
+STREAM_AUDIO_BITRATE = 256_000
 
 # Populated once by configure(); a bot script calls it right after building Bot().
 JELLYFIN_URL = ""
@@ -53,6 +56,8 @@ JELLYFIN_STREAM_MAX_BITRATE = 8_000_000
 # Reused as the WebRTC ceiling too by default - the transcode's own bitrate, not a guess; see README.md.
 JELLYFIN_STREAM_WEBRTC_MAX_BITRATE = None
 JELLYFIN_STREAM_AUDIO_MAX_BITRATE = 128_000
+JELLYFIN_STREAM_VIDEO_CODEC = None
+JELLYFIN_STREAM_VIDEO_ENCODER = None
 JELLYFIN_AUTOPLAY_NEXT = False
 JELLYFIN_NEXT_WAIT_SECONDS = 180
 JELLYFIN_DEDUPE_DAYS = 7
@@ -75,12 +80,25 @@ def parse_library_routes(spec):
     return routes
 
 
+VIDEO_CODECS = ("vp8", "h264")
+VIDEO_ENCODERS = ("software", "hardware", "nvenc", "vaapi")
+
+
+def parse_choice(value, choices, name):
+    """An empty setting is None (livekit's own default); anything else must be one of `choices`, case-insensitively."""
+    value = str(value or "").strip().lower()
+    if value and value not in choices:
+        raise RuntimeError(f"{name} must be one of {', '.join(choices)}, not {value!r}")
+    return value or None
+
+
 def configure(bot):
     """Resolves every JELLYFIN_* setting through `bot.setting()`; called once, right after `Bot()` is built."""
     global JELLYFIN_URL, JELLYFIN_API_KEY, JELLYFIN_ITEM_TYPES, JELLYFIN_LIBRARY_IDS
     global JELLYFIN_POLL_SECONDS, JELLYFIN_BATCH_THRESHOLD, JELLYFIN_LIBRARY_ROUTES, JELLYFIN_EXCLUDE_GENRES
     global JELLYFIN_STREAM_WIDTH, JELLYFIN_STREAM_HEIGHT, JELLYFIN_STREAM_FPS, JELLYFIN_STREAM_MAX_BITRATE
     global JELLYFIN_STREAM_WEBRTC_MAX_BITRATE, JELLYFIN_STREAM_AUDIO_MAX_BITRATE
+    global JELLYFIN_STREAM_VIDEO_CODEC, JELLYFIN_STREAM_VIDEO_ENCODER
     global JELLYFIN_AUTOPLAY_NEXT, JELLYFIN_NEXT_WAIT_SECONDS
     global JELLYFIN_DEDUPE_DAYS, JELLYFIN_REANNOUNCE_REPLACED
     JELLYFIN_URL = (bot.setting("JELLYFIN_URL", required=True) or "").rstrip("/")
@@ -97,6 +115,10 @@ def configure(bot):
     JELLYFIN_STREAM_MAX_BITRATE = bot.setting("JELLYFIN_STREAM_MAX_BITRATE", 8_000_000, type=int)
     JELLYFIN_STREAM_WEBRTC_MAX_BITRATE = bot.setting("JELLYFIN_STREAM_WEBRTC_MAX_BITRATE", None, type=int) or JELLYFIN_STREAM_MAX_BITRATE
     JELLYFIN_STREAM_AUDIO_MAX_BITRATE = bot.setting("JELLYFIN_STREAM_AUDIO_MAX_BITRATE", 128_000, type=int)
+    JELLYFIN_STREAM_VIDEO_CODEC = parse_choice(bot.setting("JELLYFIN_STREAM_VIDEO_CODEC", ""), VIDEO_CODECS, "JELLYFIN_STREAM_VIDEO_CODEC")
+    JELLYFIN_STREAM_VIDEO_ENCODER = parse_choice(
+        bot.setting("JELLYFIN_STREAM_VIDEO_ENCODER", ""), VIDEO_ENCODERS, "JELLYFIN_STREAM_VIDEO_ENCODER",
+    )
     JELLYFIN_AUTOPLAY_NEXT = str(bot.setting("JELLYFIN_AUTOPLAY_NEXT", "") or "").lower() in ("1", "true", "yes", "on")
     JELLYFIN_NEXT_WAIT_SECONDS = bot.setting("JELLYFIN_NEXT_WAIT_SECONDS", 180, type=int)
     JELLYFIN_DEDUPE_DAYS = bot.setting("JELLYFIN_DEDUPE_DAYS", 7, type=int)
@@ -522,6 +544,7 @@ def build_stream_url(
     # Jellyfin keys a transcode by item, device and PlaySessionId, so a restart without a fresh one replays the old stream.
     params = {
         "Static": "false", "VideoCodec": "h264", "AudioCodec": "aac", "Container": "mkv",
+        "AudioChannels": STREAM_AUDIO_CHANNELS, "AudioBitrate": STREAM_AUDIO_BITRATE,
         "MaxWidth": max_width or JELLYFIN_STREAM_WIDTH, "VideoBitrate": video_bitrate or JELLYFIN_STREAM_MAX_BITRATE,
         "StartTimeTicks": int(start_seconds * 10_000_000),
     }

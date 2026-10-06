@@ -68,10 +68,11 @@ class VoiceSession:
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
         video_max_bitrate: int | None = None, video_max_framerate: float | None = None,
-        audio_max_bitrate: int | None = None, simulcast: bool = False,
+        audio_max_bitrate: int | None = None, simulcast: bool = False, audio_queue_ms: int | None = None,
+        video_codec: str | None = None, video_encoder: str | None = None,
     ) -> tuple[Any, Any]:
         """Publishes a video+audio pair tagged SCREEN_SHARE/SCREEN_SHARE_AUDIO - what a person's own share also uses.
-        A `None` ceiling keeps the library default; resolution beats framerate; simulcast is off - see docs/framework.md."""
+        A `None` ceiling, queue, codec or encoder keeps the library default; resolution beats framerate; simulcast is off - see docs/framework.md."""
         if not self.can_publish:
             raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
         rtc = self.rtc
@@ -83,6 +84,12 @@ class VoiceSession:
         audio_encoding = (
             _audio_encoding(rtc, audio_max_bitrate) if audio_max_bitrate is not None else None
         )
+        codec_options: dict[str, Any] = {}
+        if video_codec is not None:
+            codec_options["video_codec"] = getattr(rtc.VideoCodec, video_codec.upper())
+        if video_encoder is not None:
+            # VideoEncoderBackend is proto-only on rtc (1.1.20); the message takes the enum by name.
+            codec_options["video_encoder"] = f"ENCODER_BACKEND_{video_encoder.upper()}"
         video_source = rtc.VideoSource(width, height, is_screencast=True)
         video_track = rtc.LocalVideoTrack.create_video_track("screen", video_source)
         video_publication = await self.room.local_participant.publish_track(
@@ -90,9 +97,14 @@ class VoiceSession:
             rtc.TrackPublishOptions(
                 source=rtc.TrackSource.SOURCE_SCREENSHARE, video_encoding=video_encoding,
                 degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION, simulcast=simulcast,
+                **codec_options,
             ),
         )
-        audio_source = rtc.AudioSource(sample_rate, num_channels)
+        audio_source = (
+            rtc.AudioSource(sample_rate, num_channels)
+            if audio_queue_ms is None
+            else rtc.AudioSource(sample_rate, num_channels, queue_size_ms=audio_queue_ms)
+        )
         audio_track = rtc.LocalAudioTrack.create_audio_track("screen-audio", audio_source)
         audio_publication = await self.room.local_participant.publish_track(
             audio_track,
