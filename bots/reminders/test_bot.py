@@ -9,8 +9,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as reminders  # noqa: E402
-from slimbots import Store  # noqa: E402
+from slimbots import ApiError, Store  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
+from slimbots.http import is_token_revoked  # noqa: E402
 from slimbots.space import Space  # noqa: E402
 from slimbots.testing import FakeAsyncClient  # noqa: E402
 
@@ -246,6 +247,52 @@ def test_on_ready_starts_both_loops_as_supervised_background_tasks():
                 pass
 
     asyncio.run(run())
+
+
+def run_due_checker_briefly():
+    reminders.DUE_CHECK_SECONDS = 0.01
+    reminders.bot._fatal_error = None
+    reminders.bot._main_task = None
+
+    async def run():
+        task = reminders.bot.background(reminders.due_checker(), name="due")
+        await asyncio.sleep(0.3)
+        died = task.done()
+        task.cancel()
+        return died
+
+    return asyncio.run(run())
+
+
+def test_due_checker_survives_a_reminder_whose_channel_is_gone_and_still_delivers_the_rest():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "gone", "c-deleted", "u1", "m0", int(time.time()) - 1, "lost channel")
+    reminders.add_reminder(conn, "ok", "c1", "u1", "m0", int(time.time()) - 1, "fine one")
+    client.respond("POST", "/channels/c-deleted/messages", ApiError(404, {"error": "channel not found"}))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None, f"due_checker died: {reminders.bot._fatal_error!r}"
+    assert any(s["channel_id"] == "c1" and "fine one" in s["content"] for s in client.sent)
+    assert reminders.due_reminders(conn, int(time.time())) == [], "the undeliverable row is still due, so a restart hits it again"
+
+
+def test_due_checker_keeps_a_reminder_it_could_not_send_for_a_transient_reason():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "flaky", "c1", "u1", "m0", int(time.time()) - 1, "later")
+    client.respond("POST", "/channels/c1/messages", ApiError(500, {"error": "boom"}))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None, f"due_checker died: {reminders.bot._fatal_error!r}"
+    assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["flaky"]
+
+
+def test_due_checker_still_stops_on_a_revoked_token():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "r", "c1", "u1", "m0", int(time.time()) - 1, "x")
+    client.respond("POST", "/channels/c1/messages", ApiError(401, {"error": "unauthorized"}))
+    died = run_due_checker_briefly()
+    assert died and is_token_revoked(reminders.bot._fatal_error)
 
 
 if __name__ == "__main__":
