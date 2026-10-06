@@ -15,6 +15,9 @@ import watch_start
 from stream_session import StreamError, format_hms, parse_hms
 
 
+ENDED = "that watch party has ended."
+
+
 def _may_control(ctx, session):
     return ctx.author.id == session.started_by_id or ctx.author.has_permission(Permissions.MANAGE_CHANNELS)
 
@@ -26,11 +29,11 @@ async def run_pause(ctx):
     if not _may_control(ctx, session):
         await ctx.reply("only the person who started this, or a channel manager, can pause it.")
         return
-    if not session.pause():
-        await ctx.reply("already paused.")
-        return
-    await ctx.reply("paused.")
-    await session.refresh_panel()
+    async with session.control_lock:
+        paused = session.pause()
+    await ctx.reply("paused." if paused else "already paused.")
+    if paused:
+        await session.refresh_panel()
 
 
 async def run_resume(ctx):
@@ -40,11 +43,11 @@ async def run_resume(ctx):
     if not _may_control(ctx, session):
         await ctx.reply("only the person who started this, or a channel manager, can resume it.")
         return
-    if not session.resume():
-        await ctx.reply("already playing.")
-        return
-    await ctx.reply("resumed.")
-    await session.refresh_panel()
+    async with session.control_lock:
+        resumed = session.resume()
+    await ctx.reply("resumed." if resumed else "already playing.")
+    if resumed:
+        await session.refresh_panel()
 
 
 async def run_seek(ctx, position_text):
@@ -59,7 +62,11 @@ async def run_seek(ctx, position_text):
     except ValueError:
         await ctx.reply("give a time like `1:02:03`, `2:03`, or a bare second count.")
         return
-    await session.seek(seconds)
+    async with session.control_lock:
+        if session.finished:
+            await ctx.reply(ENDED)
+            return
+        await session.seek(seconds)
     await ctx.reply(f"seeked to {format_hms(session.position_seconds)}.")
     await session.refresh_panel()
 
@@ -71,7 +78,8 @@ async def run_stop(ctx):
     if not _may_control(ctx, session):
         await ctx.reply("only the person who started this, or a channel manager, can stop it.")
         return
-    await session.stop(reason=f"stopped by {ctx.author.display_name}")
+    async with session.control_lock:
+        await session.stop(reason=f"stopped by {ctx.author.display_name}")
 
 
 async def run_now_playing(ctx):
@@ -90,7 +98,11 @@ async def run_subs(ctx, language):
         return
     language = (language or "").strip()
     if not language or language.lower() == "off":
-        await session.set_subtitle(None, None)
+        async with session.control_lock:
+            if session.finished:
+                await ctx.reply(ENDED)
+                return
+            await session.set_subtitle(None, None)
         await ctx.reply("subtitles off.")
         await session.refresh_panel()
         return
@@ -98,7 +110,11 @@ async def run_subs(ctx, language):
     if stream is None:
         await ctx.reply(f'no subtitle track matching "{language}".')
         return
-    await session.set_subtitle(stream["Index"], stream.get("DisplayTitle") or stream.get("Language") or language)
+    async with session.control_lock:
+        if session.finished:
+            await ctx.reply(ENDED)
+            return
+        await session.set_subtitle(stream["Index"], stream.get("DisplayTitle") or stream.get("Language") or language)
     await ctx.reply(f"subtitles set to {session.subtitle_label}.")
     await session.refresh_panel()
 
@@ -119,7 +135,11 @@ async def run_quality(ctx, preset_name):
         await ctx.reply("only the person who started this, or a channel manager, can change the quality.")
         return
     try:
-        await session.set_quality(preset)
+        async with session.control_lock:
+            if session.finished:
+                await ctx.reply(ENDED)
+                return
+            await session.set_quality(preset)
     except (StreamError, VoiceError) as err:
         await ctx.reply(f"could not switch quality: {err}")
         return
