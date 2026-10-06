@@ -15,6 +15,8 @@ FULL_HD_CLASS_MAX_HEIGHT = 1088
 
 def below_vp8_thread_jump(width, height):
     """Trims a 1080p-class height to stay under libwebrtc's 8-thread VP8 cutoff, which stalls on a busy host; see README.md."""
+    if jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC not in (None, "vp8"):
+        return width, height
     if width * height < VP8_EIGHT_THREAD_AREA or height > FULL_HD_CLASS_MAX_HEIGHT:
         return width, height
     return width, (VP8_EIGHT_THREAD_AREA - 1) // width // 8 * 8

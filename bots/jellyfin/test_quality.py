@@ -184,6 +184,33 @@ def test_the_video_decode_runs_on_a_fixed_small_thread_count():
     assert args[args.index("-threads") + 1] == str(stream_session.DECODE_THREADS)
 
 
+def test_an_h264_stream_keeps_the_full_1080_and_asks_livekit_for_the_codec():
+    import asyncio
+    voice = FakeVoiceSession("c1")
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", voice)
+    session.quality = quality.PRESETS["high"]
+    saved = stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER
+    stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER = "h264", "nvenc"
+    try:
+        asyncio.run(session._publish())
+    finally:
+        stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, stream_session.jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER = saved
+    assert (voice.published["width"], voice.published["height"]) == (1920, 1080)
+    assert (voice.published["video_codec"], voice.published["video_encoder"]) == ("h264", "nvenc")
+
+
+def test_codec_and_encoder_settings_take_only_known_names():
+    core = stream_session.jellyfin_core
+    assert core.parse_choice("", core.VIDEO_CODECS, "X") is None
+    assert core.parse_choice(" H264 ", core.VIDEO_CODECS, "X") == "h264"
+    try:
+        core.parse_choice("hevc", core.VIDEO_CODECS, "JELLYFIN_STREAM_VIDEO_CODEC")
+    except RuntimeError as err:
+        assert "JELLYFIN_STREAM_VIDEO_CODEC" in str(err)
+    else:
+        raise AssertionError("an unknown codec was accepted")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

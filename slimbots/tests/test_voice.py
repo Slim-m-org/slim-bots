@@ -67,10 +67,12 @@ def fake_rtc_module(room: FakeRoom) -> SimpleNamespace:
         ),
         # No AudioEncoding on purpose: real livekit (1.1.20) re-exports VideoEncoding but not AudioEncoding.
         DegradationPreference=FakeDegradationPreference,
-        TrackPublishOptions=lambda source=None, video_encoding=None, audio_encoding=None, degradation_preference=None, simulcast=None: SimpleNamespace(
+        TrackPublishOptions=lambda source=None, video_encoding=None, audio_encoding=None, degradation_preference=None, simulcast=None,
+        video_codec=None, video_encoder=None: SimpleNamespace(
             source=source, video_encoding=video_encoding, audio_encoding=audio_encoding,
-            degradation_preference=degradation_preference, simulcast=simulcast,
+            degradation_preference=degradation_preference, simulcast=simulcast, video_codec=video_codec, video_encoder=video_encoder,
         ),
+        VideoCodec=SimpleNamespace(VP8=0, H264=1, AV1=2, VP9=3),
         TrackSource=FakeTrackSource,
     )
 
@@ -149,6 +151,22 @@ def test_publish_screen_share_sizes_the_audio_queue_only_when_asked(monkeypatch:
         _video, short_audio = await session.publish_screen_share(width=1280, height=720, audio_queue_ms=100)
         assert default_audio.queue_size_ms == 1000
         assert short_audio.queue_size_ms == 100
+        session._heartbeat_task.cancel()
+
+    asyncio.run(run())
+
+
+def test_publish_screen_share_asks_for_a_codec_and_encoder_only_when_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    bot, client, room = make_bot()
+    monkeypatch.setattr(voice_module, "load_rtc", lambda: fake_rtc_module(room))
+
+    async def run() -> None:
+        session = await bot.voice.join("c1")
+        await session.publish_screen_share(width=1920, height=1080)
+        await session.publish_screen_share(width=1920, height=1080, video_codec="h264", video_encoder="nvenc")
+        default, _audio, chosen, _audio2 = (options for _track, options in room.local_participant.published)
+        assert (default.video_codec, default.video_encoder) == (None, None)
+        assert (chosen.video_codec, chosen.video_encoder) == (1, "ENCODER_BACKEND_NVENC")
         session._heartbeat_task.cancel()
 
     asyncio.run(run())

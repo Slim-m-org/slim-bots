@@ -148,6 +148,7 @@ class WatchSession:
             video_max_bitrate=self.quality.publish_bitrate,
             video_max_framerate=float(jellyfin_core.JELLYFIN_STREAM_FPS),
             audio_max_bitrate=jellyfin_core.JELLYFIN_STREAM_AUDIO_MAX_BITRATE, audio_queue_ms=AUDIO_QUEUE_MS,
+            video_codec=jellyfin_core.JELLYFIN_STREAM_VIDEO_CODEC, video_encoder=jellyfin_core.JELLYFIN_STREAM_VIDEO_ENCODER,
         )
 
     async def start(self, start_seconds=0.0):

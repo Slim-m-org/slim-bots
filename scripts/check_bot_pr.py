@@ -16,7 +16,7 @@ EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
-    (r"\baudio_queue_ms\b", "publish_screen_share audio_queue_ms", (0, 9, 7)),
+    (r"\baudio_queue_ms\b|\bvideo_encoder=", "publish_screen_share audio_queue_ms, video_codec and video_encoder", (0, 9, 7)),
     (r"\bslimbots\.hidden_chars\b|\bis_hidden_char\b|\bhas_hidden_char\b", "slimbots.hidden_chars", (0, 9, 4)),
     (r"\b(?:set|tick|end)_watch_session\b", "AsyncClient watch-session routes", (0, 9, 4)),
     (
