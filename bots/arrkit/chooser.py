@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -89,10 +90,19 @@ class Chooser:
             with contextlib.suppress(ApiError):
                 await interaction.reply_ephemeral(f"only {pick.invoker_name} can choose here - {retry} starts your own.")
             return
-        await interaction.ack()
         action = interaction.custom_id[len(self.prefix):]
+        index = int(action[4:]) if action.startswith("sel:") and action[4:].isdigit() else None
+        if action != "cancel" and (index is None or index >= len(pick.items)):
+            await interaction.ack()
+            return
+        self._picks.pop(pick.message_id, None)
+        await interaction.ack()
         if action == "cancel":
             await self._close(bot, pick, "cancelled.")
-        elif action.startswith("sel:") and action[4:].isdigit() and int(action[4:]) < len(pick.items):
-            self._picks.pop(pick.message_id, None)
-            await self._close(bot, pick, await pick.on_choose(pick.items[int(action[4:])]))
+            return
+        try:
+            outcome = await pick.on_choose(pick.items[index])
+        except Exception as err:
+            print(f"chooser `{self.prefix}` could not act on a pick: {err}", file=sys.stderr)
+            outcome = f"could not {self.verb} that - {retry} again to retry."
+        await self._close(bot, pick, outcome)
