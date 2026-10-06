@@ -68,10 +68,10 @@ class VoiceSession:
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
         video_max_bitrate: int | None = None, video_max_framerate: float | None = None,
-        audio_max_bitrate: int | None = None, simulcast: bool = False,
+        audio_max_bitrate: int | None = None, simulcast: bool = False, audio_queue_ms: int | None = None,
     ) -> tuple[Any, Any]:
         """Publishes a video+audio pair tagged SCREEN_SHARE/SCREEN_SHARE_AUDIO - what a person's own share also uses.
-        A `None` ceiling keeps the library default; resolution beats framerate; simulcast is off - see docs/framework.md."""
+        A `None` ceiling or queue keeps the library default; resolution beats framerate; simulcast is off - see docs/framework.md."""
         if not self.can_publish:
             raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
         rtc = self.rtc
@@ -92,7 +92,11 @@ class VoiceSession:
                 degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION, simulcast=simulcast,
             ),
         )
-        audio_source = rtc.AudioSource(sample_rate, num_channels)
+        audio_source = (
+            rtc.AudioSource(sample_rate, num_channels)
+            if audio_queue_ms is None
+            else rtc.AudioSource(sample_rate, num_channels, queue_size_ms=audio_queue_ms)
+        )
         audio_track = rtc.LocalAudioTrack.create_audio_track("screen-audio", audio_source)
         audio_publication = await self.room.local_participant.publish_track(
             audio_track,

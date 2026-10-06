@@ -19,6 +19,7 @@ from watch_sync import WatchSync
 AUDIO_SAMPLE_RATE = 48000
 AUDIO_CHANNELS = 2
 AUDIO_CHUNK_MS = 20
+AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 ms default left audio a second off the picture
 ROSTER_POLL_SECONDS = 20
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
@@ -151,7 +152,7 @@ class WatchSession:
             sample_rate=AUDIO_SAMPLE_RATE, num_channels=AUDIO_CHANNELS,
             video_max_bitrate=self.quality.publish_bitrate,
             video_max_framerate=float(jellyfin_core.JELLYFIN_STREAM_FPS),
-            audio_max_bitrate=jellyfin_core.JELLYFIN_STREAM_AUDIO_MAX_BITRATE,
+            audio_max_bitrate=jellyfin_core.JELLYFIN_STREAM_AUDIO_MAX_BITRATE, audio_queue_ms=AUDIO_QUEUE_MS,
         )
 
     async def start(self, start_seconds=0.0):
@@ -275,6 +276,8 @@ class WatchSession:
         for process in (self._video_process, self._audio_process):
             if process is not None:
                 await reap(process)
+        if self._audio_source is not None:
+            self._audio_source.clear_queue()
         self._video_task = self._audio_task = None
         self._video_process = self._audio_process = None
 

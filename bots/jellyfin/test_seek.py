@@ -133,6 +133,18 @@ def test_plus_thirty_restarts_the_stream_at_the_new_position(rig):
 
 
 @with_rig
+def test_a_seek_drops_the_queued_audio_from_before_it(rig):
+    async def scenario():
+        await rig.start()
+        source = rig.session._audio_source
+        await rig.press("fwd")
+        return source
+    source = rig.run(scenario())
+    assert rig.voice.published["audio_queue_ms"] == stream_session.AUDIO_QUEUE_MS
+    assert source.clear_count >= 1, "old audio still queued would play over the new position"
+
+
+@with_rig
 def test_quality_change_resumes_the_stream_at_the_current_position(rig):
     async def scenario():
         await rig.start(600.0)
