@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 
 from arrkit.guard import UNREACHABLE
 from arrkit.service import AuthError
@@ -13,12 +14,7 @@ import seerr_core as core
 
 ID_PREFIX = "seerrreq:"
 
-_texts: dict[str, str] = {}
-
-
-def remember(message_id, text):
-    """Keeps a pending post's text so the decision can be written under it; lost on restart, then a generic line is used."""
-    _texts[message_id] = text
+_DECIDED = re.compile(r"\n(?:Approved|Declined) by [^\n]*\.$")
 
 
 def buttons_for(request_id):
@@ -61,8 +57,16 @@ async def on_decision_press(interaction):
             await interaction.reply_ephemeral(f"seerr did not accept that - request {raw_id} is unchanged.")
         return
     await bot.store.run(core.mark_announced, [f"r|{raw_id}|{verb}"])
-    who = interaction.user_display_name or "a member"
-    text = _texts.pop(interaction.message_id, f"Request {raw_id}")
     with contextlib.suppress(ApiError):
-        await bot.client.edit_message(interaction.channel_id, interaction.message_id, f"{text}\n{verb.capitalize()} by {who}.")
-        await bot.client.edit_components(interaction.channel_id, interaction.message_id, [])
+        await close_out(bot, interaction, f"{verb.capitalize()} by {interaction.user_display_name or 'a member'}.")
+
+
+async def close_out(bot, interaction, decision):
+    """Writes the decision under the post as it reads now, and drops the buttons; an unreadable post only loses them."""
+    try:
+        post = await bot.client.get_message(interaction.channel_id, interaction.message_id)
+    except ApiError:
+        post = None
+    if post is not None and post.content and not _DECIDED.search(post.content):
+        await bot.client.edit_message(interaction.channel_id, interaction.message_id, f"{post.content}\n{decision}")
+    await bot.client.edit_components(interaction.channel_id, interaction.message_id, [])

@@ -25,9 +25,7 @@ async def send_post(post):
     assert bot.client is not None, "send_post runs only once connected"
     text = seerr_core.render_text(post)
     layout = approvals.buttons_for(post["request_id"]) if post["buttons"] else None
-    message = await bot.client.send(bot.channel, text, message_id=post["message_id"], components=layout)
-    if layout:
-        approvals.remember(message.id, text)
+    await bot.client.send(bot.channel, text, message_id=post["message_id"], components=layout)
 
 
 async def poll_once():

@@ -98,6 +98,8 @@ def approval_setup(admin_ids=("u1",), with_roles=True):
         asyncio.run(seerr.poll_once())
         api.requests.append(request(7, tmdb=7))
         asyncio.run(seerr.poll_once())
+    post = client.sent[-1]
+    client.respond("GET", f"/channels/{post['channel_id']}/messages/{post['id']}", lambda: {"id": post["id"], "content": post["content"]})
     return client, api
 
 
@@ -116,6 +118,32 @@ def test_a_member_with_the_permission_approves_and_the_post_is_closed_out():
     assert [c[1] for c in decisions(api)] == ["/request/7/approve"]
     assert "Requested:" in client.edited[-1]["content"] and "Approved by u1." in client.edited[-1]["content"]
     assert client.component_edits[-1]["components"] == []
+
+
+def test_a_decision_keeps_the_post_text_it_reads_back_from_the_message():
+    client, api = approval_setup()
+    original = client.sent[-1]["content"]
+    decide(client, api, f"{approvals.ID_PREFIX}approve:7", "u1")
+    assert client.edited[-1]["content"] == f"{original}\nApproved by u1.", client.edited[-1]["content"]
+
+
+def test_a_decision_pressed_twice_writes_one_decision_line():
+    client, api = approval_setup()
+    post = client.sent[-1]
+    decided = f"{post['content']}\nApproved by Nick."
+    client.respond("GET", f"/channels/{post['channel_id']}/messages/{post['id']}", {"id": post["id"], "content": decided})
+    decide(client, api, f"{approvals.ID_PREFIX}decline:7", "u1")
+    assert client.edited == [] and client.component_edits[-1]["components"] == []
+
+
+def test_a_decision_on_an_unreadable_post_still_closes_the_buttons():
+    from slimbots import ApiError
+
+    client, api = approval_setup()
+    post = client.sent[-1]
+    client.respond("GET", f"/channels/{post['channel_id']}/messages/{post['id']}", ApiError(404, {"error": "not found"}))
+    decide(client, api, f"{approvals.ID_PREFIX}approve:7", "u1")
+    assert client.edited == [] and client.component_edits[-1]["components"] == []
 
 
 def test_the_approval_made_from_the_button_is_not_announced_again_by_the_poll():
