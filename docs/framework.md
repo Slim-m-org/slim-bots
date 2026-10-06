@@ -142,6 +142,7 @@ Call it from `on_connect`/`on_ready`, the same place a bot used to reach for `as
 `Bot(default_data_path="casino.db")` gives `bot.data_path`: `SLIMM_DB_PATH` if set, else that default - the one place a bot's own sqlite file path is derived, instead of every bot re-deriving `os.environ.get("SLIMM_DB_PATH", "...")` by hand.
 
 A bot with `channels` set gets a persisted, cross-restart `seq` cursor for free, at `bot.data_path` when the bot has one (sharing the same file as its business data, the way `bot-casino` does) or a generic default (`slimbots-cursor.db`) otherwise; `Bot` bootstraps and `/sync`-replays the backlog through `process_message` on every connect, before `on_ready` fires - no bot code calls `cursor`/`catchup` directly any more.
+The replay follows the server's `has_more` page by page until the backlog is drained, and a channel the server says is too far behind to replay (`reset`) skips ahead to its newest message instead of replaying anything.
 `cursor_path=` on `Bot()` still exists to point the cursor at a file *other* than `data_path`, for the rare bot that wants them separate.
 
 `on_raw_message(message)` still fires for every in-scope message, command or not - for a bot that wants its own hook into every message, not for cursor-keeping any more.

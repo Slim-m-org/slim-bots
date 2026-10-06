@@ -516,21 +516,33 @@ class Bot:
             cursor.set(self._cursor_conn, channel_id, seq)
 
     async def _catch_up(self) -> None:
-        """Replays any `/sync` backlog for `channels` through `process_message`, persisting the cursor as it goes."""
+        """Replays the `/sync` backlog for `channels` through `process_message`, page by page, persisting the cursor as it goes."""
         assert self.client is not None, "_catch_up needs start() to have run"
         if not self.channels or self._cursor_conn is None:
             return
         for channel_id in self.channels:
             await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
-        scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in self.channels]
-        for scope in await catchup.sync(self.client, scopes):
-            channel_id = scope["channel_id"]
-            for message in scope["messages"]:
-                await guard_dispatch(self.process_message, message)
-            if scope["messages"]:
-                cursor.set(self._cursor_conn, channel_id, scope["messages"][-1]["seq"])
-            elif scope["reset"]:
-                await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+        pending = list(self.channels)
+        while pending:
+            scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in pending]
+            more, starved = [], []
+            for scope in await catchup.sync(self.client, scopes):
+                channel_id = scope["channel_id"]
+                if scope["messages"]:
+                    await self._replay_page(channel_id, scope["messages"])
+                elif scope["reset"]:
+                    await catchup.jump_to_latest(self.client, self._cursor_conn, channel_id)
+                    continue
+                if scope.get("has_more"):
+                    (more if scope["messages"] else starved).append(channel_id)
+            # A scope the shared response budget left empty can only get a page once another scope has used one.
+            pending = more + (starved if more else [])
+
+    async def _replay_page(self, channel_id: str, messages: list[dict[str, Any]]) -> None:
+        assert self._cursor_conn is not None
+        for message in messages:
+            await guard_dispatch(self.process_message, message)
+        cursor.set(self._cursor_conn, channel_id, messages[-1]["seq"])
 
     async def _connect_once(self, reset_delay: Callable[[], None]) -> None:
         assert self.client is not None and self.space is not None, "_connect_once needs start() to have run"
