@@ -178,6 +178,12 @@ def test_a_film_is_decoded_and_paced_at_its_own_rate():
     assert args[args.index("-vf") + 1].endswith(",fps=24000/1001")
 
 
+def test_the_video_decode_runs_on_a_fixed_small_thread_count():
+    args = stream_session.build_video_args("http://jf/x", "", width=1920, height=1072, fps=24)
+    assert args.index("-threads") < args.index("-i"), "a -threads after -i sets the encoder, not the decoder"
+    assert args[args.index("-threads") + 1] == str(stream_session.DECODE_THREADS)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

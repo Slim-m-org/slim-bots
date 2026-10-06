@@ -24,6 +24,7 @@ AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 m
 ROSTER_POLL_SECONDS = 20
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
+DECODE_THREADS = 2  # ffmpeg's one-thread-per-core default held 291 MB at 1080p for the same CPU as two threads at 173 MB
 
 
 class StreamError(Exception):
@@ -41,8 +42,8 @@ def build_video_args(url, headers, *, width, height, fps):
     """Letterboxes Jellyfin's own aspect-preserving transcode into an exact WxH - the size `VideoSource` publishes."""
     filters = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
     return [
-        ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-headers", headers, "-i", url,
-        "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
+        ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-threads", str(DECODE_THREADS),
+        "-headers", headers, "-i", url, "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
     ]
 
 
