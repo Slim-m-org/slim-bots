@@ -7,12 +7,20 @@ import asyncio
 import logging
 
 from slimbots import ApiError
+from slimbots.hidden_chars import is_hidden_char
 
 log = logging.getLogger("jellyfin.watch_sync")
 
 TICK_SECONDS = 5.0
 # The server refills one write per 2 seconds after a burst of 4, so a mashed control must not outrun it.
 MIN_GAP_SECONDS = 2.0
+MAX_TITLE_CHARS = 200  # the server's watch-session title cap
+
+
+def wire_title(title):
+    """What the server accepts: no hidden characters, trimmed, at most 200 characters, never blank."""
+    visible = "".join(char for char in title if not is_hidden_char(char)).strip()
+    return visible[:MAX_TITLE_CHARS].strip() or "Unknown title"
 
 
 class WatchSync:
@@ -89,7 +97,7 @@ class WatchSync:
         session = self.session
         channel_id, playing, position_ms = self._sample()
         await session.bot.client.set_watch_session(
-            channel_id, item_id=session.item_id, title=session.title, playing=playing, position_ms=position_ms,
+            channel_id, item_id=session.item_id, title=wire_title(session.title), playing=playing, position_ms=position_ms,
             duration_ms=int(session.duration_seconds * 1000) or None, seeked=seeked, controller_user_id=self._controller,
         )
 
