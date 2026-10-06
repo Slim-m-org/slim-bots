@@ -3,6 +3,12 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.9.6
+
+- The catch-up after a restart pages through `/sync` instead of stopping at one page, so a bot that was down through a busy stretch replays everything it missed, and a scope the server resets jumps to the latest message instead of replaying old history.
+- `role.changed` and `member.role_changed` frames refresh a bot's cached permissions (`Space.reapply_roles`), so a role change no longer needs a restart to take effect.
+- `Store.run` rolls back a transaction left open when the function it runs raises, so the next run does not fail on a dangling transaction.
+
 ## 0.9.5
 
 - `publish_screen_share` publishes without simulcast by default, with `simulcast=True` to ask for it. livekit defaulted it on, and a screen share's low layer runs at 3 fps, so a small tile at 1080p got a slideshow.
