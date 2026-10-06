@@ -226,6 +226,10 @@ a crash between sending a batch and recording it just repeats that one
 fetch, rebuilds the identical group, and sends under the same deterministic
 message id.
 
+The cursor also never moves past the oldest item that has not been sent yet.
+Posts go out in grouped order, not date order, so without that a failed older
+post would be left behind a newer one that had already landed and never retried.
+
 ## Output
 
 A post with a poster is the poster as a slim-m attachment plus a small

@@ -190,6 +190,11 @@ def advance_cursor(conn, value):
     conn.commit()
 
 
+def cursor_below_unsent(target, unsent_items):
+    """`target`, held back to the oldest unsent item: the next poll reads from the cursor, so passing one would drop it."""
+    return min([target, *(item["DateCreated"] for item in unsent_items)])
+
+
 def already_posted(conn, item_id):
     return conn.execute("SELECT 1 FROM posted_items WHERE item_id = ?", (item_id,)).fetchone() is not None
 
