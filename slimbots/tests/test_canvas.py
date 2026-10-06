@@ -13,6 +13,13 @@ async def test_place_posts_to_canvas_objects():
     assert client.calls[-1][2]["props"] == {"text": "hi"}
 
 
+async def test_place_without_props_still_sends_the_required_props_field():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/canvas/objects", {"id": "o1", "seq": 1})
+    await Canvas(client, "c1").place("shape", x=0, y=0, w=10, h=10)
+    assert client.calls[-1][2]["props"] == {}
+
+
 async def test_move_posts_a_move_op():
     client = FakeAsyncClient()
     client.respond("POST", "/channels/c1/canvas/ops", None)
