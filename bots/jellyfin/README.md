@@ -173,7 +173,7 @@ what actually limits going past 720p; see below.
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |
 | `JELLYFIN_STREAM_WIDTH` | `1280` | The published video width; Jellyfin's own aspect ratio is letterboxed into this. |
 | `JELLYFIN_STREAM_HEIGHT` | `720` | The published video height. |
-| `JELLYFIN_STREAM_FPS` | `30` | The published frame rate. |
+| `JELLYFIN_STREAM_FPS` | `30` | The highest published frame rate. A title plays at its own rate, or the largest whole fraction of it under this (a 23.976 fps film at 23.976, 50 fps at 25), so no frame is shown twice. |
 | `JELLYFIN_STREAM_MAX_BITRATE` | `8000000` | The `VideoBitrate` Jellyfin is asked to transcode at, in bits/second. |
 | `JELLYFIN_STREAM_WEBRTC_MAX_BITRATE` | `JELLYFIN_STREAM_MAX_BITRATE` | The ceiling on LiveKit's own re-encode of the decoded frames, in bits/second. Defaults to whatever `JELLYFIN_STREAM_MAX_BITRATE` resolves to, so raising one without the other no longer throws away the extra quality. |
 | `JELLYFIN_STREAM_AUDIO_MAX_BITRATE` | `128000` | The ceiling on LiveKit's Opus re-encode of the decoded PCM audio, in bits/second. The unset default is speech-call-tuned and noticeably worse for movie audio. |

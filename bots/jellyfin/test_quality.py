@@ -3,6 +3,7 @@
 
 import os
 import sys
+from fractions import Fraction
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -153,6 +154,28 @@ def test_the_stream_url_and_np_embed_follow_the_preset():
         assert fields["quality"] == "medium (1280x720, up to 4000 kbps)"
     finally:
         session_registry.clear()
+
+
+def _with_rate(rate):
+    return {"Id": "m1", "Name": "film", "MediaStreams": [{"Type": "Audio"}, {"Type": "Video", "RealFrameRate": rate}]}
+
+
+def test_playback_fps_keeps_the_titles_own_rate_or_a_whole_fraction_of_it():
+    assert quality.playback_fps(_with_rate(23.976025), 30) == Fraction(24000, 1001)
+    assert quality.playback_fps(_with_rate(25.0), 30) == 25
+    assert quality.playback_fps(_with_rate(29.97003), 30) == Fraction(30000, 1001)
+    assert quality.playback_fps(_with_rate(50.0), 30) == 25
+    assert quality.playback_fps(_with_rate(59.94006), 30) == Fraction(30000, 1001)
+    assert quality.playback_fps(_with_rate(60.0), 30) == 30
+    assert quality.playback_fps({"MediaStreams": []}, 30) == 30
+    assert quality.playback_fps(_with_rate(None), 24) == 24
+
+
+def test_a_film_is_decoded_and_paced_at_its_own_rate():
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", _with_rate(23.976025), "u1", FakeVoiceSession("c1"))
+    args = stream_session.build_video_args("http://jf/x", "", width=1280, height=720, fps=session.fps)
+    assert session.fps == Fraction(24000, 1001)
+    assert args[args.index("-vf") + 1].endswith(",fps=24000/1001")
 
 
 if __name__ == "__main__":

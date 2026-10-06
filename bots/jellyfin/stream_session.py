@@ -14,7 +14,7 @@ from slimbots import Embed
 import jellyfin_core
 import playback_progress
 from pump_sync import StartLine, reap
-from quality import Quality, configured_default
+from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
 
 AUDIO_SAMPLE_RATE = 48000
@@ -124,6 +124,7 @@ class WatchSession:
         self.item_id = item["Id"]
         self.title = item.get("Name") or "Unknown title"
         self.duration_seconds = (item.get("RunTimeTicks") or 0) / 10_000_000
+        self.fps = playback_fps(item, jellyfin_core.JELLYFIN_STREAM_FPS)
         self.audio_stream_index = None
         self.subtitle_stream_index = None
         self.subtitle_label = None
@@ -170,7 +171,7 @@ class WatchSession:
             )
             headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
             width, height = self.quality.frame_size
-            video_args = build_video_args(url, headers, width=width, height=height, fps=jellyfin_core.JELLYFIN_STREAM_FPS)
+            video_args = build_video_args(url, headers, width=width, height=height, fps=self.fps)
             audio_args = build_audio_args(url, headers)
             for args in (video_args, audio_args):
                 processes.append(await asyncio.create_subprocess_exec(
@@ -194,12 +195,12 @@ class WatchSession:
         self._audio_task = asyncio.create_task(self._pump_audio(self._audio_process), name="jellyfin-audio-pump")
 
     async def _pump_video(self, process):
-        """Reads fixed-size I420 frames and paces them to `JELLYFIN_STREAM_FPS`; pausing just stops reading the pipe,
+        """Reads fixed-size I420 frames and paces them to the title's frame rate; pausing just stops reading the pipe,
         so ffmpeg blocks on its own full pipe buffer instead of needing a separate pause signal."""
         rtc = self.voice_session.rtc
         width, height = self.quality.frame_size
         frame_size = frame_byte_size(width, height)
-        frame_interval = 1.0 / jellyfin_core.JELLYFIN_STREAM_FPS
+        frame_interval = 1.0 / float(self.fps)
         frame_index = 0
         start = None
         start_line = self._start_line
