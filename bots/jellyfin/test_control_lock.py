@@ -67,8 +67,26 @@ def race_a_press_against(typed_command):
     return live[0]
 
 
+def clean_pipeline():
+    live = []
+
+    @ts.with_rig
+    def run(rig):
+        async def scenario():
+            await rig.start()
+            shape = live_pipeline(rig)
+            await rig.session._teardown_pipeline()
+            return shape
+
+        live.append(rig.run(scenario()))
+
+    run()
+    return live[0]
+
+
 def test_a_typed_seek_racing_a_panel_press_leaves_one_pipeline():
-    assert race_a_press_against(lambda ctx: watch_cog.run_seek(ctx, "1:00")) == (2, 2)
+    raced = race_a_press_against(lambda ctx: watch_cog.run_seek(ctx, "1:00"))
+    assert raced == clean_pipeline()
 
 
 if __name__ == "__main__":

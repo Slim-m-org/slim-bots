@@ -16,6 +16,9 @@ from test_bot import jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
 class Exited:
     returncode = 0
 
+    async def communicate(self):
+        return b"", b""
+
 
 def test_an_empty_call_while_waiting_for_next_leaves_the_room_without_cancelling_the_monitor():
     setup_with_voice()
