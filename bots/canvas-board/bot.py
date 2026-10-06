@@ -278,10 +278,19 @@ async def on_canvas_cleared(frame):
     await bot.store.run(_txn_deactivate_before_seq, frame.get("before_seq"))
 
 
+async def _refuse_to_start(err):
+    """A handler's own exception is swallowed; one out of a background task stops the bot."""
+    raise err
+
+
 @bot.event
 async def on_connect():
     global canvas, canvas_channel_name
-    channel = resolve_canvas_channel()
+    try:
+        channel = resolve_canvas_channel()
+    except RuntimeError as err:
+        bot.background(_refuse_to_start(err), name="canvas-board-config")
+        return
     canvas_channel_name = channel.name
     canvas = bot.canvas(channel.id)
     await reconcile()
