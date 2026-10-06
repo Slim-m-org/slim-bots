@@ -26,6 +26,8 @@ def message(author_id, content, msg_id="m1"):
 
 
 def setup(*, my_permissions=32):  # MANAGE_ROLES
+    roles.ROLES.clear()
+    roles.ROLES.update({"member": "r-member", "helper": "r-helper"})
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/roles", ROLE_DEFS)
@@ -83,6 +85,36 @@ def test_role_replies_name_the_configured_prefix():
 def test_the_roles_setting_parses_into_an_ordered_name_to_id_map():
     assert roles.ROLES == {"member": "r-member", "helper": "r-helper"}
     assert list(roles.ROLES) == ["member", "helper"]
+
+
+def with_roles(mapping):
+    roles.ROLES.clear()
+    roles.ROLES.update(mapping)
+
+
+def test_a_multi_word_role_name_can_be_requested_and_removed():
+    client = setup()
+    with_roles({"Game Night": "r-member"})
+    client.respond("PUT", "/members/u1/roles/r-member", None)
+    client.respond("DELETE", "/members/u1/roles/r-member", None)
+    process(client, message("u1", "!role Game Night"))
+    assert "you have `Game Night` now" in client.sent[-1]["content"], client.sent[-1]["content"]
+    process(client, message("u1", "!role remove game  night", "m2"))
+    assert "removed `Game Night`" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_role_lookup_ignores_case():
+    client = setup()
+    with_roles({"gamer": "r-member"})
+    client.respond("PUT", "/members/u1/roles/r-member", None)
+    process(client, message("u1", "!role GAMER"))
+    assert "you have `gamer` now" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_names_the_subcommands_or_one_another_are_refused_at_startup():
+    assert roles.unusable_role_names({"member": "a", "Mine": "b", "remove": "c", "Remove x": "d"}) == ["Mine", "remove", "Remove x"]
+    assert roles.unusable_role_names({"Gamer": "a", "gamer": "b"}) == ["gamer"]
+    assert roles.unusable_role_names({"member": "a", "Game Night": "b"}) == []
 
 
 def test_role_refuses_an_unlisted_name():

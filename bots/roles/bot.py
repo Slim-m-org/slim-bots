@@ -14,6 +14,27 @@ bot = Bot(prefix="!", require_channels=True)
 ROLES = bot.setting("SLIMM_ROLES", {}, type=dict)
 
 
+def normalize(name):
+    return " ".join(name.split()).casefold()
+
+
+def find_role(name):
+    """The configured (name, id) a typed name means, matched ignoring case and spacing, or None."""
+    wanted = normalize(name)
+    return next(((known, role_id) for known, role_id in ROLES.items() if normalize(known) == wanted), None)
+
+
+def unusable_role_names(mapping):
+    """Names nobody could type: a subcommand word, or a repeat of an earlier name once case is ignored."""
+    seen, bad = set(), []
+    for name in mapping:
+        key = normalize(name)
+        if key in ("mine", "remove") or key.startswith("remove ") or key in seen:
+            bad.append(name)
+        seen.add(key)
+    return bad
+
+
 def listing_message_id():
     return str(uuid.uuid5(LISTING_NAMESPACE, bot.channel))
 
@@ -82,11 +103,12 @@ async def escalation_explanation(role_name, role_id):
     )
 
 
-async def grant(ctx, role_name):
-    role_id = ROLES.get(role_name)
-    if role_id is None:
-        await ctx.reply(f"no role called `{role_name}` is offered here - try `{bot.prefix}roles`.")
+async def grant(ctx, typed):
+    found = find_role(typed)
+    if found is None:
+        await ctx.reply(f"no role called `{typed}` is offered here - try `{bot.prefix}roles`.")
         return
+    role_name, role_id = found
     try:
         await bot.space.grant_role(ctx.author, role_id)
     except ApiError as err:
@@ -100,11 +122,12 @@ async def grant(ctx, role_name):
     await ctx.reply(f"done - you have `{role_name}` now.")
 
 
-async def revoke(ctx, role_name):
-    role_id = ROLES.get(role_name)
-    if role_id is None:
-        await ctx.reply(f"no role called `{role_name}` is offered here - try `{bot.prefix}roles`.")
+async def revoke(ctx, typed):
+    found = find_role(typed)
+    if found is None:
+        await ctx.reply(f"no role called `{typed}` is offered here - try `{bot.prefix}roles`.")
         return
+    role_name, role_id = found
     try:
         await bot.space.revoke_role(ctx.author, role_id)
     except ApiError as err:
@@ -151,15 +174,15 @@ async def roles_cmd(ctx, sub: str = None):
 
 
 @bot.command(name="role", help="Add a role, `remove <name>` to drop it, `mine` to see what you hold", usage="<name> | remove <name> | mine")
-async def role_cmd(ctx, first: str, second: str = None):
-    action = first.lower()
-    if action == "mine":
+async def role_cmd(ctx, name: str):
+    action, _, rest = name.strip().partition(" ")
+    if normalize(name) == "mine":
         await show_mine(ctx)
         return
-    if action == "remove" and second:
-        await revoke(ctx, second)
+    if action.lower() == "remove" and rest.strip():
+        await revoke(ctx, rest.strip())
         return
-    await grant(ctx, first)
+    await grant(ctx, name.strip())
 
 
 @bot.event
@@ -170,6 +193,8 @@ async def on_connect():
 def main():
     if not ROLES:
         raise SystemExit("set SLIMM_ROLES")
+    if unusable := unusable_role_names(ROLES):
+        raise SystemExit(f"SLIMM_ROLES has names that cannot be requested (a subcommand word or a case-insensitive repeat): {', '.join(unusable)}")
     try:
         raise SystemExit(bot.run() or 0)
     except RuntimeError as err:
