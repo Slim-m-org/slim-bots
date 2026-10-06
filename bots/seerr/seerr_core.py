@@ -123,7 +123,11 @@ def media_details(media_type, tmdb_id):
     except urllib.error.HTTPError:
         data = {}
     date = data.get("firstAirDate") or data.get("releaseDate") or ""
-    return {"title": data.get("name") or data.get("title") or f"tmdb {tmdb_id}", "year": date[:4]}
+    return {"title": data.get("name") or data.get("title") or placeholder_details(tmdb_id)["title"], "year": date[:4]}
+
+
+def placeholder_details(tmdb_id):
+    return {"title": f"tmdb {tmdb_id}", "year": ""}
 
 
 def bootstrap(conn, requests):
@@ -149,6 +153,16 @@ def request_events(request):
     elif media.get("status") == MEDIA_PARTIAL:
         events.append(("partial", f"{base}|partial"))
     return events
+
+
+def fresh_media(conn, requests):
+    """The distinct `(media_type, tmdb_id)` pairs whose requests have something unannounced, so they are fetched once."""
+    wanted = {}
+    for request in requests:
+        if any(not is_announced(conn, key) for _kind, key in request_events(request)):
+            media = request.get("media") or {}
+            wanted[(media.get("mediaType"), media.get("tmdbId"))] = None
+    return list(wanted)
 
 
 def plan_posts(conn, requests, details=media_details):

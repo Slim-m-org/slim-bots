@@ -32,7 +32,9 @@ async def poll_once():
     requests = await asyncio.to_thread(seerr_core.fetch_recent_requests)
     if await bot.store.run(seerr_core.bootstrap, requests):
         return
-    for post in await bot.store.run(seerr_core.plan_posts, requests):
+    wanted = await bot.store.run(seerr_core.fresh_media, requests)
+    infos = {pair: await asyncio.to_thread(seerr_core.media_details, *pair) for pair in wanted}
+    for post in await bot.store.run(seerr_core.plan_posts, requests, lambda kind, tmdb_id: infos[(kind, tmdb_id)]):
         try:
             await send_post(post)
         except ApiError as err:
