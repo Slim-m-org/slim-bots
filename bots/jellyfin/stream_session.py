@@ -136,8 +136,9 @@ class WatchSession:
         self._wake_monitor.set()
 
     async def _publish(self):
+        width, height = self.quality.frame_size
         self._video_source, self._audio_source = await self.voice_session.publish_screen_share(
-            width=self.quality.width, height=self.quality.height,
+            width=width, height=height,
             sample_rate=AUDIO_SAMPLE_RATE, num_channels=AUDIO_CHANNELS,
             video_max_bitrate=self.quality.publish_bitrate,
             video_max_framerate=float(jellyfin_core.JELLYFIN_STREAM_FPS),
@@ -170,9 +171,8 @@ class WatchSession:
                 video_bitrate=self.quality.video_bitrate, play_session_id=uuid.uuid4().hex,
             )
             headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
-            video_args = build_video_args(
-                url, headers, video_fifo, width=self.quality.width, height=self.quality.height, fps=jellyfin_core.JELLYFIN_STREAM_FPS,
-            )
+            width, height = self.quality.frame_size
+            video_args = build_video_args(url, headers, video_fifo, width=width, height=height, fps=jellyfin_core.JELLYFIN_STREAM_FPS)
             audio_args = build_audio_args(url, headers, audio_fifo)
             for args in (video_args, audio_args):
                 processes.append(await asyncio.create_subprocess_exec(
@@ -200,7 +200,7 @@ class WatchSession:
         """Reads fixed-size I420 frames and paces them to `JELLYFIN_STREAM_FPS`; pausing just stops reading the fifo,
         so ffmpeg blocks on its own full pipe buffer instead of needing a separate pause signal."""
         rtc = self.voice_session.rtc
-        width, height = self.quality.width, self.quality.height
+        width, height = self.quality.frame_size
         frame_size = frame_byte_size(width, height)
         frame_interval = 1.0 / jellyfin_core.JELLYFIN_STREAM_FPS
         handle = await asyncio.to_thread(open, fifo_path, "rb")

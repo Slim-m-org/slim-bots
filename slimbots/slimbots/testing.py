@@ -135,7 +135,7 @@ class FakeVoiceSession:
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
         video_max_bitrate: int | None = None, video_max_framerate: float | None = None,
-        audio_max_bitrate: int | None = None,
+        audio_max_bitrate: int | None = None, simulcast: bool = False,
     ) -> tuple[Any, Any]:
         if not self.can_publish:
             raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
@@ -143,7 +143,7 @@ class FakeVoiceSession:
         self.published = {
             "width": width, "height": height, "sample_rate": sample_rate, "num_channels": num_channels,
             "video_max_bitrate": video_max_bitrate, "video_max_framerate": video_max_framerate,
-            "audio_max_bitrate": audio_max_bitrate,
+            "audio_max_bitrate": audio_max_bitrate, "simulcast": simulcast,
         }
         return FakeVideoSource(), FakeAudioSource()
 

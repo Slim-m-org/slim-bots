@@ -108,6 +108,30 @@ def test_a_1080p_preset_warns_about_the_cpu_cost():
     assert quality.HEAVY_WARNING in client.sent[-1]["content"]
 
 
+def test_the_high_preset_publishes_just_under_the_vp8_eight_thread_cutoff():
+    client = setup_with_voice()
+    voice_session = FakeVoiceSession("c1")
+    running_session(voice_session)
+    original = patch_pipeline()
+    try:
+        process(client, message("!quality high"))
+    finally:
+        restore_pipeline(original)
+    width, height = voice_session.published["width"], voice_session.published["height"]
+    assert (width, height) == (1920, 1072)
+    assert width * height < quality.VP8_EIGHT_THREAD_AREA
+
+
+def test_only_a_1080p_class_size_is_trimmed():
+    assert quality.below_vp8_thread_jump(1920, 1080) == (1920, 1072)
+    assert quality.below_vp8_thread_jump(1920, 1088) == (1920, 1072)
+    assert quality.below_vp8_thread_jump(1920, 1072) == (1920, 1072)
+    assert quality.below_vp8_thread_jump(1280, 720) == (1280, 720)
+    assert quality.below_vp8_thread_jump(2560, 1440) == (2560, 1440)
+    assert quality.PRESETS["high"].frame_size == (1920, 1072)
+    assert quality.PRESETS["medium"].frame_size == (1280, 720)
+
+
 def test_a_failed_republish_is_reported_not_raised():
     client = setup_with_voice()
     running_session(FakeVoiceSession("c1", can_publish=False))
