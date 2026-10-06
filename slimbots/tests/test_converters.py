@@ -40,3 +40,10 @@ def test_time_of_day_rejects_out_of_range_and_malformed():
     assert TimeOfDay.parse("noon") is None
     assert TimeOfDay.parse("12") is None
     assert TimeOfDay.parse("") is None
+
+
+def test_a_non_ascii_digit_is_not_a_duration_or_a_time_of_day():
+    for text in ("²m", "٣m", "1h²m"):
+        assert Duration.parse(text) is None
+    for text in ("²:00", "10:٣٠", "١٠:00"):
+        assert TimeOfDay.parse(text) is None

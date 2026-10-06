@@ -73,5 +73,8 @@ def next_interval(last_due_at, interval_seconds, now_epoch):
 
 
 def format_local(epoch_seconds, tz_name):
-    tz = ZoneInfo(tz_name)
-    return dt.datetime.fromtimestamp(epoch_seconds, tz).strftime("%Y-%m-%d %H:%M %Z")
+    """The time in `tz_name`, or a plain sentence for an epoch no calendar can show, so one bad row never kills a listing."""
+    try:
+        return dt.datetime.fromtimestamp(epoch_seconds, ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M %Z")
+    except (ValueError, OverflowError, OSError):
+        return "a date too far away to show"

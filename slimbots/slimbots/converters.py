@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 _DURATION_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+_ASCII_DIGITS = frozenset("0123456789")
+
+
+def _is_ascii_number(text: str) -> bool:
+    """`str.isdigit()` also accepts superscripts and other scripts' digits that `int()` then refuses."""
+    return bool(text) and set(text) <= _ASCII_DIGITS
 
 
 class Duration(int):
@@ -15,7 +21,7 @@ class Duration(int):
         matched_anything = False
         while rest:
             digits = ""
-            while rest and rest[0].isdigit():
+            while rest and rest[0] in _ASCII_DIGITS:
                 digits += rest[0]
                 rest = rest[1:]
             if not digits or not rest or rest[0] not in _DURATION_UNIT_SECONDS:
@@ -36,7 +42,7 @@ class TimeOfDay:
     @classmethod
     def parse(cls, token: str) -> TimeOfDay | None:
         hour_text, sep, minute_text = token.partition(":")
-        if not sep or not hour_text.isdigit() or not minute_text.isdigit():
+        if not sep or not _is_ascii_number(hour_text) or not _is_ascii_number(minute_text):
             return None
         hour, minute = int(hour_text), int(minute_text)
         if not (0 <= hour < 24 and 0 <= minute < 60):
