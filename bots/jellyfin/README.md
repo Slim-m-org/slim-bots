@@ -106,6 +106,10 @@ asked to join the call they mean if several are.
 - `!pause` / `!resume` - stops or resumes reading the decoded stream;
   ffmpeg blocks on its own full pipe buffer while paused, so it costs no
   CPU and resumes exactly where it left off.
+- A title ends only when the video `ffmpeg` exits cleanly within a few seconds of its runtime.
+  Any other end of the stream (Jellyfin refusing it, a cut connection, a crash) stops the party with "the stream dropped",
+  reports the position it reached, and leaves the title unwatched; `!watch` resumes it.
+  A title with no audio stream keeps playing its video in silence.
 - `!seek <h:mm:ss>` - restarts the transcode at a new position (`mm:ss`
   and a bare second count also work).
 - `!np` - an embed with title, position, duration, and subtitle state.
