@@ -54,6 +54,7 @@ The highlights channel itself is never a source, even if it is listed.
 - Editing the original updates the quote.
   Deleting the original deletes the highlight and forgets it.
 - The digest lists the top highlights starred since the last digest, by count.
+- A digest that cannot be sent (a deleted channel, a lost permission) is logged and tried again on the next hourly pass; highlighting and pruning carry on, and only a revoked token stops the bot.
   The first run only starts the clock, and a week with no highlights posts nothing.
 
 ## What this deliberately does not do
