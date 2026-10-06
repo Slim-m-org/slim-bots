@@ -72,7 +72,7 @@ One line each way, by construction: neither name is spelled `id`, so a bot canno
 
 ## The Space model
 
-`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect and reloadable on demand:
+`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed` and `member.role_changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
 
 - `space.get_member(id_or_name)`, `space.get_channel(...)`, `space.get_role(...)`
 - `await space.refresh_members()` / `refresh_channels()` / `refresh_roles()`

@@ -425,6 +425,25 @@ class Bot:
         elif kind in _VISIBILITY_FRAMES and (kind != "member.role_changed" or frame.get("user_id") == self.me_id):
             await self._refresh_channels_guarded()
 
+    async def _track_roles(self, kind: str, frame: dict[str, Any]) -> None:
+        """Keeps the cached roles and members current, so a `requires=` check never trusts a revoked or missing role."""
+        if self.space is None:
+            return
+        if kind == "role.changed":
+            await guard_dispatch(self._reload_roles)
+        elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
+            await guard_dispatch(self.space.fetch_member, frame["user_id"])
+
+    async def _reload_roles(self) -> None:
+        assert self.space is not None
+        try:
+            await self.space.refresh_roles()
+        except ApiError as err:
+            if not is_forbidden(err):
+                raise
+            return
+        self.space.reapply_roles()
+
     async def _apply_channel_frame(self, frame: dict[str, Any]) -> None:
         assert self.space is not None
         self.space.apply_channel_frame(frame)
@@ -466,6 +485,7 @@ class Bot:
         kind: str = frame.get("type") or ""
         await guard_dispatch(self._dispatch_event, "on_frame", frame)
         await self._track_channels(kind, frame)
+        await self._track_roles(kind, frame)
         if kind == "message.created":
             channel_id = frame.get("channel_id")
             if not await self._accepts_channel(channel_id, kind):
