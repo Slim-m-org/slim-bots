@@ -287,3 +287,29 @@ def test_unpublish_screen_share_takes_down_both_tracks_once(monkeypatch: pytest.
         session._heartbeat_task.cancel()
 
     asyncio.run(run())
+
+
+def test_a_failed_audio_publish_takes_the_video_track_back_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    bot, client, room = make_bot()
+    calls = {"n": 0}
+    original = room.local_participant.publish_track
+
+    async def refuse_the_second(track: Any, options: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("audio publish refused")
+        return await original(track, options)
+
+    room.local_participant.publish_track = refuse_the_second  # type: ignore[method-assign]
+    monkeypatch.setattr(voice_module, "load_rtc", lambda: fake_rtc_module(room))
+
+    async def run() -> None:
+        session = await bot.voice.join("c1")
+        with pytest.raises(RuntimeError):
+            await session.publish_screen_share(width=1280, height=720)
+        assert room.local_participant.unpublished == ["pub-1"]
+        await session.unpublish_screen_share()
+        assert room.local_participant.unpublished == ["pub-1"]
+        session._heartbeat_task.cancel()
+
+    asyncio.run(run())
