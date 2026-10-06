@@ -146,7 +146,7 @@ Video is Jellyfin's own server-side transcode
 local `ffmpeg` (a system binary - not pip-installed, and not in the
 hash-locked CI requirements since the test suite never spawns it) into
 raw I420 frames letterboxed to `JELLYFIN_STREAM_WIDTH`x`JELLYFIN_STREAM_HEIGHT`
-and PCM audio, published through `bot.voice`'s `SOURCE_SCREENSHARE`/
+and PCM audio (one ffmpeg, video on stdout and audio on a second pipe), published through `bot.voice`'s `SOURCE_SCREENSHARE`/
 `SOURCE_SCREENSHARE_AUDIO` tracks - see `stream_session.py`.
 Picture and sound start together: each pump holds its first chunk until
 the other has one (`pump_sync.StartLine`), since Jellyfin takes a second

@@ -24,18 +24,15 @@ FRAME_BYTES = stream_session.frame_byte_size(WIDTH, HEIGHT)
 FRAMES = 5
 
 STAND_IN = """#!/bin/sh
-audio=0
-case " $* " in *" -vn "*) audio=1;; esac
+audio=/dev/null
+for out; do case "$out" in pipe:1) ;; pipe:*) audio=/dev/fd/${out#pipe:};; esac; done
 case "$STAND_IN_MODE" in
 dead) exit 1;;
-endless) exec cat /dev/zero;;
-slowstart) sleep 0.6; exec cat /dev/zero;;
-lateaudio) [ $audio = 1 ] && sleep 0.6; exec cat /dev/zero;;
-noaudio) [ $audio = 1 ] && exit 1; exec sleep 30;;
+endless) cat /dev/zero > "$audio" & exec cat /dev/zero;;
+slowstart) sleep 0.6; cat /dev/zero > "$audio" & exec cat /dev/zero;;
+lateaudio) (sleep 0.6; exec cat /dev/zero > "$audio") & exec cat /dev/zero;;
 *)
-  [ $audio = 1 ] && exec sleep 30
-  for out; do :; done
-  if [ "$out" = pipe:1 ]; then head -c $((FRAME_BYTES * FRAMES)) /dev/zero; else head -c $((FRAME_BYTES * FRAMES)) /dev/zero > "$out"; fi
+  head -c $((FRAME_BYTES * FRAMES)) /dev/zero
   [ "$STAND_IN_MODE" = clean ] && exit 0
   exit 1;;
 esac
@@ -147,20 +144,30 @@ def test_a_clean_exit_at_the_end_of_the_title_still_finishes_it():
 
 
 def test_a_title_with_no_audio_stream_keeps_playing_its_video():
-    rig = Rig("noaudio")
+    rig = Rig("endless")
+    rig.session.item["MediaStreams"] = [{"Type": "Video", "RealFrameRate": 30}]
 
     async def scenario():
         await rig.session._publish()
         await rig.session._start_pipeline(0.0)
         await asyncio.sleep(0.5)
         alive = not rig.session.finished
+        frames = rig.session._video_source.frame_count
         await rig.session._teardown_pipeline()
-        return alive
+        return alive, frames
 
     try:
-        assert asyncio.run(scenario())
+        alive, frames = asyncio.run(scenario())
+        assert alive and frames > 0, (alive, frames)
     finally:
         rig.close()
+
+
+def test_one_ffmpeg_reads_the_transcode_for_both_tracks():
+    args = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30, audio_fd=7)
+    assert args.count("-i") == 1
+    assert args[-1] == "pipe:7" and "pipe:1" in args
+    assert "pipe:7" not in stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30)
 
 
 def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():
@@ -170,7 +177,7 @@ def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():
         await rig.session._publish()
         await rig.session._start_pipeline(0.0)
         await asyncio.sleep(0.5)
-        old = (rig.session._video_process, rig.session._audio_process)
+        old = (rig.session._video_process,)
         await asyncio.wait_for(rig.session.seek(60.0), timeout=5)
         await asyncio.sleep(0.5)
         await asyncio.wait_for(rig.session.stop(), timeout=5)

@@ -173,13 +173,13 @@ def test_playback_fps_keeps_the_titles_own_rate_or_a_whole_fraction_of_it():
 
 def test_a_film_is_decoded_and_paced_at_its_own_rate():
     session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", _with_rate(23.976025), "u1", FakeVoiceSession("c1"))
-    args = stream_session.build_video_args("http://jf/x", "", width=1280, height=720, fps=session.fps)
+    args = stream_session.build_args("http://jf/x", "", width=1280, height=720, fps=session.fps)
     assert session.fps == Fraction(24000, 1001)
     assert args[args.index("-vf") + 1].endswith(",fps=24000/1001")
 
 
 def test_the_video_decode_runs_on_a_fixed_small_thread_count():
-    args = stream_session.build_video_args("http://jf/x", "", width=1920, height=1072, fps=24)
+    args = stream_session.build_args("http://jf/x", "", width=1920, height=1072, fps=24)
     assert args.index("-threads") < args.index("-i"), "a -threads after -i sets the encoder, not the decoder"
     assert args[args.index("-threads") + 1] == str(stream_session.DECODE_THREADS)
 

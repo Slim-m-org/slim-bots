@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 
 START_WAIT_SECONDS = 3  # how long one pump holds its first chunk for the other; a title with no audio never sends any
 
@@ -15,6 +16,25 @@ async def reap(process):
             process.kill()
     with contextlib.suppress(ProcessLookupError):
         await process.communicate()
+
+
+class AudioPipe:
+    """The read end of the ffmpeg's extra audio output as a StreamReader; `stdout` so a pump reads it like a process."""
+
+    def __init__(self, reader, transport):
+        self.stdout = reader
+        self._transport = transport
+
+    @classmethod
+    async def open(cls, read_fd):
+        reader = asyncio.StreamReader()
+        transport, _protocol = await asyncio.get_running_loop().connect_read_pipe(
+            lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(read_fd, "rb", buffering=0),
+        )
+        return cls(reader, transport)
+
+    def close(self):
+        self._transport.close()
 
 
 class StartLine:
