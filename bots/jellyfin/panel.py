@@ -21,7 +21,7 @@ def _state_text(session):
     return None
 
 
-def panel_text(session, voice_name, *, ended_reason=None):
+def panel_text(session, *, ended_reason=None):
     """One short line; the position is only shown while paused, since the panel is not redrawn as it advances."""
     if ended_reason or session.finished:
         return f"{session.title} - ended"
@@ -70,27 +70,26 @@ def panel_rows(session, *, live=True):
 class Panel:
     """Posts and keeps up to date the one message whose buttons drive a party."""
 
-    def __init__(self, bot, channel_id, voice_name):
+    def __init__(self, bot, channel_id):
         self.bot = bot
         self.channel_id = channel_id
-        self.voice_name = voice_name
         self.message_id = None
         self._last = None
 
     async def post(self, session, reply_to_id=None):
         assert self.bot.client is not None
         message = await self.bot.client.send(
-            self.channel_id, panel_text(session, self.voice_name), reply_to_id=reply_to_id, components=panel_rows(session),
+            self.channel_id, panel_text(session), reply_to_id=reply_to_id, components=panel_rows(session),
         )
         self.message_id = message.id
-        self._last = (panel_text(session, self.voice_name), panel_rows(session))
+        self._last = (panel_text(session), panel_rows(session))
 
     async def refresh(self, session, *, ended_reason=None):
         """Best-effort: a failed edit must never interrupt playback."""
         if self.message_id is None:
             return
         live = ended_reason is None and not session.finished
-        text, layout = panel_text(session, self.voice_name, ended_reason=ended_reason), panel_rows(session, live=live)
+        text, layout = panel_text(session, ended_reason=ended_reason), panel_rows(session, live=live)
         previous_text, previous_layout = self._last or (None, None)
         with contextlib.suppress(ApiError):
             if text != previous_text:

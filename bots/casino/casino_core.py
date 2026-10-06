@@ -2,7 +2,6 @@
 Never imports `bot` (the entry point) - see "Splitting a bot across files" there for why."""
 
 import secrets
-import sqlite3
 import time
 
 import blackjack
@@ -22,14 +21,6 @@ SUITS = ["H", "D", "C", "S"]
 
 
 # --- durable state; test_concurrency.py imports these (via bot.py's re-export) by name, unchanged ---
-
-
-def open_db(path):
-    conn = sqlite3.connect(path, timeout=30, isolation_level=None)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    init_db(conn)
-    return conn
 
 
 def init_db(conn):

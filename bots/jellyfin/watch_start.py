@@ -113,7 +113,7 @@ async def launch(ctx, full_item, start_seconds):
         return
     session.jellyfin_user_id = await accounts.user_for(ctx.bot, ctx.author.id)
     session_registry.add(session)
-    session.panel = panel.Panel(ctx.bot, ctx.channel_id, voice_channel_name)
+    session.panel = panel.Panel(ctx.bot, ctx.channel_id)
     await session.panel.post(session, reply_to_id=ctx.message.get("id"))
 
 
