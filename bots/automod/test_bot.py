@@ -192,6 +192,33 @@ def test_a_refused_delete_with_no_timeout_logs_that_no_action_was_taken():
     assert "message deleted refused (403)" in text
 
 
+def _spam_link_with_refused_delete(client):
+    client.respond("DELETE", "/channels/c-chat/messages/m-refused", ApiError(403, "forbidden"))
+    frame = {"id": "m-refused", "channel_id": "c-chat", "author_id": "u1", "content": "https://evil.example", "seq": 1}
+    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": "c-chat", "message": frame}))
+
+
+def test_no_removed_notice_is_posted_when_the_delete_was_refused():
+    client = setup(LINK_POLICY="deny", LINK_DOMAINS=["evil.example"], LOG_CHANNEL="modlog")
+    _spam_link_with_refused_delete(client)
+    assert [s["content"] for s in client.sent if s["channel_id"] == "c-chat"] == []
+
+
+def test_a_failing_notice_send_still_reaches_the_modlog():
+    client = setup(LINK_POLICY="deny", LINK_DOMAINS=["evil.example"], LOG_CHANNEL="modlog")
+    orig = client.call
+
+    async def call(method, path, body=None, **kw):
+        if method == "POST" and path == "/channels/c-chat/messages":
+            raise ApiError(403, "forbidden")
+        return await orig(method, path, body, **kw)
+
+    client.call = call
+    frame = {"id": "m-ok", "channel_id": "c-chat", "author_id": "u1", "content": "https://evil.example", "seq": 1}
+    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": "c-chat", "message": frame}))
+    assert logged(client), "modlog never written"
+
+
 def test_no_log_channel_configured_means_no_log_post():
     client = setup(MENTION_LIMIT=1)
     say("@a @b")

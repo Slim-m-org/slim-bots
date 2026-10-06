@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """bot-automod: moderator-written rules (flood, links, words, mention spam) that act and log; see README.md."""
 
+import contextlib
 import sqlite3
 import time
 import uuid
@@ -150,11 +151,12 @@ async def enforce(message, member, channel_name, rule, reason, timeout_seconds):
     if timeout_seconds:
         timeout_call = bot.client.time_out_member(member.id, timeout_seconds, reason=f"automod: {rule}")
         outcomes.append(await _attempt(f"timed out {timeout_seconds}s", timeout_call))
-    else:
-        await bot.client.send(
-            message["channel_id"], f"{member.mention()}, that message was removed by automod ({rule}).",
-            message_id=str(uuid.uuid4()),
-        )
+    elif outcomes[0][1] is None:
+        with contextlib.suppress(ApiError):
+            await bot.client.send(
+                message["channel_id"], f"{member.mention()}, that message was removed by automod ({rule}).",
+                message_id=str(uuid.uuid4()),
+            )
     await bot.store.run(_log_action, rule)
     await write_modlog(_describe(member, channel_name, rule, reason, outcomes))
 
