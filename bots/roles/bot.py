@@ -12,8 +12,6 @@ LISTING_NAMESPACE = uuid.UUID("d1f6a9d0-0f0f-4b6a-9b0f-2f6b6f0f9a10")
 
 bot = Bot(prefix="!", require_channels=True)
 ROLES = bot.setting("SLIMM_ROLES", {}, type=dict)
-bot.my_permissions = 0
-_role_permissions_cache = {}
 
 
 def listing_message_id():
@@ -41,24 +39,26 @@ async def post_listing():
         await bot.client.send(bot.channel, listing_text(), message_id=message_id)
 
 
+async def my_permissions():
+    """The bot's own bits, read fresh: an admin grants them while it runs, and diagnostics must see that."""
+    return (await bot.client.me()).get("permissions", 0)
+
+
 async def fetch_role_permissions(role_id):
     """The configured role's own permission bits, or None if unreadable (needs MANAGE_ROLES, or the role is gone)."""
-    if role_id in _role_permissions_cache:
-        return _role_permissions_cache[role_id]
     try:
         roles = await bot.client.list_roles()
     except ApiError as err:
         if is_forbidden(err):
             return None
         raise
-    for role in roles:
-        _role_permissions_cache[role["id"]] = role["permissions"]
-    return _role_permissions_cache.get(role_id)
+    return next((role["permissions"] for role in roles if role["id"] == role_id), None)
 
 
 async def escalation_explanation(role_name, role_id):
     """Names the exact permission gap - a 403 alone cannot say which guard fired, so this asks `GET /roles` too."""
-    if not (bot.my_permissions & Permissions.MANAGE_ROLES):
+    held = await my_permissions()
+    if not (held & Permissions.MANAGE_ROLES):
         return (
             "I can't grant or remove any role here, not even a zero-permission one - I don't hold MANAGE_ROLES "
             "myself. An admin needs to grant this bot's own account MANAGE_ROLES before self-service roles can work at all."
@@ -69,7 +69,7 @@ async def escalation_explanation(role_name, role_id):
             f"I hold MANAGE_ROLES but still can't grant `{role_name}` - either it was deleted, or something else "
             "is wrong. An admin should check it still exists."
         )
-    missing = Permissions.names(role_permissions & ~bot.my_permissions)
+    missing = Permissions.names(role_permissions & ~held)
     if not missing:
         return (
             f"granting `{role_name}` was refused, but I hold everything it carries - an admin should check my "
@@ -126,8 +126,9 @@ async def show_mine(ctx):
 
 async def show_status(ctx):
     """The same diagnosis a failed grant gives, but on demand and for every configured role at once."""
-    lines = [f"I hold: {', '.join(Permissions.names(bot.my_permissions)) or 'nothing'}"]
-    if not (bot.my_permissions & Permissions.MANAGE_ROLES):
+    held = await my_permissions()
+    lines = [f"I hold: {', '.join(Permissions.names(held)) or 'nothing'}"]
+    if not (held & Permissions.MANAGE_ROLES):
         lines.append("MANAGE_ROLES is missing, so no role here is grantable yet.")
         await ctx.reply("\n".join(lines))
         return
@@ -136,7 +137,7 @@ async def show_status(ctx):
         if role_permissions is None:
             lines.append(f"`{name}`: cannot verify (role missing or unreadable)")
             continue
-        missing = Permissions.names(role_permissions & ~bot.my_permissions)
+        missing = Permissions.names(role_permissions & ~held)
         lines.append(f"`{name}`: grantable" if not missing else f"`{name}`: missing {', '.join(missing)}")
     await ctx.reply("\n".join(lines))
 
@@ -163,8 +164,6 @@ async def role_cmd(ctx, first: str, second: str = None):
 
 @bot.event
 async def on_connect():
-    bot.my_permissions = (await bot.client.me()).get("permissions", 0)
-    _role_permissions_cache.clear()
     await post_listing()
 
 

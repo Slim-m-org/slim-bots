@@ -36,9 +36,7 @@ def setup(*, my_permissions=32):  # MANAGE_ROLES
     roles.bot.space = Space(client)
     roles.bot.authors = AuthorFilter(client, space=roles.bot.space, ignore_bots=True)
     roles.bot.me_id = "bot-1"
-    roles._role_permissions_cache.clear()
     asyncio.run(roles.bot.space.refresh_members())
-    roles.bot.my_permissions = my_permissions
     return client
 
 
@@ -157,12 +155,34 @@ def test_a_missing_role_on_grant_is_called_misconfigured():
     assert "misconfigured" in client.sent[-1]["content"]
 
 
-def test_on_connect_refreshes_permissions_and_forgets_the_cached_role_bits():
+def test_status_sees_a_permission_granted_after_connect():
     client = setup(my_permissions=0)
-    roles._role_permissions_cache["r-member"] = 123
+    process(client, message("u1", "!roles status"))
+    assert "MANAGE_ROLES is missing" in client.sent[-1]["content"]
     client.respond("GET", "/me", {"id": "bot-1", "permissions": 32})
-    asyncio.run(roles.on_connect())
-    assert roles.bot.my_permissions == 32 and roles._role_permissions_cache == {}
+    process(client, message("u1", "!roles status", "m2"))
+    assert "MANAGE_ROLES is missing" not in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_status_sees_an_edited_role():
+    client = setup(my_permissions=32)
+    process(client, message("u1", "!roles status"))
+    assert "`helper`: missing MANAGE_MESSAGES" in client.sent[-1]["content"]
+    client.respond("GET", "/roles", [dict(r, permissions=0) if r["id"] == "r-helper" else r for r in ROLE_DEFS])
+    process(client, message("u1", "!roles status", "m2"))
+    assert "`helper`: grantable" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_a_refused_grant_explains_with_the_permissions_held_now():
+    from slimbots.http import ApiError
+
+    client = setup(my_permissions=0)
+    client.respond("PUT", "/members/u1/roles/r-helper", ApiError(403, {"error": "forbidden"}))
+    process(client, message("u1", "!role helper"))
+    assert "MANAGE_ROLES" in client.sent[-1]["content"]
+    client.respond("GET", "/me", {"id": "bot-1", "permissions": 32})
+    process(client, message("u1", "!role helper", "m2"))
+    assert "also carries MANAGE_MESSAGES" in client.sent[-1]["content"], client.sent[-1]["content"]
 
 
 def test_the_listing_is_posted_when_the_old_one_is_gone_and_other_errors_propagate():
