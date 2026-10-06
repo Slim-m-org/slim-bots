@@ -28,6 +28,7 @@ audio=0
 case " $* " in *" -vn "*) audio=1;; esac
 case "$STAND_IN_MODE" in
 dead) exit 1;;
+endless) exec cat /dev/zero;;
 noaudio) [ $audio = 1 ] && exit 1; exec sleep 30;;
 *)
   [ $audio = 1 ] && exec sleep 30
@@ -156,6 +157,27 @@ def test_a_title_with_no_audio_stream_keeps_playing_its_video():
 
     try:
         assert asyncio.run(scenario())
+    finally:
+        rig.close()
+
+
+def test_a_seek_and_a_stop_reap_an_ffmpeg_that_still_has_output_queued():
+    rig = Rig("endless")
+
+    async def scenario():
+        await rig.session._publish()
+        await rig.session._start_pipeline(0.0)
+        await asyncio.sleep(0.5)
+        old = (rig.session._video_process, rig.session._audio_process)
+        await asyncio.wait_for(rig.session.seek(60.0), timeout=5)
+        await asyncio.sleep(0.5)
+        await asyncio.wait_for(rig.session.stop(), timeout=5)
+        return old
+
+    try:
+        old = asyncio.run(scenario())
+        assert all(process.returncode is not None for process in old), "a seek left the old ffmpeg running"
+        assert rig.voice.left, "stop never got as far as leaving the call"
     finally:
         rig.close()
 

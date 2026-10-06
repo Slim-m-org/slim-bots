@@ -52,6 +52,15 @@ def build_audio_args(url, headers):
     ]
 
 
+async def reap(process):
+    """Kills an ffmpeg and drains its pipe: on Python 3.12 `wait()` never returns while unread output is still queued."""
+    if process.returncode is None:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+    with contextlib.suppress(ProcessLookupError):
+        await process.communicate()
+
+
 def frame_byte_size(width, height):
     """I420: a full-resolution Y plane plus two quarter-resolution chroma planes."""
     return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
@@ -264,10 +273,8 @@ class WatchSession:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         for process in (self._video_process, self._audio_process):
-            if process is not None and process.returncode is None:
-                process.kill()
-                with contextlib.suppress(ProcessLookupError):
-                    await process.wait()
+            if process is not None:
+                await reap(process)
         self._video_task = self._audio_task = None
         self._video_process = self._audio_process = None
 

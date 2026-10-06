@@ -31,6 +31,9 @@ class FakeProcess:
     async def wait(self):
         return self.returncode
 
+    async def communicate(self):
+        return b"", b""
+
 
 class FakeJellyfin:
     """Jellyfin names a progressive transcode by item, device and play session, never by start time, and serves an existing one as is."""
