@@ -276,6 +276,20 @@ def test_due_checker_survives_a_reminder_whose_channel_is_gone_and_still_deliver
     assert reminders.due_reminders(conn, int(time.time())) == [], "the undeliverable row is still due, so a restart hits it again"
 
 
+def test_a_weekly_reminder_that_missed_several_weeks_is_delivered_once():
+    client = setup()
+    conn = reminders.bot.store.connection
+    now = int(time.time())
+    due = reminders.recurrence.next_weekly(now - 21 * 86400, 0, 9, 0, "UTC")
+    reminders.add_reminder(
+        conn, "w", "c1", "u1", "m0", due, "weekly thing", recur={"kind": "weekly", "weekday": 0, "hour": 9, "minute": 0, "tz": "UTC"},
+    )
+    run_due_checker_briefly()
+    sent = [s for s in client.sent if s["content"].startswith("reminder:")]
+    assert len(sent) == 1, f"{len(sent)} messages for one missed schedule"
+    assert reminders.due_reminders(conn, now) == []
+
+
 def test_due_checker_keeps_a_reminder_it_could_not_send_for_a_transient_reason():
     client = setup()
     conn = reminders.bot.store.connection

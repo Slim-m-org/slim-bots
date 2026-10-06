@@ -374,7 +374,7 @@ async def deliver_reminder(row):
     if recur_kind == "interval":
         await bot.store.run(reschedule, reminder_id, recurrence.next_interval(due_at, interval_seconds, now))
     elif recur_kind == "weekly":
-        await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(due_at, weekday, hour, minute, tz_name))
+        await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(max(due_at, now), weekday, hour, minute, tz_name))
     else:
         await bot.store.run(mark_sent, reminder_id)
 
