@@ -45,7 +45,7 @@ def test_two_members_starting_a_watch_in_one_call_get_one_party():
         asyncio.run(both())
     joins = len(jellyfin.bot.voice.sessions)
     assert joins == 1 and len(starts) == 1, f"{joins} joins, {len(starts)} starts"
-    assert any("already" in (m.get("content") or "") for m in client.sent)
+    assert any("already" in (m.get("content") or "") for m in client.ephemerals)
 
 
 def test_a_start_failure_that_is_not_a_stream_error_still_leaves_the_call_and_replies():
@@ -56,7 +56,7 @@ def test_a_start_failure_that_is_not_a_stream_error_still_leaves_the_call_and_re
     voices = list(jellyfin.bot.voice.sessions)
     assert voices and all(v.left for v in voices), "bot is still in the call after the start failed"
     assert session_registry.session_for_channel("v1") is None
-    assert any("could not start streaming" in (m.get("content") or "") for m in client.sent)
+    assert any("could not start streaming" in (m.get("content") or "") for m in client.ephemerals)
 
 
 def test_a_failed_start_frees_the_call_for_the_next_try():

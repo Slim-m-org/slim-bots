@@ -5,6 +5,7 @@ from __future__ import annotations
 from slimbots import Permissions
 from slimbots.voice import VoiceError
 
+import answers
 import controls
 import jellyfin_core
 import panel
@@ -27,11 +28,12 @@ async def run_pause(ctx):
     if session is None:
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can pause it.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can pause it.")
         return
     async with session.control_lock:
         paused = session.pause()
-    await ctx.reply("paused." if paused else "already paused.")
+    await answers.tell(ctx, "paused." if paused else "already paused.")
+    await answers.tidy(ctx)
     if paused:
         await session.refresh_panel()
 
@@ -41,11 +43,12 @@ async def run_resume(ctx):
     if session is None:
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can resume it.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can resume it.")
         return
     async with session.control_lock:
         resumed = session.resume()
-    await ctx.reply("resumed." if resumed else "already playing.")
+    await answers.tell(ctx, "resumed." if resumed else "already playing.")
+    await answers.tidy(ctx)
     if resumed:
         await session.refresh_panel()
 
@@ -55,19 +58,20 @@ async def run_seek(ctx, position_text):
     if session is None:
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can seek it.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can seek it.")
         return
     try:
         seconds = parse_hms(position_text or "")
     except ValueError:
-        await ctx.reply("give a time like `1:02:03`, `2:03`, or a bare second count.")
+        await answers.tell(ctx, "give a time like `1:02:03`, `2:03`, or a bare second count.")
         return
     async with session.control_lock:
         if session.finished:
-            await ctx.reply(ENDED)
+            await answers.tell(ctx, ENDED)
             return
         await session.seek(seconds)
-    await ctx.reply(f"seeked to {format_hms(session.position_seconds)}.")
+    await answers.tell(ctx, f"seeked to {format_hms(session.position_seconds)}.")
+    await answers.tidy(ctx)
     await session.refresh_panel()
 
 
@@ -76,17 +80,19 @@ async def run_stop(ctx):
     if session is None:
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can stop it.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can stop it.")
         return
     async with session.control_lock:
         await session.stop(reason=f"stopped by {ctx.author.display_name}")
+    await answers.tidy(ctx)
 
 
 async def run_now_playing(ctx):
     session = await session_registry.resolve_session(ctx)
     if session is None:
         return
-    await ctx.reply(embed=session.now_playing_embed())
+    await answers.tell(ctx, embed=session.now_playing_embed())
+    await answers.tidy(ctx)
 
 
 async def run_subs(ctx, language):
@@ -94,28 +100,30 @@ async def run_subs(ctx, language):
     if session is None:
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can change subtitles.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can change subtitles.")
         return
     language = (language or "").strip()
     if not language or language.lower() == "off":
         async with session.control_lock:
             if session.finished:
-                await ctx.reply(ENDED)
+                await answers.tell(ctx, ENDED)
                 return
             await session.set_subtitle(None, None)
-        await ctx.reply("subtitles off.")
+        await answers.tell(ctx, "subtitles off.")
+        await answers.tidy(ctx)
         await session.refresh_panel()
         return
     stream = jellyfin_core.find_subtitle_stream(session.item, language)
     if stream is None:
-        await ctx.reply(f'no subtitle track matching "{language}".')
+        await answers.tell(ctx, f'no subtitle track matching "{language}".')
         return
     async with session.control_lock:
         if session.finished:
-            await ctx.reply(ENDED)
+            await answers.tell(ctx, ENDED)
             return
         await session.set_subtitle(stream["Index"], stream.get("DisplayTitle") or stream.get("Language") or language)
-    await ctx.reply(f"subtitles set to {session.subtitle_label}.")
+    await answers.tell(ctx, f"subtitles set to {session.subtitle_label}.")
+    await answers.tidy(ctx)
     await session.refresh_panel()
 
 
@@ -125,26 +133,27 @@ async def run_quality(ctx, preset_name):
         return
     preset_name = (preset_name or "").strip()
     if not preset_name:
-        await ctx.reply(f"quality is {session.quality.describe()}. change it with `{ctx.bot.prefix}quality <{'|'.join(quality.PRESETS)}>`.")
+        await answers.tell(ctx, f"quality is {session.quality.describe()}. change it with `{ctx.bot.prefix}quality <{'|'.join(quality.PRESETS)}>`.")
         return
     preset = quality.find_preset(preset_name)
     if preset is None:
-        await ctx.reply(f'no quality called "{preset_name}" - try {quality.preset_names()}.')
+        await answers.tell(ctx, f'no quality called "{preset_name}" - try {quality.preset_names()}.')
         return
     if not _may_control(ctx, session):
-        await ctx.reply("only the person who started this, or a channel manager, can change the quality.")
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can change the quality.")
         return
     try:
         async with session.control_lock:
             if session.finished:
-                await ctx.reply(ENDED)
+                await answers.tell(ctx, ENDED)
                 return
             await session.set_quality(preset)
     except (StreamError, VoiceError) as err:
-        await ctx.reply(f"could not switch quality: {err}")
+        await answers.tell(ctx, f"could not switch quality: {err}")
         return
     note = f" {quality.HEAVY_WARNING}" if preset.is_heavy else ""
-    await ctx.reply(f"quality set to {preset.describe()}, resumed at {format_hms(session.position_seconds)}.{note}")
+    await answers.tell(ctx, f"quality set to {preset.describe()}, resumed at {format_hms(session.position_seconds)}.{note}")
+    await answers.tidy(ctx)
     await session.refresh_panel()
 
 

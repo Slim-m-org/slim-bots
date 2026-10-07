@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import answers
+
 _sessions = {}
 
 
@@ -46,7 +48,7 @@ async def resolve_session(ctx):
     A person in no call gets the only party if exactly one runs, so `!np` still works from a phone."""
     live = live_sessions()
     if not live:
-        await ctx.reply("nothing is playing.")
+        await answers.tell(ctx, "nothing is playing.")
         return None
     channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if channel_id in live:
@@ -55,7 +57,7 @@ async def resolve_session(ctx):
         return next(iter(live.values()))
     running = _names(ctx.bot, live)
     if channel_id is None:
-        await ctx.reply(f"streams are playing in {running} - join the voice channel you mean, then try again.")
+        await answers.tell(ctx, f"streams are playing in {running} - join the voice channel you mean, then try again.")
     else:
-        await ctx.reply(f"nothing is playing in {channel_name(ctx.bot, channel_id)} (streaming in {running}).")
+        await answers.tell(ctx, f"nothing is playing in {channel_name(ctx.bot, channel_id)} (streaming in {running}).")
     return None

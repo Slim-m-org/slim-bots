@@ -75,7 +75,7 @@ def test_a_second_stream_in_the_same_call_is_refused():
         jellyfin.bot.voice.member_channels["u2"] = "v1"
         process(client, command("u2", "!watch inception"))
         assert list(session_registry.live_sessions()) == ["v1"]
-    assert "already watching **Inception** in #call-1" in client.sent[-1]["content"]
+    assert "already watching **Inception** in #call-1" in client.ephemerals[-1]["content"]
     assert len(jellyfin.bot.voice.sessions) == 1
     session_registry.clear()
 
@@ -103,7 +103,7 @@ def test_a_person_in_a_call_with_no_stream_is_told_where_streams_are():
     client = two_calls()
     start_both(client)
     process(client, command("u3", "!np"))
-    assert client.sent[-1]["content"] == "nothing is playing in #call-3 (streaming in #call-1, #call-2)."
+    assert client.ephemerals[-1]["content"] == "nothing is playing in #call-3 (streaming in #call-1, #call-2)."
     session_registry.clear()
 
 
@@ -112,7 +112,7 @@ def test_a_person_in_no_call_needs_to_pick_one_when_several_are_playing():
     start_both(client)
     jellyfin.bot.voice.member_channels.pop("u1")
     process(client, command("u1", "!np"))
-    assert "join the voice channel you mean" in client.sent[-1]["content"]
+    assert "join the voice channel you mean" in client.ephemerals[-1]["content"]
     session_registry.clear()
 
 
@@ -123,7 +123,7 @@ def test_a_person_in_no_call_reaches_the_only_stream():
         session_registry.add(next(iter(session_registry.live_sessions().values())))
         jellyfin.bot.voice.member_channels.pop("u1")
         process(client, command("u1", "!np"))
-    assert client.sent[-1].get("embeds")
+    assert client.ephemerals[-1].get("embeds")
     session_registry.clear()
 
 

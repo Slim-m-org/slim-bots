@@ -16,7 +16,7 @@ import playback_progress  # noqa: E402
 import stream_session  # noqa: E402
 import session_registry  # noqa: E402
 import watch_cog  # noqa: E402
-from slimbots import Permissions, Store  # noqa: E402
+from slimbots import ApiError, Permissions, Store  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
 from slimbots.models import Channel  # noqa: E402
 from slimbots.space import Space  # noqa: E402
@@ -431,7 +431,7 @@ def test_watch_requires_the_invoker_to_be_in_any_voice_call():
         process(client, message("!watch inception"))
     finally:
         stream_session.WatchSession.start = original_start
-    assert client.sent[-1]["content"] == "join a voice channel first, then run `!watch` again."
+    assert client.ephemerals[-1]["content"] == "join a voice channel first, then run `!watch` again."
     assert not session_registry.live_sessions()
 
 
@@ -489,8 +489,8 @@ def test_watch_refuses_when_the_bot_lacks_speak_in_the_invokers_channel():
     finally:
         jellyfin.jellyfin_core.watch_search = original_search
         jellyfin.jellyfin_core.fetch_item_for_playback = original_fetch
-    assert "need SPEAK" in client.sent[-1]["content"]
-    assert "#voice-room" in client.sent[-1]["content"]
+    assert "need SPEAK" in client.ephemerals[-1]["content"]
+    assert "#voice-room" in client.ephemerals[-1]["content"]
     assert not session_registry.live_sessions()
 
 
@@ -508,8 +508,8 @@ def test_watch_names_the_missing_permission_when_the_bot_cannot_connect():
     finally:
         jellyfin.jellyfin_core.watch_search = original_search
         jellyfin.jellyfin_core.fetch_item_for_playback = original_fetch
-    assert "CONNECT" in client.sent[-1]["content"]
-    assert "#voice-room" in client.sent[-1]["content"]
+    assert "CONNECT" in client.ephemerals[-1]["content"]
+    assert "#voice-room" in client.ephemerals[-1]["content"]
     assert not session_registry.live_sessions()
 
 
@@ -518,7 +518,7 @@ def test_watch_refuses_a_second_stream_while_one_is_active():
     session_registry.add(stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", None))
     try:
         process(client, message("!watch inception"))
-        assert "already watching" in client.sent[-1]["content"]
+        assert "already watching" in client.ephemerals[-1]["content"]
     finally:
         session_registry.clear()
 
@@ -531,7 +531,7 @@ def test_pause_then_resume_updates_state():
         process(client, message("!pause"))
         assert session.paused
         process(client, message("!np"))
-        assert client.sent[-1].get("embeds")
+        assert client.ephemerals[-1].get("embeds")
         process(client, message("!resume"))
         assert not session.paused
     finally:
@@ -544,7 +544,7 @@ def test_pause_refuses_a_non_starter_non_manager():
     session_registry.add(session)
     try:
         process(client, message("!pause"))
-        assert "only the person who started this" in client.sent[-1]["content"]
+        assert "only the person who started this" in client.ephemerals[-1]["content"]
         assert not session.paused
     finally:
         session_registry.clear()
@@ -564,7 +564,7 @@ def test_stop_allows_a_channel_manager_to_stop_someone_elses_stream():
 def test_np_reports_nothing_playing_when_idle():
     client = setup_with_voice()
     process(client, message("!np"))
-    assert "nothing is playing" in client.sent[-1]["content"]
+    assert "nothing is playing" in client.ephemerals[-1]["content"]
 
 
 def test_seek_and_subs_update_the_session():
@@ -591,6 +591,61 @@ def test_seek_and_subs_update_the_session():
     finally:
         stream_session.WatchSession.seek = original_seek
         session_registry.clear()
+
+
+def _deleted(client):
+    return [path for method, path, _body, _params in client.calls if method == "DELETE" and "/messages/" in path]
+
+
+def test_playback_commands_answer_privately_and_clear_the_command():
+    client = setup_with_voice()
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(runtime_seconds=3600), "u1", FakeVoiceSession("c1"))
+    session.item["MediaStreams"] = [{"Type": "Subtitle", "Index": 3, "Language": "eng", "DisplayTitle": "English"}]
+    session_registry.add(session)
+
+    async def fake_seek(self, seconds):
+        self._seek_base = seconds
+        self._segment_started_at = stream_session.time.monotonic()
+
+    async def fake_set_subtitle(self, index, label):
+        self.subtitle_label = label
+
+    original_seek, original_subs = stream_session.WatchSession.seek, stream_session.WatchSession.set_subtitle
+    stream_session.WatchSession.seek, stream_session.WatchSession.set_subtitle = fake_seek, fake_set_subtitle
+    try:
+        expected = {
+            "!pause": "paused.", "!resume": "resumed.", "!seek 10:00": "seeked to 10:00.",
+            "!subs english": "subtitles set to English.", "!subs off": "subtitles off.",
+        }
+        for n, (command, answer) in enumerate(expected.items()):
+            public_before = len(client.sent)
+            process(client, message(command, f"cmd{n}"))
+            assert client.ephemerals[-1]["content"] == answer, command
+            assert len(client.sent) == public_before, f"{command} posted a public line"
+            assert _deleted(client)[-1] == f"/channels/c1/messages/cmd{n}", command
+    finally:
+        stream_session.WatchSession.seek, stream_session.WatchSession.set_subtitle = original_seek, original_subs
+        session_registry.clear()
+
+
+def test_a_refused_command_answers_privately_and_stays():
+    client = setup_with_voice()
+    session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(), "someone-else", FakeVoiceSession("c1"))
+    session_registry.add(session)
+    try:
+        process(client, message("!pause"))
+        assert "only the person who started this" in client.ephemerals[-1]["content"]
+        assert client.sent == []
+        assert _deleted(client) == []
+    finally:
+        session_registry.clear()
+
+
+def test_an_answer_the_server_refuses_to_keep_private_still_reaches_the_channel():
+    client = setup_with_voice()
+    client.respond("POST", "/channels/c1/ephemeral-messages", ApiError(403, "forbidden"))
+    process(client, message("!np"))
+    assert client.sent[-1]["content"] == "nothing is playing."
 
 
 if __name__ == "__main__":
