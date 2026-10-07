@@ -3,6 +3,16 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.10.0
+
+- Breaking: `AuthorFilter` no longer takes `ignore_bots`. It was never read. `Bot(ignore_bots=...)` is unchanged.
+- The catch-up after a restart opens the gateway first and holds live frames until the replay ends, so nothing that arrives during the replay is lost or applied out of order.
+- `Store` runs on one worker thread and honours its timeout.
+- Embeds and components are checked before they are sent, so a bad one fails in the bot with a clear error instead of as a 400 from the server.
+- `Permissions.VIEW_MODERATION_HISTORY` is the server's bit, and `UiEntry` checks the permission it names.
+- A failed audio publish takes the video track back down instead of leaving a silent share.
+- The publish workflow pins its actions by sha and builds from a hash-locked requirements file.
+
 ## 0.9.7
 
 - `publish_screen_share` takes `audio_queue_ms`, `video_codec` and `video_encoder`, each keeping the library default when left out. A short audio queue keeps the sound with the picture after a seek or pause; `video_codec="h264"` with `video_encoder="nvenc"` encodes on an nvidia gpu when the container has one.
