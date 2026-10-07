@@ -55,7 +55,9 @@ async def send_post(entry):
 
 
 async def poll_once():
-    items = await bot.store.run(jellyfin_core.fetch_new_items)
+    cursor = await bot.store.run(jellyfin_core.get_cursor) or ""
+    fetched = await asyncio.to_thread(jellyfin_core.items_since, cursor)
+    items = await bot.store.run(jellyfin_core.unseen_items, fetched)
     if not items:
         return
     excluded = [item for item in items if jellyfin_core.is_excluded(item)]
@@ -97,13 +99,21 @@ async def poll_loop():
         await asyncio.sleep(jellyfin_core.JELLYFIN_POLL_SECONDS)
 
 
+async def bootstrap():
+    """Jellyfin is read off the store lock, so a slow server never stalls a lookup."""
+    if await bot.store.run(jellyfin_core.get_cursor) is not None:
+        return
+    plan = await asyncio.to_thread(jellyfin_core.bootstrap_plan)
+    await bot.store.run(jellyfin_core.apply_bootstrap, plan)
+
+
 _background_started = False
 
 
 @bot.event
 async def on_connect():
     global _background_started
-    await bot.store.run(jellyfin_core.bootstrap_cursor)
+    await bootstrap()
     if _background_started:
         return
     _background_started = True

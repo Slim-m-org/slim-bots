@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 MAX_TITLE = 256
@@ -13,19 +14,37 @@ MAX_FOOTER = 2048
 MAX_AUTHOR_NAME = 256
 
 
+def _unix_millis(value: int | str | datetime.datetime | None) -> int | None:
+    """The server's `timestamp` is integer Unix milliseconds; a datetime (naive means UTC) or ISO 8601 string converts."""
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        try:
+            value = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(f"an embed timestamp must be Unix milliseconds, a datetime or an ISO 8601 string, not {value!r}") from None
+    if isinstance(value, datetime.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=datetime.timezone.utc)
+        return int(value.timestamp() * 1000)
+    raise ValueError(f"an embed timestamp must be Unix milliseconds, a datetime or an ISO 8601 string, not {value!r}")
+
+
 class Embed:
     """One embed; `to_wire()` is what a bot sends, `render_fallback()` is what an older server sees instead."""
 
     def __init__(
         self, *, title: str | None = None, description: str | None = None, color: int | None = None,
-        footer: str | None = None, url: str | None = None, timestamp: str | None = None,
+        footer: str | None = None, url: str | None = None, timestamp: int | str | datetime.datetime | None = None,
     ) -> None:
         self.title = title
         self.description = description
         self.color = color
         self.footer_text = footer
         self.url = url
-        self.timestamp = timestamp
+        self.timestamp = _unix_millis(timestamp)
         self.author: dict[str, str] | None = None
         self.image_url: str | None = None
         self.thumbnail_url: str | None = None

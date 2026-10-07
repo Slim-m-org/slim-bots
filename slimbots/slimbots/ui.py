@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .hidden_chars import has_hidden_char
 from .http import ApiError
+from .permissions import Permissions
 from .registration import RegistrationRejected
 
 if TYPE_CHECKING:
@@ -41,6 +42,8 @@ class UiEntry:
             raise ValueError("an entry label cannot hold control or invisible characters")
         if self.icon is not None and self.icon not in ICONS:
             raise ValueError(f"icon must be one of {ICONS}, not {self.icon!r}")
+        if self.permission is not None and not Permissions.is_one_known_bit(self.permission):
+            raise ValueError("an entry's permission must be exactly one known Permissions bit")
 
     def to_wire(self) -> dict[str, Any]:
         wire: dict[str, Any] = {"id": self.id, "label": self.label.strip()}

@@ -263,17 +263,24 @@ def mark_posted(conn, item_ids, quiet=False, items=()):
     conn.commit()
 
 
-def bootstrap_cursor(conn):
+def bootstrap_plan():
+    """The network half of a cold start: `(newest_at, ids at that instant)`, or None for an empty library."""
+    newest = newest_item()
+    if newest is None:
+        return None
+    newest_at = newest["DateCreated"]
+    return newest_at, [item["Id"] for item in items_since(newest_at)]
+
+
+def apply_bootstrap(conn, plan):
     """A cold start: mark everything at the newest instant already-posted and start watching from there; see README.md."""
     if get_cursor(conn) is not None:
         return
-    newest = newest_item()
-    if newest is None:
+    if plan is None:
         advance_cursor(conn, "0001-01-01T00:00:00.0000000Z")
         return
-    newest_at = newest["DateCreated"]
-    boundary = items_since(newest_at)
-    mark_posted(conn, [item["Id"] for item in boundary], quiet=True)
+    newest_at, boundary_ids = plan
+    mark_posted(conn, boundary_ids, quiet=True)
     advance_cursor(conn, newest_at)
 
 
@@ -329,10 +336,9 @@ def items_since(cursor):
     return sorted(by_id.values(), key=lambda item: item["DateCreated"])
 
 
-def fetch_new_items(conn):
-    """Unseen items, minus replacements of media already announced; those are recorded so the window ending cannot resurrect them."""
-    cursor = get_cursor(conn) or ""
-    fresh = [item for item in items_since(cursor) if not already_posted(conn, item["Id"])]
+def unseen_items(conn, fetched):
+    """`fetched` minus what was posted, minus replacements of media already announced; those are recorded so the window ending cannot resurrect them."""
+    fresh = [item for item in fetched if not already_posted(conn, item["Id"])]
     if JELLYFIN_REANNOUNCE_REPLACED:
         return fresh
     kept, seen = [], set()

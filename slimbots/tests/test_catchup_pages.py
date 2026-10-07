@@ -60,7 +60,7 @@ def make_bot(monkeypatch, tmp_path, client, channels):
     bot = Bot(channels=set(channels), cursor_path=str(tmp_path / "cursor.db"))
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
     bot._cursor_conn = sqlite3.connect(str(tmp_path / "cursor.db"), isolation_level=None)
     cursor.init_table(bot._cursor_conn)

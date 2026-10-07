@@ -25,16 +25,16 @@ async def send_post(post):
     assert bot.client is not None, "send_post runs only once connected"
     text = seerr_core.render_text(post)
     layout = approvals.buttons_for(post["request_id"]) if post["buttons"] else None
-    message = await bot.client.send(bot.channel, text, message_id=post["message_id"], components=layout)
-    if layout:
-        approvals.remember(message.id, text)
+    await bot.client.send(bot.channel, text, message_id=post["message_id"], components=layout)
 
 
 async def poll_once():
     requests = await asyncio.to_thread(seerr_core.fetch_recent_requests)
     if await bot.store.run(seerr_core.bootstrap, requests):
         return
-    for post in await bot.store.run(seerr_core.plan_posts, requests):
+    wanted = await bot.store.run(seerr_core.fresh_media, requests)
+    infos = {pair: await asyncio.to_thread(seerr_core.media_details, *pair) for pair in wanted}
+    for post in await bot.store.run(seerr_core.plan_posts, requests, lambda kind, tmdb_id: infos[(kind, tmdb_id)]):
         try:
             await send_post(post)
         except ApiError as err:

@@ -27,11 +27,12 @@ def setup():
     asyncio.run(reminders.bot.store.open())
     reminders.bot.channels = {"c1"}
     reminders._command_limiter._hits.clear()
+    reminders._listed.clear()
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     reminders.bot.client = client
     reminders.bot.space = Space(client)
-    reminders.bot.authors = AuthorFilter(client, space=reminders.bot.space, ignore_bots=True)
+    reminders.bot.authors = AuthorFilter(client, space=reminders.bot.space)
     reminders.bot.me_id = "bot-1"
     asyncio.run(reminders.bot.space.refresh_members())
     return client
@@ -274,6 +275,46 @@ def test_due_checker_survives_a_reminder_whose_channel_is_gone_and_still_deliver
     assert not died and reminders.bot._fatal_error is None, f"due_checker died: {reminders.bot._fatal_error!r}"
     assert any(s["channel_id"] == "c1" and "fine one" in s["content"] for s in client.sent)
     assert reminders.due_reminders(conn, int(time.time())) == [], "the undeliverable row is still due, so a restart hits it again"
+
+
+def test_a_weekly_reminder_that_missed_several_weeks_is_delivered_once():
+    client = setup()
+    conn = reminders.bot.store.connection
+    now = int(time.time())
+    due = reminders.recurrence.next_weekly(now - 21 * 86400, 0, 9, 0, "UTC")
+    reminders.add_reminder(
+        conn, "w", "c1", "u1", "m0", due, "weekly thing", recur={"kind": "weekly", "weekday": 0, "hour": 9, "minute": 0, "tz": "UTC"},
+    )
+    run_due_checker_briefly()
+    sent = [s for s in client.sent if s["content"].startswith("reminder:")]
+    assert len(sent) == 1, f"{len(sent)} messages for one missed schedule"
+    assert reminders.due_reminders(conn, now) == []
+
+
+def test_a_number_from_the_listing_still_means_the_reminder_it_showed():
+    client = setup()
+    now = int(time.time())
+    conn = reminders.bot.store.connection
+    for rid, due, text in (("a", now + 10, "A soon"), ("b", now + 3600, "B"), ("c", now + 7200, "C")):
+        reminders.add_reminder(conn, rid, "c1", "u1", "m0", due, text)
+    process(client, message("!reminders", "m1"))
+    assert client.sent[-1]["content"].splitlines()[1].endswith("- B")
+    reminders.mark_sent(conn, "a")
+    process(client, message("!reminders cancel 2", "m2"))
+    assert [row[2] for row in reminders.pending_for_user(conn, "c1", "u1")] == ["C"], "cancelled the wrong reminder"
+
+
+def test_a_listed_number_whose_reminder_already_fired_is_refused_not_redirected():
+    client = setup()
+    now = int(time.time())
+    conn = reminders.bot.store.connection
+    for rid, due, text in (("a", now + 10, "A soon"), ("b", now + 3600, "B")):
+        reminders.add_reminder(conn, rid, "c1", "u1", "m0", due, text)
+    process(client, message("!reminders", "m1"))
+    reminders.mark_sent(conn, "a")
+    process(client, message("!reminders cancel 1", "m2"))
+    assert client.sent[-1]["content"] == "no reminder 1"
+    assert [row[2] for row in reminders.pending_for_user(conn, "c1", "u1")] == ["B"]
 
 
 def test_due_checker_keeps_a_reminder_it_could_not_send_for_a_transient_reason():

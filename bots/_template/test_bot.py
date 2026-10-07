@@ -23,7 +23,7 @@ def setup():
     client.respond("GET", "/users/u-1", PERSON)
     template.bot.client = client
     template.bot.space = Space(client)
-    template.bot.authors = AuthorFilter(client, space=template.bot.space, ignore_bots=True)
+    template.bot.authors = AuthorFilter(client, space=template.bot.space)
     template.bot.store = None
     template.bot.commands["vote"].cooldown._last.clear()
     template.bot.data_path = os.path.join(tempfile.mkdtemp(), "template.db")

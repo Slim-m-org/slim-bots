@@ -21,6 +21,7 @@ COMMAND_WINDOW_SECONDS = 10
 MAX_PENDING_PER_USER = 25  # per person, per channel - the guard against a reminder storm
 MIN_RECUR_SECONDS = 300  # no recurring reminder may fire more often than this
 MAX_TEXT_LEN = 500
+MAX_DURATION_SECONDS = 365 * 86400  # also keeps every due time inside what a calendar can show
 REMINDER_RETENTION_SECONDS = 30 * 24 * 3600  # a resolved reminder is pruned once this old; a pending one never is
 PRUNE_INTERVAL_SECONDS = 3600
 DEFAULT_RECUR_HOUR = 9
@@ -132,8 +133,23 @@ def pending_for_user(conn, channel_id, user_id):
     ).fetchall()
 
 
+LISTING_TTL_SECONDS = 600
+_listed: dict[tuple[str, str], tuple[float, list[str]]] = {}
+
+
+def remember_listing(channel_id, user_id, rows):
+    _listed[(channel_id, user_id)] = (time.time(), [row[0] for row in rows])
+
+
 def _nth_id(conn, channel_id, user_id, n):
-    """1-based, ordered the same way `!reminders` lists them; None if out of range."""
+    """1-based against the last `!reminders` listing this user saw (so a shifted list never redirects it), else the live list; None if out of range or already gone."""
+    listed = _listed.get((channel_id, user_id))
+    if listed is not None and time.time() - listed[0] <= LISTING_TTL_SECONDS:
+        ids = listed[1]
+        if n < 1 or n > len(ids):
+            return None
+        still_pending = conn.execute("SELECT 1 FROM reminders WHERE id = ? AND sent = 0 AND cancelled = 0", (ids[n - 1],)).fetchone()
+        return ids[n - 1] if still_pending else None
     rows = pending_for_user(conn, channel_id, user_id)
     if n < 1 or n > len(rows):
         return None
@@ -227,6 +243,16 @@ def _txn_create_reminder(conn, channel_id, user_id, request_message_id, due_at, 
     return f"will remind you at {recurrence.format_local(due_at, tz_name)}{note}"
 
 
+async def _duration_allowed(ctx, seconds):
+    """Replies and returns False for a duration over the limit; checked before anything is written."""
+    try:
+        require_range(seconds, max_value=MAX_DURATION_SECONDS, field="a reminder duration")
+    except ValidationError as err:
+        await ctx.reply(f"{err} seconds (a year)")
+        return False
+    return True
+
+
 async def _create_and_ack(ctx, due_at, text, recur=None):
     message = await bot.store.run(_txn_create_reminder, ctx.channel_id, ctx.author.id, ctx.message["id"], due_at, text, recur)
     await ctx.reply(message)
@@ -240,6 +266,8 @@ async def remind(ctx, rest: str = ""):
 
 @remind.command(name="in", help="Remind you after a duration", usage="<duration> <text>")
 async def remind_in(ctx, duration: Duration, text: str):
+    if not await _duration_allowed(ctx, int(duration)):
+        return
     await _create_and_ack(ctx, int(time.time()) + int(duration), text)
 
 
@@ -264,6 +292,8 @@ async def remind_every(ctx, spec: str, rest: str):
             await ctx.reply(f"not a duration or weekday I understand: `{spec}`")
             return
         interval_seconds = int(duration)
+        if not await _duration_allowed(ctx, interval_seconds):
+            return
 
     hour, minute, text = DEFAULT_RECUR_HOUR, 0, rest
     first, _, remainder = rest.partition(" ")
@@ -301,7 +331,9 @@ async def remind_every(ctx, spec: str, rest: str):
 
 
 def _txn_list_pending(conn, channel_id, user_id):
-    return pending_for_user(conn, channel_id, user_id), get_timezone(conn, user_id)
+    rows = pending_for_user(conn, channel_id, user_id)
+    remember_listing(channel_id, user_id, rows)
+    return rows, get_timezone(conn, user_id)
 
 
 @bot.group(name="reminders", help="List your pending reminders, or manage one by its listed number")
@@ -341,6 +373,8 @@ async def reminders_edit(ctx, n: int, text: str):
 
 @reminders_group.command(name="snooze", help="Push one back by a duration", usage="<n> <duration>")
 async def reminders_snooze(ctx, n: int, duration: Duration):
+    if not await _duration_allowed(ctx, int(duration)):
+        return
     new_due = await bot.store.run(snooze_nth, ctx.channel_id, ctx.author.id, n, int(duration))
     if new_due is None:
         await ctx.reply(f"no reminder {n}")
@@ -374,7 +408,7 @@ async def deliver_reminder(row):
     if recur_kind == "interval":
         await bot.store.run(reschedule, reminder_id, recurrence.next_interval(due_at, interval_seconds, now))
     elif recur_kind == "weekly":
-        await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(due_at, weekday, hour, minute, tz_name))
+        await bot.store.run(reschedule, reminder_id, recurrence.next_weekly(max(due_at, now), weekday, hour, minute, tz_name))
     else:
         await bot.store.run(mark_sent, reminder_id)
 

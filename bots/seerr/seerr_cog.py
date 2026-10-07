@@ -13,7 +13,6 @@ import seerr_core as core
 GUARD = Guard(core.SERVICE)
 CHOOSER = Chooser("seerrpick:", "request", lambda item: core.result_title(item)[:80], "request")
 NAME_MAX = 100
-RESERVED = ("link", "unlink", "account", "help")
 
 
 async def _tell(ctx, text, fallback):
@@ -76,6 +75,14 @@ async def _file_request(bot, slimm_user_id, item):
     return f"requested **{core.result_title(item)}**."
 
 
+async def _details_or_placeholder(media_type, tmdb_id):
+    """A title lookup that never fails the listing: a dropped or unauthorised seerr leaves the `tmdb <id>` stand-in."""
+    try:
+        return await asyncio.to_thread(core.media_details, media_type, tmdb_id)
+    except (*UNREACHABLE, core.AuthError):
+        return core.placeholder_details(tmdb_id)
+
+
 async def run_pending(ctx):
     if await GUARD.throttled(ctx):
         return
@@ -89,7 +96,7 @@ async def run_pending(ctx):
     lines = []
     for request in requests:
         media = request.get("media") or {}
-        info = await asyncio.to_thread(core.media_details, media.get("mediaType"), media.get("tmdbId"))
+        info = await _details_or_placeholder(media.get("mediaType"), media.get("tmdbId"))
         year = f" ({info['year']})" if info["year"] else ""
         lines.append(f"- {info['title']}{year} [{'show' if media.get('mediaType') == 'tv' else 'movie'}] - {core.display_name(request.get('requestedBy'))}")
     more = f"\n...and {total - len(requests)} more." if total > len(requests) else ""

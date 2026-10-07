@@ -41,7 +41,7 @@ def setup():
     client.respond("GET", "/channels", CHANNELS)
     starboard.bot.client = client
     starboard.bot.space = Space(client)
-    starboard.bot.authors = AuthorFilter(client, space=starboard.bot.space, ignore_bots=True)
+    starboard.bot.authors = AuthorFilter(client, space=starboard.bot.space)
     starboard.bot.me_id = "bot-1"
     asyncio.run(starboard.bot.space.refresh_members())
     asyncio.run(starboard.bot.space.refresh_channels())

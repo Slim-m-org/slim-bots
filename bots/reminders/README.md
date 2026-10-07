@@ -3,7 +3,7 @@
 A slim-m bot: `!remind in 2h <text>`, `!remind at 15:30 <text>`,
 `!remind every monday [at 09:00] <text>` or `!remind every 2h <text>`
 for a recurring one, and `!reminders` to list, or `cancel`/`edit`/`snooze`
-your own by its listed number. `!timezone <IANA name>` sets the zone
+your own by its listed number (the numbers of the last listing you saw, for ten minutes, so a reminder firing in between never shifts them). `!timezone <IANA name>` sets the zone
 `at`/`every ... at` and the listing are shown in.
 
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.

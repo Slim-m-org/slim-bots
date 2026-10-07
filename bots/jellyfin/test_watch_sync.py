@@ -218,6 +218,42 @@ def test_a_controller_the_server_refuses_is_dropped_and_the_session_still_stated
     scenario(body, stub=stub)
 
 
+def stated_title(title):
+    """The title of the first PUT when the item is called `title`."""
+    seen = []
+
+    async def body(client, session):
+        await settle(TICK * 2)
+        seen.append(writes(client, "PUT")[0][2]["title"])
+
+    def stub(client):
+        client.respond("PUT", "/channels/c1/watch-session", lambda: None)
+
+    jellyfin_item = stream_session.WatchSession.__init__
+
+    def named(self, bot, text_channel_id, voice_channel_id, item, *args, **kwargs):
+        jellyfin_item(self, bot, text_channel_id, voice_channel_id, {**item, "Name": title}, *args, **kwargs)
+
+    stream_session.WatchSession.__init__ = named
+    try:
+        scenario(body, stub=stub)
+    finally:
+        stream_session.WatchSession.__init__ = jellyfin_item
+    return seen[0]
+
+
+def test_a_title_with_a_hidden_character_is_stated_without_it():
+    assert stated_title("The Family\u200d Man") == "The Family Man"
+
+
+def test_a_title_over_the_server_limit_is_truncated_to_it():
+    assert stated_title("y" * 250) == "y" * watch_sync.MAX_TITLE_CHARS
+
+
+def test_a_title_with_nothing_visible_falls_back_to_a_placeholder():
+    assert stated_title("\u200b\u200d") == "Unknown title"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

@@ -32,11 +32,12 @@ def setup():
     asyncio.run(board.bot.store.open())
     board.bot.channels = {"c1"}
     board._names.clear()
+    board.board_lock = asyncio.Lock()
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     board.bot.client = client
     board.bot.space = Space(client)
-    board.bot.authors = AuthorFilter(client, space=board.bot.space, ignore_bots=True)
+    board.bot.authors = AuthorFilter(client, space=board.bot.space)
     board.bot.me_id = "bot-1"
     board.canvas = Canvas(client, "c1")
     board.canvas_channel_name = "voice-room"
@@ -258,6 +259,50 @@ def test_reconcile_asks_the_server_for_its_largest_page():
     client.respond("GET", "/channels/c1/canvas/objects", {"objects": [], "has_more": False, "latest_seq": 1})
     asyncio.run(board.reconcile())
     assert client.calls[-1][3]["limit"] == 2000
+
+
+def slow_canvas(client):
+    """Makes each canvas call suspend like its http round trip, so two commands can interleave."""
+    orig = client.call
+    placed = iter(range(1, 100))
+
+    async def call(method, path, body=None, **kwargs):
+        if "/canvas/" not in path:
+            return await orig(method, path, body, **kwargs)
+        await asyncio.sleep(0.02)
+        n = next(placed)
+        return {"id": f"o{n}", "seq": n} if path.endswith("/objects") else {"seq": n}
+
+    client.call = call
+
+
+def test_two_adds_in_flight_get_distinct_slots():
+    client = setup()
+    slow_canvas(client)
+    first, second = message("!board add one", "m1"), message("!board add two", "m2")
+
+    async def both():
+        await asyncio.gather(board.bot.process_message(first), board.bot.process_message(second))
+
+    asyncio.run(both())
+    slots = sorted(row[1] for row in board.active_items(board.bot.store.connection))
+    assert slots == [0, 1], slots
+
+
+def test_two_moves_to_one_target_in_flight_do_not_collide():
+    client = setup()
+    slow_canvas(client)
+    conn = board.bot.store.connection
+    board._insert_item(conn, "s0", 0, "a", 1, "u1")
+    board._insert_item(conn, "s1", 1, "b", 2, "u1")
+    first, second = message("!board move 1 4", "m1"), message("!board move 2 4", "m2")
+
+    async def both():
+        await asyncio.gather(board.bot.process_message(first), board.bot.process_message(second))
+
+    asyncio.run(both())
+    slots = sorted(row[1] for row in board.active_items(conn))
+    assert slots == [1, 3], slots
 
 
 if __name__ == "__main__":

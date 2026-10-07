@@ -169,9 +169,9 @@ This bot persists the largest `seq` it has seen, and on every connect compares i
 The first connect only seeds it.
 A head still ahead of everything received after a short wait is logged as a gap marker in the transcript and the bot's stdout, and counted by `!modlog gaps`.
 The cursor is clock-seeded, so the first reconnect after a server restart always reads as a possible gap, which is the safe direction.
-To keep that apart from a real hole, the bot also reads `/version` on each connect and remembers a build fingerprint (the release version plus its capability list, the only build signal `/version` exposes).
+To keep that apart from a real hole, the bot also reads `/version` on each connect and remembers a build fingerprint (the release version, its capability list and the `build_id` git sha when the server sends one).
 A gap where the fingerprint changed is recorded as "server restarted, events may have been missed"; one on an unchanged fingerprint is a plain gap, and `!modlog gaps` counts them separately.
-Two deploys of `main` with the same version and capabilities look identical, so those still read as plain gaps.
+A server too old to send `build_id` falls back to version and capabilities, where two deploys of `main` look identical and still read as plain gaps.
 The first connect seeds the seq and the fingerprint and records nothing.
 
 ## Output

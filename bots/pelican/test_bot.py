@@ -129,7 +129,7 @@ def setup(*, confirm=True):
     client.respond("GET", "/roles", ROLE_DEFS)
     pelican.bot.client = client
     pelican.bot.space = Space(client)
-    pelican.bot.authors = AuthorFilter(client, space=pelican.bot.space, ignore_bots=True)
+    pelican.bot.authors = AuthorFilter(client, space=pelican.bot.space)
     pelican.bot.me_id = "bot-1"
     asyncio.run(pelican.bot.space.refresh_roles())
     asyncio.run(pelican.bot.space.refresh_members())

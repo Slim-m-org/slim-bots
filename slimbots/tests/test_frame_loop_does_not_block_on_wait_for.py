@@ -24,7 +24,7 @@ async def a_bot():
     bot = Bot(prefix="!")
     bot.client = client
     bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     bot.me_id = "bot-1"
     await bot.space.refresh_members()
     return bot, client

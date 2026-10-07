@@ -19,7 +19,7 @@ async def make(monkeypatch, initial_roles):
     client = FakeAsyncClient()
     bot = Bot(channels={"text"})
     bot.client, bot.space, bot.me_id = client, Space(client), "bot-1"
-    bot.authors = AuthorFilter(client, space=bot.space, ignore_bots=True)
+    bot.authors = AuthorFilter(client, space=bot.space)
     client.respond("GET", "/roles", ROLES)
     client.respond("GET", "/members", [member(initial_roles)])
     await bot.space.refresh_roles()

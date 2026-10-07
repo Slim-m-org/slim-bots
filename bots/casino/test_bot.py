@@ -34,7 +34,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     casino.bot.client = client
     casino.bot.space = Space(client)
-    casino.bot.authors = AuthorFilter(client, space=casino.bot.space, ignore_bots=True)
+    casino.bot.authors = AuthorFilter(client, space=casino.bot.space)
     casino.bot.me_id = "bot-1"
     asyncio.run(casino.bot.space.refresh_members())
     return client
@@ -72,8 +72,10 @@ def test_daily_credits_and_then_cools_down():
     client = setup()
     process(client, message("u1", "!daily", "m1"))
     assert "claimed 500 chips" in client.sent[-1]["content"]
+    assert casino.get_balance(casino.bot.store.connection, "u1") == 500
     process(client, message("u1", "!daily", "m2"))
     assert "already claimed" in client.sent[-1]["content"]
+    assert casino.get_balance(casino.bot.store.connection, "u1") == 500
 
 
 def test_give_moves_chips_between_accounts():
@@ -201,6 +203,42 @@ def test_blackjack_split_creates_two_hands():
         restore_draw_card(original)
     assert "split into two hands" in client.sent[-1]["content"]
     assert casino.blackjack.has_round(casino.bot.store.connection, "c1", "u1")
+    assert len(casino.blackjack.round_hands(casino.bot.store.connection, "c1", "u1")) == 2
+
+
+def _play(client, cards, *texts, chips=100):
+    casino.credit(casino.bot.store.connection, "u1", chips)
+    original = casino.casino_core.draw_card
+    script_cards(cards)
+    try:
+        process(client, *(message("u1", text, f"m{i}") for i, text in enumerate(texts)))
+    finally:
+        restore_draw_card(original)
+    return casino.get_balance(casino.bot.store.connection, "u1")
+
+
+def test_a_split_debits_the_second_stake():
+    client = setup()
+    assert _play(client, ["8H", "8D", "2C", "5D", "3H", "4H"], "!blackjack 10", "!split") == 80
+
+
+def test_a_split_without_chips_for_the_second_stake_changes_nothing():
+    client = setup()
+    assert _play(client, ["8H", "8D", "2C", "5D", "3H", "4H"], "!blackjack 10", "!split", chips=15) == 5
+    assert "don't have that many chips" in client.sent[-1]["content"]
+    assert len(casino.blackjack.round_hands(casino.bot.store.connection, "c1", "u1")) == 1
+
+
+def test_a_split_of_two_different_cards_is_refused_and_costs_nothing():
+    client = setup()
+    assert _play(client, ["9H", "6H", "2C", "5D"], "!blackjack 10", "!split") == 90
+    assert "can't be split" in client.sent[-1]["content"]
+
+
+def test_a_double_after_a_hit_is_refused_and_costs_nothing():
+    client = setup()
+    assert _play(client, ["5H", "6H", "2C", "5D", "2D"], "!blackjack 10", "!hit", "!double") == 90
+    assert "first two cards" in client.sent[-1]["content"]
 
 
 def test_blackjack_surrender_refunds_half():

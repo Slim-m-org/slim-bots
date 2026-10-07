@@ -111,7 +111,7 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     client.respond("GET", "/members", MEMBERS)
     music.bot.client = client
     music.bot.space = Space(client)
-    music.bot.authors = AuthorFilter(client, space=music.bot.space, ignore_bots=True)
+    music.bot.authors = AuthorFilter(client, space=music.bot.space)
     music.bot.me_id = "bot-1"
     asyncio.run(music.bot.space.refresh_members())
     for channel in VOICE_CHANNELS:
@@ -225,6 +225,24 @@ def test_play_searches_jellyfin_with_the_whole_multiword_query():
         music_core.search_tracks = original
     assert seen == ["daft punk around the world"]
     assert replies(client)[0] == "playing **Daft Punk - Around the World** in #voice-room."
+
+
+def test_a_start_failure_that_is_not_a_player_error_still_leaves_the_call_and_replies():
+    client = setup()
+    original = FakeLocalParticipant.publish_track
+
+    async def timed_out(self, track, options):
+        raise RuntimeError("engine: publish track timed out")
+
+    FakeLocalParticipant.publish_track = timed_out
+    try:
+        scenario(client, f"~play {PUBLIC_URL}")
+    finally:
+        FakeLocalParticipant.publish_track = original
+    voices = music.bot.voice.sessions
+    assert voices and all(v.left for v in voices), "bot is still in the call"
+    assert any("could not start playing" in text for text in replies(client))
+    assert music_cog.active_sessions() == {}
 
 
 def test_play_plays_into_the_invokers_call_as_a_microphone_track_and_leaves_when_done():

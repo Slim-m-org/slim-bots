@@ -138,6 +138,8 @@ class Bot:
         self._fatal_error: BaseException | None = None
         self._main_task: asyncio.Task[Any] | None = None
         self._gateway: Gateway | None = None
+        self._held_live: list[tuple[str | None, dict[str, Any]]] | None = None
+        self._replayed_ids: set[str] = set()
         self.moderation_head: int | None = None
         self._clock: Callable[[], float] = time.monotonic
         self._channel_miss_at: dict[str, float] = {}
@@ -491,6 +493,12 @@ class Bot:
             if not await self._accepts_channel(channel_id, kind):
                 return
             message = frame.get("message") or {}
+            if message.get("id") in self._replayed_ids:
+                return
+            if self._held_live is not None:
+                await guard_dispatch(self._dispatch_event, "on_raw_message", message)
+                self._held_live.append((channel_id, message))
+                return
             self._note_seq(channel_id, message.get("seq"))
             await guard_dispatch(self._dispatch_event, "on_raw_message", message)
             self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
@@ -561,6 +569,7 @@ class Bot:
     async def _replay_page(self, channel_id: str, messages: list[dict[str, Any]]) -> None:
         assert self._cursor_conn is not None
         for message in messages:
+            self._replayed_ids.add(message["id"])
             await guard_dispatch(self.process_message, message)
         cursor.set(self._cursor_conn, channel_id, messages[-1]["seq"])
 
@@ -580,19 +589,51 @@ class Bot:
         if self._ui:
             await register_ui(self.client, self._ui)
         await self._dispatch_event("on_connect")
-        await self._catch_up()
-
         async with await Gateway.open(self.client) as gateway:
             self._gateway = gateway
             head = gateway.hello.get("moderation_seq")
             self.moderation_head = head if isinstance(head, int) else None
             try:
-                reset_delay()
-                await self._dispatch_event("on_ready")
-                async for frame in gateway.frames():
-                    await self._handle_frame(frame)
+                await self._serve(gateway, reset_delay)
             finally:
                 self._gateway = None
+                self._held_live = None
+
+    async def _serve(self, gateway: Gateway, reset_delay: Callable[[], None]) -> None:
+        """Runs the frame loop and the backlog replay side by side, so a replayed command has a live socket."""
+        self._held_live = []
+        self._replayed_ids.clear()
+        ready = asyncio.create_task(self._catch_up_then_ready(reset_delay))
+        pump = asyncio.create_task(self._pump_frames(gateway))
+        pending = {ready, pump}
+        try:
+            while pump in pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+        finally:
+            for task in (ready, pump):
+                task.cancel()
+            await asyncio.gather(ready, pump, return_exceptions=True)
+
+    async def _pump_frames(self, gateway: Gateway) -> None:
+        async for frame in gateway.frames():
+            await self._handle_frame(frame)
+
+    async def _catch_up_then_ready(self, reset_delay: Callable[[], None]) -> None:
+        await self._catch_up()
+        self._release_held_messages()
+        reset_delay()
+        await self._dispatch_event("on_ready")
+
+    def _release_held_messages(self) -> None:
+        """Processes the live messages held during the replay, minus any the replay already covered; never awaits."""
+        for channel_id, message in self._held_live or []:
+            if message.get("id") in self._replayed_ids:
+                continue
+            self._note_seq(channel_id, message.get("seq"))
+            self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
+        self._held_live = None
 
     async def send_frame(self, frame):
         """Sends a client->server frame (typing, canvas.cursor, canvas.stroke_preview) over the open gateway."""
@@ -663,7 +704,7 @@ class Bot:
         base, token = self._resolve_config(url, token)
         self.client = AsyncClient(base, token, self.user_agent)
         self.space = Space(self.client)
-        self.authors = AuthorFilter(self.client, space=self.space, ignore_bots=self.ignore_bots)
+        self.authors = AuthorFilter(self.client, space=self.space)
         self._open_cursor_if_scoped()
         if self._store_migrate is not None:
             await self.open_store(migrate=self._store_migrate)

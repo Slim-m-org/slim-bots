@@ -25,7 +25,9 @@ python3 bot.py
 
 `SLIMM_ROLES` is a comma-separated `name:role-id` map. Only the roles listed
 there are offered; a request for anything else is refused with a message
-that says so, never ignored silently. `SLIMM_CHANNELS` should name exactly
+that says so, never ignored silently. Names may hold spaces and are matched
+ignoring case; the bot refuses to start if one is `mine`, `remove`, starts
+with `remove `, or repeats another once case is ignored. `SLIMM_CHANNELS` should name exactly
 one channel here - `bot.channel` is that one channel - the one this bot
 watches and posts in. See "Getting a token" and "What your bot may do" in
 `docs/bots/building-bots.md` for how to find channel and role ids, and how

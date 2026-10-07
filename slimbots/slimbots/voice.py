@@ -100,19 +100,22 @@ class VoiceSession:
                 **codec_options,
             ),
         )
+        self._screen_share_sids = [sid for sid in [getattr(video_publication, "sid", None)] if sid]
         audio_source = (
             rtc.AudioSource(sample_rate, num_channels)
             if audio_queue_ms is None
             else rtc.AudioSource(sample_rate, num_channels, queue_size_ms=audio_queue_ms)
         )
         audio_track = rtc.LocalAudioTrack.create_audio_track("screen-audio", audio_source)
-        audio_publication = await self.room.local_participant.publish_track(
-            audio_track,
-            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_SCREENSHARE_AUDIO, audio_encoding=audio_encoding),
-        )
-        self._screen_share_sids = [
-            sid for sid in (getattr(p, "sid", None) for p in (video_publication, audio_publication)) if sid
-        ]
+        try:
+            audio_publication = await self.room.local_participant.publish_track(
+                audio_track,
+                rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_SCREENSHARE_AUDIO, audio_encoding=audio_encoding),
+            )
+        except BaseException:
+            await self.unpublish_screen_share()
+            raise
+        self._screen_share_sids += [sid for sid in [getattr(audio_publication, "sid", None)] if sid]
         return video_source, audio_source
 
     async def unpublish_screen_share(self) -> None:

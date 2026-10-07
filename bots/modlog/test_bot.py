@@ -34,7 +34,7 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     modlog.bot.client = client
     modlog.bot.space = Space(client)
-    modlog.bot.authors = AuthorFilter(client, space=modlog.bot.space, ignore_bots=True)
+    modlog.bot.authors = AuthorFilter(client, space=modlog.bot.space)
     modlog.bot.me_id = "bot-1"
     asyncio.run(modlog.bot.space.refresh_members())
     return client
@@ -229,8 +229,11 @@ def moderation_gap_count():
     return modlog.bot.store.connection.execute("SELECT COUNT(*) FROM moderation_gaps").fetchone()[0]
 
 
-def serve_version(version, capabilities=("push",)):
-    modlog.bot.client.respond("GET", "/version", {"version": version, "capabilities": list(capabilities)})
+def serve_version(version, capabilities=("push",), build_id=None):
+    body = {"version": version, "capabilities": list(capabilities)}
+    if build_id is not None:
+        body["build_id"] = build_id
+    modlog.bot.client.respond("GET", "/version", body)
 
 
 def ready_with_head(head, version="0.76.0"):
@@ -300,6 +303,42 @@ def test_a_head_ahead_after_the_build_changed_is_a_restart_gap():
     text = modlog.bot.store.connection.execute("SELECT text FROM events WHERE kind = 'gap'").fetchone()[0]
     assert text == "server restarted, events may have been missed"
     assert stored_build() == "0.77.0+push"
+
+
+def test_a_redeploy_with_a_new_build_id_is_a_restart_gap():
+    setup()
+    serve_version("0.76.0", build_id="aaaaaaa")
+    modlog.bot.moderation_head = 50
+    asyncio.run(modlog.check_moderation_cursor())
+    dispatch_frame({"type": "member.removed", "user_id": "u1", "seq": 100})
+    serve_version("0.76.0", build_id="bbbbbbb")
+    modlog.bot.moderation_head = 200
+
+    async def run():
+        await modlog.check_moderation_cursor()
+        while modlog.bot._background_tasks:
+            await list(modlog.bot._background_tasks)[0]
+
+    asyncio.run(run())
+    assert moderation_gap_count() == 1 and restart_gap_count() == 1
+    assert stored_build() == "0.76.0+push@bbbbbbb"
+
+
+def test_the_same_build_id_stays_a_plain_gap():
+    setup()
+    serve_version("0.76.0", build_id="aaaaaaa")
+    modlog.bot.moderation_head = 50
+    asyncio.run(modlog.check_moderation_cursor())
+    dispatch_frame({"type": "member.removed", "user_id": "u1", "seq": 100})
+    modlog.bot.moderation_head = 200
+
+    async def run():
+        await modlog.check_moderation_cursor()
+        while modlog.bot._background_tasks:
+            await list(modlog.bot._background_tasks)[0]
+
+    asyncio.run(run())
+    assert moderation_gap_count() == 1 and restart_gap_count() == 0
 
 
 def test_a_changed_capability_list_counts_as_a_changed_build():

@@ -53,7 +53,7 @@ def started_session(client, item=None):
 
     session._start_pipeline = fake_pipeline
     session._teardown_pipeline = fake_teardown
-    session.panel = panel.Panel(jellyfin.bot, "c1", "#voice-room")
+    session.panel = panel.Panel(jellyfin.bot, "c1")
     asyncio.run(session._publish())
     asyncio.run(session.panel.post(session))
     session_registry.add(session)

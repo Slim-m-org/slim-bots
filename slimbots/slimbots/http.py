@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import urllib.parse
 import uuid
 from typing import Any, Awaitable, Callable
@@ -15,6 +16,7 @@ from .components import to_wire as components_to_wire
 from .models import Attachment, DmConversation, Message
 
 DEFAULT_TIMEOUT = 15.0
+log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -171,7 +173,7 @@ class AsyncClient:
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
         fallback_content: str | None = None, components: Rows | None = None,
     ) -> Message:
-        """Posts a message under a stable id; on rejection with `embeds` set, retries once as plain `fallback_content`."""
+        """Posts a message under a stable id; a 400 with `embeds` set retries once as plain `fallback_content`, buttons kept."""
         message_id = message_id or str(uuid.uuid4())
         body: dict[str, Any] = {"id": message_id, "content": content}
         if reply_to_id:
@@ -184,15 +186,12 @@ class AsyncClient:
             body["components"] = components_to_wire(components)
         try:
             data = await self.call("POST", f"/channels/{channel_id}/messages", body)
-        except ApiError:
-            if not embeds or fallback_content is None:
+        except ApiError as err:
+            if err.status != 400 or not embeds or fallback_content is None:
                 raise
-            body = {"id": message_id, "content": fallback_content}
-            if reply_to_id:
-                body["reply_to_id"] = reply_to_id
-            if attachment_ids:
-                body["attachment_ids"] = attachment_ids
-            data = await self.call("POST", f"/channels/{channel_id}/messages", body)
+            log.warning("the server refused the embed (%s); sending %s as plain text", err.reason, message_id)
+            plain = {key: value for key, value in body.items() if key != "embeds"}
+            data = await self.call("POST", f"/channels/{channel_id}/messages", {**plain, "content": fallback_content})
         return Message(data, client=self, channel_id=channel_id)
 
     async def send_ephemeral(

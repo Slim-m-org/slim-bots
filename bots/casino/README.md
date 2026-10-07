@@ -85,7 +85,7 @@ On top of that, every money-moving command first does `INSERT OR IGNORE INTO pro
 This exists for a narrower case than the transaction above: if the bot process crashes after committing a bet's balance change but before its `seq` cursor write lands, the next connection's `/sync` call replays that same message.
 Without the guard it would be charged twice on a machine that merely restarted at a bad moment, not on any actual double-send.
 
-This part of the bot was deliberately left untouched by the framework port: `open_db`, `init_db`, `begin`, `try_consume_request`, `begin_idempotent`, `ensure_account`, `get_balance`, `resolve_amount`, `try_debit` and `credit` are byte-for-byte the same functions as before the port, so `test_concurrency.py` needed no changes at all and still passes against them as-is.
+This part of the bot was deliberately left untouched by the framework port: `init_db`, `begin`, `try_consume_request`, `begin_idempotent`, `ensure_account`, `get_balance`, `resolve_amount`, `try_debit` and `credit` are byte-for-byte the same functions as before the port, so `test_concurrency.py` needed no changes at all and still passes against them as-is.
 It opens several genuinely separate sqlite connections on real OS threads against the same database file and hammers one account from all of them at once:
 
 - fifty concurrent `!flip all` attempts against one balance - exactly one may win the race, and the balance never goes negative

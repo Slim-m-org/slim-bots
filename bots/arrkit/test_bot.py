@@ -290,6 +290,36 @@ def test_the_service_refusing_the_add_is_reported_in_the_chooser():
     assert "could not add **A (2000)**: no root folder." in client.edited[-1]["content"]
 
 
+def test_a_second_press_while_the_ack_is_in_flight_adds_nothing_more():
+    client, api = fresh(**{"/lookup": LOOKUP})
+    orig = client.ack_interaction
+
+    async def slow_ack(*args, **kwargs):
+        await asyncio.sleep(0)
+        return await orig(*args, **kwargs)
+
+    client.ack_interaction = slow_ack
+    say("!demo add a")
+
+    async def flow():
+        message = next(m for m in reversed(client.sent) if m.get("components"))
+        frame = harness.press("demopick:sel:1", message["id"], "u1")
+        await harness.bot._handle_frame(frame)
+        await harness.bot._handle_frame(dict(frame, interaction_id="i-second"))
+        await harness.settle()
+
+    asyncio.run(flow())
+    assert len(api.posts()) == 1, f"adds: {len(api.posts())}"
+
+
+def test_an_unexpected_error_in_the_add_still_closes_the_chooser():
+    client, api = fresh(**{"/lookup": LOOKUP})
+    api.refuse_posts = ValueError("bad json")
+    say("!demo add a")
+    harness.press_chooser(client, ("demopick:sel:0", "u1"))
+    assert client.component_edits[-1]["components"] == [] and "could not add" in client.edited[-1]["content"]
+
+
 def test_everything_already_in_the_library_opens_no_chooser():
     client, _ = fresh(**{"/lookup": [LOOKUP[1]]})
     say("!demo add old")

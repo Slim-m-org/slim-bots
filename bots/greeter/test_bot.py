@@ -31,7 +31,7 @@ def setup(pinned=None):
     greeter.bot.channels = {pinned} if pinned else None
     greeter.bot.client = client
     greeter.bot.space = Space(client)
-    greeter.bot.authors = AuthorFilter(client, space=greeter.bot.space, ignore_bots=True)
+    greeter.bot.authors = AuthorFilter(client, space=greeter.bot.space)
     greeter.bot.store = None
     greeter.bot.data_path = os.path.join(tempfile.mkdtemp(), "greeter.db")
     asyncio.run(greeter.bot.space.refresh_members())

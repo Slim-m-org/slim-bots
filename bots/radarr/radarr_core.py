@@ -3,7 +3,7 @@
 import uuid
 
 from arrkit import arr, history, store
-from arrkit.service import AuthError, Service  # noqa: F401 - re-exported for the cog and bot
+from arrkit.service import Service
 
 NAMESPACE = uuid.UUID("72616461-7272-4000-8000-626f74000000")
 SERVICE = Service("radarr", "/api/v3")

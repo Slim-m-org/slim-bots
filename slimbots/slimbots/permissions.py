@@ -23,6 +23,7 @@ class Permissions:
     MANAGE_SERVER = 1 << 15
     MENTION_EVERYONE = 1 << 16
     RUN_CODE = 1 << 17
+    VIEW_MODERATION_HISTORY = 1 << 18
 
     @classmethod
     def contains(cls, bits: int, permission: int) -> bool:
@@ -30,6 +31,11 @@ class Permissions:
         if bits & cls.ADMINISTRATOR:
             return True
         return (bits & permission) == permission
+
+    @classmethod
+    def is_one_known_bit(cls, value: int) -> bool:
+        """Whether `value` is exactly one of the named bits, the rule the server applies to a UI entry's permission."""
+        return any(value == bit for name, bit in vars(cls).items() if name.isupper() and name != "NONE" and isinstance(bit, int))
 
     @classmethod
     def names(cls, bits: int) -> list[str]:

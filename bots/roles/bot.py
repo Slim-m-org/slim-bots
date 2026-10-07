@@ -12,8 +12,27 @@ LISTING_NAMESPACE = uuid.UUID("d1f6a9d0-0f0f-4b6a-9b0f-2f6b6f0f9a10")
 
 bot = Bot(prefix="!", require_channels=True)
 ROLES = bot.setting("SLIMM_ROLES", {}, type=dict)
-bot.my_permissions = 0
-_role_permissions_cache = {}
+
+
+def normalize(name):
+    return " ".join(name.split()).casefold()
+
+
+def find_role(name):
+    """The configured (name, id) a typed name means, matched ignoring case and spacing, or None."""
+    wanted = normalize(name)
+    return next(((known, role_id) for known, role_id in ROLES.items() if normalize(known) == wanted), None)
+
+
+def unusable_role_names(mapping):
+    """Names nobody could type: a subcommand word, or a repeat of an earlier name once case is ignored."""
+    seen, bad = set(), []
+    for name in mapping:
+        key = normalize(name)
+        if key in ("mine", "remove") or key.startswith("remove ") or key in seen:
+            bad.append(name)
+        seen.add(key)
+    return bad
 
 
 def listing_message_id():
@@ -41,24 +60,26 @@ async def post_listing():
         await bot.client.send(bot.channel, listing_text(), message_id=message_id)
 
 
+async def my_permissions():
+    """The bot's own bits, read fresh: an admin grants them while it runs, and diagnostics must see that."""
+    return (await bot.client.me()).get("permissions", 0)
+
+
 async def fetch_role_permissions(role_id):
     """The configured role's own permission bits, or None if unreadable (needs MANAGE_ROLES, or the role is gone)."""
-    if role_id in _role_permissions_cache:
-        return _role_permissions_cache[role_id]
     try:
         roles = await bot.client.list_roles()
     except ApiError as err:
         if is_forbidden(err):
             return None
         raise
-    for role in roles:
-        _role_permissions_cache[role["id"]] = role["permissions"]
-    return _role_permissions_cache.get(role_id)
+    return next((role["permissions"] for role in roles if role["id"] == role_id), None)
 
 
 async def escalation_explanation(role_name, role_id):
     """Names the exact permission gap - a 403 alone cannot say which guard fired, so this asks `GET /roles` too."""
-    if not (bot.my_permissions & Permissions.MANAGE_ROLES):
+    held = await my_permissions()
+    if not (held & Permissions.MANAGE_ROLES):
         return (
             "I can't grant or remove any role here, not even a zero-permission one - I don't hold MANAGE_ROLES "
             "myself. An admin needs to grant this bot's own account MANAGE_ROLES before self-service roles can work at all."
@@ -69,7 +90,7 @@ async def escalation_explanation(role_name, role_id):
             f"I hold MANAGE_ROLES but still can't grant `{role_name}` - either it was deleted, or something else "
             "is wrong. An admin should check it still exists."
         )
-    missing = Permissions.names(role_permissions & ~bot.my_permissions)
+    missing = Permissions.names(role_permissions & ~held)
     if not missing:
         return (
             f"granting `{role_name}` was refused, but I hold everything it carries - an admin should check my "
@@ -82,11 +103,12 @@ async def escalation_explanation(role_name, role_id):
     )
 
 
-async def grant(ctx, role_name):
-    role_id = ROLES.get(role_name)
-    if role_id is None:
-        await ctx.reply(f"no role called `{role_name}` is offered here - try `{bot.prefix}roles`.")
+async def grant(ctx, typed):
+    found = find_role(typed)
+    if found is None:
+        await ctx.reply(f"no role called `{typed}` is offered here - try `{bot.prefix}roles`.")
         return
+    role_name, role_id = found
     try:
         await bot.space.grant_role(ctx.author, role_id)
     except ApiError as err:
@@ -100,11 +122,12 @@ async def grant(ctx, role_name):
     await ctx.reply(f"done - you have `{role_name}` now.")
 
 
-async def revoke(ctx, role_name):
-    role_id = ROLES.get(role_name)
-    if role_id is None:
-        await ctx.reply(f"no role called `{role_name}` is offered here - try `{bot.prefix}roles`.")
+async def revoke(ctx, typed):
+    found = find_role(typed)
+    if found is None:
+        await ctx.reply(f"no role called `{typed}` is offered here - try `{bot.prefix}roles`.")
         return
+    role_name, role_id = found
     try:
         await bot.space.revoke_role(ctx.author, role_id)
     except ApiError as err:
@@ -126,8 +149,9 @@ async def show_mine(ctx):
 
 async def show_status(ctx):
     """The same diagnosis a failed grant gives, but on demand and for every configured role at once."""
-    lines = [f"I hold: {', '.join(Permissions.names(bot.my_permissions)) or 'nothing'}"]
-    if not (bot.my_permissions & Permissions.MANAGE_ROLES):
+    held = await my_permissions()
+    lines = [f"I hold: {', '.join(Permissions.names(held)) or 'nothing'}"]
+    if not (held & Permissions.MANAGE_ROLES):
         lines.append("MANAGE_ROLES is missing, so no role here is grantable yet.")
         await ctx.reply("\n".join(lines))
         return
@@ -136,7 +160,7 @@ async def show_status(ctx):
         if role_permissions is None:
             lines.append(f"`{name}`: cannot verify (role missing or unreadable)")
             continue
-        missing = Permissions.names(role_permissions & ~bot.my_permissions)
+        missing = Permissions.names(role_permissions & ~held)
         lines.append(f"`{name}`: grantable" if not missing else f"`{name}`: missing {', '.join(missing)}")
     await ctx.reply("\n".join(lines))
 
@@ -150,27 +174,27 @@ async def roles_cmd(ctx, sub: str = None):
 
 
 @bot.command(name="role", help="Add a role, `remove <name>` to drop it, `mine` to see what you hold", usage="<name> | remove <name> | mine")
-async def role_cmd(ctx, first: str, second: str = None):
-    action = first.lower()
-    if action == "mine":
+async def role_cmd(ctx, name: str):
+    action, _, rest = name.strip().partition(" ")
+    if normalize(name) == "mine":
         await show_mine(ctx)
         return
-    if action == "remove" and second:
-        await revoke(ctx, second)
+    if action.lower() == "remove" and rest.strip():
+        await revoke(ctx, rest.strip())
         return
-    await grant(ctx, first)
+    await grant(ctx, name.strip())
 
 
 @bot.event
 async def on_connect():
-    bot.my_permissions = (await bot.client.me()).get("permissions", 0)
-    _role_permissions_cache.clear()
     await post_listing()
 
 
 def main():
     if not ROLES:
         raise SystemExit("set SLIMM_ROLES")
+    if unusable := unusable_role_names(ROLES):
+        raise SystemExit(f"SLIMM_ROLES has names that cannot be requested (a subcommand word or a case-insensitive repeat): {', '.join(unusable)}")
     try:
         raise SystemExit(bot.run() or 0)
     except RuntimeError as err:

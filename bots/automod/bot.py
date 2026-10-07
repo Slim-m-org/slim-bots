@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """bot-automod: moderator-written rules (flood, links, words, mention spam) that act and log; see README.md."""
 
+import contextlib
 import sqlite3
 import time
 import uuid
@@ -100,25 +101,13 @@ def _log_action(conn, rule):
     conn.commit()
 
 
-async def _channel_by_path(path):
-    """`category/channel`, or a bare `channel`, matched by name case-insensitively; None when nothing matches."""
-    category_name, _, channel_name = path.rpartition("/")
-    await bot.space.refresh_channels()
-    candidates = [c for c in bot.space.channels.values() if c.name.lower() == channel_name.lower()]
-    if not category_name:
-        return candidates[0].id if candidates else None
-    categories = await bot.client.call("GET", "/categories") or []
-    wanted = {c["id"] for c in categories if c.get("name", "").lower() == category_name.lower()}
-    return next((c.id for c in candidates if c.category_id in wanted), None)
-
-
 async def write_modlog(text):
     """Posts to `AUTOMOD_LOG_CHANNEL` when set; a bad path is reported on stdout once per call, never fatal."""
     global _log_channel_id
     if not LOG_CHANNEL:
         return
     if _log_channel_id is None:
-        _log_channel_id = await _channel_by_path(LOG_CHANNEL)
+        _log_channel_id = await bot.space.find_channel_by_path(LOG_CHANNEL)
     if _log_channel_id is None:
         print(f"no log channel: nothing matches AUTOMOD_LOG_CHANNEL={LOG_CHANNEL!r}", flush=True)
         return
@@ -150,11 +139,12 @@ async def enforce(message, member, channel_name, rule, reason, timeout_seconds):
     if timeout_seconds:
         timeout_call = bot.client.time_out_member(member.id, timeout_seconds, reason=f"automod: {rule}")
         outcomes.append(await _attempt(f"timed out {timeout_seconds}s", timeout_call))
-    else:
-        await bot.client.send(
-            message["channel_id"], f"{member.mention()}, that message was removed by automod ({rule}).",
-            message_id=str(uuid.uuid4()),
-        )
+    elif outcomes[0][1] is None:
+        with contextlib.suppress(ApiError):
+            await bot.client.send(
+                message["channel_id"], f"{member.mention()}, that message was removed by automod ({rule}).",
+                message_id=str(uuid.uuid4()),
+            )
     await bot.store.run(_log_action, rule)
     await write_modlog(_describe(member, channel_name, rule, reason, outcomes))
 

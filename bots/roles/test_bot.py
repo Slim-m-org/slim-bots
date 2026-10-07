@@ -26,6 +26,8 @@ def message(author_id, content, msg_id="m1"):
 
 
 def setup(*, my_permissions=32):  # MANAGE_ROLES
+    roles.ROLES.clear()
+    roles.ROLES.update({"member": "r-member", "helper": "r-helper"})
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/roles", ROLE_DEFS)
@@ -34,11 +36,9 @@ def setup(*, my_permissions=32):  # MANAGE_ROLES
     client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", None)
     roles.bot.client = client
     roles.bot.space = Space(client)
-    roles.bot.authors = AuthorFilter(client, space=roles.bot.space, ignore_bots=True)
+    roles.bot.authors = AuthorFilter(client, space=roles.bot.space)
     roles.bot.me_id = "bot-1"
-    roles._role_permissions_cache.clear()
     asyncio.run(roles.bot.space.refresh_members())
-    roles.bot.my_permissions = my_permissions
     return client
 
 
@@ -85,6 +85,36 @@ def test_role_replies_name_the_configured_prefix():
 def test_the_roles_setting_parses_into_an_ordered_name_to_id_map():
     assert roles.ROLES == {"member": "r-member", "helper": "r-helper"}
     assert list(roles.ROLES) == ["member", "helper"]
+
+
+def with_roles(mapping):
+    roles.ROLES.clear()
+    roles.ROLES.update(mapping)
+
+
+def test_a_multi_word_role_name_can_be_requested_and_removed():
+    client = setup()
+    with_roles({"Game Night": "r-member"})
+    client.respond("PUT", "/members/u1/roles/r-member", None)
+    client.respond("DELETE", "/members/u1/roles/r-member", None)
+    process(client, message("u1", "!role Game Night"))
+    assert "you have `Game Night` now" in client.sent[-1]["content"], client.sent[-1]["content"]
+    process(client, message("u1", "!role remove game  night", "m2"))
+    assert "removed `Game Night`" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_role_lookup_ignores_case():
+    client = setup()
+    with_roles({"gamer": "r-member"})
+    client.respond("PUT", "/members/u1/roles/r-member", None)
+    process(client, message("u1", "!role GAMER"))
+    assert "you have `gamer` now" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_names_the_subcommands_or_one_another_are_refused_at_startup():
+    assert roles.unusable_role_names({"member": "a", "Mine": "b", "remove": "c", "Remove x": "d"}) == ["Mine", "remove", "Remove x"]
+    assert roles.unusable_role_names({"Gamer": "a", "gamer": "b"}) == ["gamer"]
+    assert roles.unusable_role_names({"member": "a", "Game Night": "b"}) == []
 
 
 def test_role_refuses_an_unlisted_name():
@@ -137,6 +167,71 @@ def test_roles_status_reports_grantable_and_missing():
     reply = client.sent[-1]["content"]
     assert "`member`: grantable" in reply
     assert "`helper`: missing MANAGE_MESSAGES" in reply
+
+
+def test_a_refused_revoke_names_the_missing_manage_roles():
+    from slimbots.http import ApiError
+
+    client = setup(my_permissions=0)
+    client.respond("DELETE", "/members/u1/roles/r-member", ApiError(403, {"error": "forbidden"}))
+    process(client, message("u1", "!role remove member"))
+    assert "MANAGE_ROLES" in client.sent[-1]["content"]
+
+
+def test_a_missing_role_on_grant_is_called_misconfigured():
+    from slimbots.http import ApiError
+
+    client = setup()
+    client.respond("PUT", "/members/u1/roles/r-member", ApiError(404, {"error": "not found"}))
+    process(client, message("u1", "!role member"))
+    assert "misconfigured" in client.sent[-1]["content"]
+
+
+def test_status_sees_a_permission_granted_after_connect():
+    client = setup(my_permissions=0)
+    process(client, message("u1", "!roles status"))
+    assert "MANAGE_ROLES is missing" in client.sent[-1]["content"]
+    client.respond("GET", "/me", {"id": "bot-1", "permissions": 32})
+    process(client, message("u1", "!roles status", "m2"))
+    assert "MANAGE_ROLES is missing" not in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_status_sees_an_edited_role():
+    client = setup(my_permissions=32)
+    process(client, message("u1", "!roles status"))
+    assert "`helper`: missing MANAGE_MESSAGES" in client.sent[-1]["content"]
+    client.respond("GET", "/roles", [dict(r, permissions=0) if r["id"] == "r-helper" else r for r in ROLE_DEFS])
+    process(client, message("u1", "!roles status", "m2"))
+    assert "`helper`: grantable" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_a_refused_grant_explains_with_the_permissions_held_now():
+    from slimbots.http import ApiError
+
+    client = setup(my_permissions=0)
+    client.respond("PUT", "/members/u1/roles/r-helper", ApiError(403, {"error": "forbidden"}))
+    process(client, message("u1", "!role helper"))
+    assert "MANAGE_ROLES" in client.sent[-1]["content"]
+    client.respond("GET", "/me", {"id": "bot-1", "permissions": 32})
+    process(client, message("u1", "!role helper", "m2"))
+    assert "also carries MANAGE_MESSAGES" in client.sent[-1]["content"], client.sent[-1]["content"]
+
+
+def test_the_listing_is_posted_when_the_old_one_is_gone_and_other_errors_propagate():
+    from slimbots.http import ApiError
+
+    client = setup()
+    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(404, {"error": "not found"}))
+    client.respond("POST", "/channels/c1/messages", {"id": roles.listing_message_id()})
+    asyncio.run(roles.post_listing())
+    assert "Self-service roles" in client.sent[-1]["content"]
+    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(500, {"error": "boom"}))
+    try:
+        asyncio.run(roles.post_listing())
+    except ApiError as err:
+        assert err.status == 500
+    else:
+        raise AssertionError("a non-404 edit failure must propagate")
 
 
 def test_another_bot_is_ignored_by_default():

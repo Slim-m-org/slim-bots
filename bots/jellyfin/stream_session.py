@@ -431,9 +431,9 @@ class WatchSession:
     async def stop(self, *, reason="stopped", announce=True):
         final_position = self.position_seconds
         self.finished = True
-        if self._monitor_task is not None:
-            self._monitor_task.cancel()
-            self._monitor_task = None
+        monitor, self._monitor_task = self._monitor_task, None
+        if monitor is not None and monitor is not asyncio.current_task():
+            monitor.cancel()
         self._cancel_next_timer()
         await self._teardown_pipeline()
         await self._report_progress(final_position, finished=self.ended_naturally)

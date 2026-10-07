@@ -22,9 +22,7 @@ class Canvas:
         self, kind: str, *, x: float, y: float, w: float, h: float,
         props: dict[str, Any] | None = None, object_id: str | None = None,
     ) -> Any:
-        body: dict[str, Any] = {"id": object_id or str(uuid.uuid4()), "kind": kind, "x": x, "y": y, "w": w, "h": h}
-        if props is not None:
-            body["props"] = props
+        body: dict[str, Any] = {"id": object_id or str(uuid.uuid4()), "kind": kind, "x": x, "y": y, "w": w, "h": h, "props": props or {}}
         return await self._client.call("POST", f"/channels/{self.channel_id}/canvas/objects", body)
 
     async def move(

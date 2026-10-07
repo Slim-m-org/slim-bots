@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CANVAS_CHANNEL resolution: the new mode and the backward-compatible fallback; run directly: python3 test_canvas_channel.py."""
 
+import asyncio
 import os
 import sys
 
@@ -80,6 +81,19 @@ def test_fallback_refuses_when_more_than_one_channel_is_configured():
         watched_channel_ids={"v1", "t1"}, canvas_channel_setting=None,
     )
     expect_runtime_error("CANVAS_CHANNEL")
+
+
+def test_a_bad_canvas_channel_is_fatal_at_connect_not_swallowed():
+    setup(channels=[text_channel("t1", "general")], watched_channel_ids={"t1"}, canvas_channel_setting="t1")
+    board.bot._fatal_error = None
+    board.canvas = None
+
+    async def connect():
+        await board.bot._dispatch_event("on_connect")
+        await asyncio.gather(*board.bot._background_tasks, return_exceptions=True)
+
+    asyncio.run(connect())
+    assert isinstance(board.bot._fatal_error, RuntimeError) and "voice channel" in str(board.bot._fatal_error)
 
 
 if __name__ == "__main__":

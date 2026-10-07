@@ -150,14 +150,16 @@ async def note_moderation_seq(frame):
 
 
 async def current_build():
-    """The server's identity from /version (release version plus capabilities, its only build signal); None when unreadable."""
+    """The server's identity from /version (version, capabilities and the git build_id when it sends one); None when unreadable."""
     try:
         info = await bot.client.call("GET", "/version")
     except ApiError:
         return None
     if not isinstance(info, dict) or "version" not in info:
         return None
-    return f"{info['version']}+{','.join(sorted(info.get('capabilities') or []))}"
+    build = f"{info['version']}+{','.join(sorted(info.get('capabilities') or []))}"
+    build_id = info.get("build_id")
+    return f"{build}@{build_id}" if isinstance(build_id, str) and build_id else build
 
 
 async def confirm_moderation_gap(last_seq, head, after_restart):

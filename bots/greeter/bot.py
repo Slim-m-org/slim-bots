@@ -37,25 +37,13 @@ def _write_setting(conn, key, value):
     conn.commit()
 
 
-async def _channel_by_path(path):
-    """`category/channel`, or a bare `channel`, matched by name case-insensitively; None when nothing matches."""
-    category_name, _, channel_name = path.rpartition("/")
-    await bot.space.refresh_channels()
-    candidates = [c for c in bot.space.channels.values() if c.name.lower() == channel_name.lower()]
-    if not category_name:
-        return candidates[0].id if candidates else None
-    categories = await bot.client.call("GET", "/categories") or []
-    wanted = {c["id"] for c in categories if c.get("name", "").lower() == category_name.lower()}
-    return next((c.id for c in candidates if c.category_id in wanted), None)
-
-
 async def welcome_channel():
     """SLIMM_CHANNELS pins it outright; otherwise an admin's `!welcome here`, else `GREETER_CHANNEL`."""
     if bot.channel:
         return bot.channel
     store = await bot.open_store()
     stored = await store.run(_read_setting, CHANNEL_KEY)
-    return stored or await _channel_by_path(GREETER_CHANNEL)
+    return stored or await bot.space.find_channel_by_path(GREETER_CHANNEL)
 
 
 @bot.event

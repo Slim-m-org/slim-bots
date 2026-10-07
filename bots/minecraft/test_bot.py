@@ -49,7 +49,7 @@ async def harness(use_rcon=True):
     client.respond("GET", "/channels", [{"id": "c-mc", "name": "minecraft", "kind": "text", "restricted": False}])
     mc.bot.client = client
     mc.bot.space = Space(client)
-    mc.bot.authors = AuthorFilter(client, space=mc.bot.space, ignore_bots=True)
+    mc.bot.authors = AuthorFilter(client, space=mc.bot.space)
     mc.bot.me_id = "bot-1"
     mc.bot.channels = {"c-mc"}
     await mc.bot.space.refresh_members()

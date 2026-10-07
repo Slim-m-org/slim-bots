@@ -1,0 +1,24 @@
+{
+  "hidden": [
+    {"from": "0000", "to": "001F", "why": "C0 controls"},
+    {"from": "007F", "to": "009F", "why": "DEL and C1 controls"},
+    {"from": "00AD", "to": "00AD", "why": "soft hyphen"},
+    {"from": "034F", "to": "034F", "why": "combining grapheme joiner"},
+    {"from": "061C", "to": "061C", "why": "Arabic letter mark"},
+    {"from": "115F", "to": "1160", "why": "hangul choseong and jungseong fillers"},
+    {"from": "17B4", "to": "17B5", "why": "khmer inherent vowels, drawn as nothing"},
+    {"from": "180E", "to": "180E", "why": "mongolian vowel separator"},
+    {"from": "200B", "to": "200F", "why": "zero-width space and joiners, LRM, RLM"},
+    {"from": "2028", "to": "2029", "why": "line and paragraph separators"},
+    {"from": "202A", "to": "202E", "why": "bidi embeddings and overrides"},
+    {"from": "2060", "to": "206F", "why": "word joiner, invisible operators, bidi isolates"},
+    {"from": "2800", "to": "2800", "why": "braille blank"},
+    {"from": "3164", "to": "3164", "why": "hangul filler"},
+    {"from": "FEFF", "to": "FEFF", "why": "zero-width no-break space"},
+    {"from": "FFA0", "to": "FFA0", "why": "halfwidth hangul filler"},
+    {"from": "FFF9", "to": "FFFC", "why": "interlinear annotation, object replacement"},
+    {"from": "E0000", "to": "E007F", "why": "tag characters"}
+  ],
+  "plain": ["0061", "0020", "00E9", "4E2D", "FE0F", "2764", "1F600"],
+  "code_layout_exempt": ["0009", "000A", "000D"]
+}

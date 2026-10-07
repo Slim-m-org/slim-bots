@@ -5,6 +5,8 @@ import asyncio
 import os
 import sqlite3
 import sys
+import time
+import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -69,6 +71,47 @@ def test_a_jellyfin_user_already_linked_to_someone_else_is_refused():
         process(client, message("!jellyfin link alice"))
     assert link_of("u1") is None and link_of("u2") == ("jf-a", "Alice")
     assert "already linked to someone else" in client.ephemerals[-1]["content"]
+
+
+class LinkCtx:
+    def __init__(self, user_id):
+        self.author = type("Author", (), {"id": user_id})()
+        self.bot = jellyfin.bot
+        self.replies = []
+
+    async def reply(self, text=None, **_kwargs):
+        self.replies.append(text)
+
+    async def reply_ephemeral(self, text, **_kwargs):
+        self.replies.append(text)
+
+
+def test_two_members_linking_one_jellyfin_user_at_once_leave_one_owner():
+    setup()
+
+    def slow_users(path, params=None):
+        time.sleep(0.05)
+        return USERS
+
+    async def both():
+        first, second = LinkCtx("u1"), LinkCtx("u2")
+        await asyncio.gather(accounts.run_link(first, "alice"), accounts.run_link(second, "alice"))
+
+    with with_users(slow_users):
+        asyncio.run(both())
+    owners = jellyfin.bot.store.connection.execute("SELECT slimm_user_id FROM user_links WHERE jellyfin_user_id = 'jf-a'").fetchall()
+    assert len(owners) == 1, owners
+
+
+def test_link_answers_when_jellyfin_is_unreachable():
+    client = setup()
+
+    def down(path, params=None):
+        raise urllib.error.URLError("connection refused")
+
+    with with_users(down):
+        process(client, message("!jellyfin link alice"))
+    assert [m["content"] for m in client.sent] == ["jellyfin is unavailable right now."]
 
 
 def test_unlink_removes_it_and_says_so_when_there_was_nothing():
