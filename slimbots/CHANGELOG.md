@@ -3,6 +3,12 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.11.0
+
+- `@bot.call_control(..., options=[(id, label), ...])` registers a call control that opens a choice instead of firing, 2 to 8 options, and the pick arrives as `interaction.option_id`. It needs a slim-m server with migration 0100; an older one shows a plain button and `option_id` is `None`.
+- `settings` (a gear) is one of the call control icons.
+- `call_control` builds its entry when it is called, so a bad option set fails at the call rather than at the decorator.
+
 ## 0.10.0
 
 - Breaking: `AuthorFilter` no longer takes `ignore_bots`. It was never read. `Bot(ignore_bots=...)` is unchanged.
