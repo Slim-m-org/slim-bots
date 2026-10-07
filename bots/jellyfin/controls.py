@@ -1,4 +1,4 @@
-"""Playback controls shared by the now-playing panel's buttons and, later, the call dock; see README.md."""
+"""Playback controls shared by the now-playing panel's buttons and the call dock; see README.md."""
 
 from __future__ import annotations
 
@@ -118,18 +118,40 @@ CALL_CONTROLS = (
 )
 
 
+QUALITY_CONTROL_ID = "jf-quality"
+
+
+def quality_options():
+    """The dock's Quality choice, one per preset, labelled the way the panel's quality row reads."""
+    return [(name, f"{name.capitalize()} {preset.height}p") for name, preset in quality.PRESETS.items()]
+
+
+async def _session_for(interaction):
+    session = session_registry.session_for_channel(interaction.channel_id)
+    if session is None:
+        voice_channel_id = await interaction.bot.voice.find_member(interaction.user_id)
+        session = session_registry.session_for_channel(voice_channel_id)
+    if session is None:
+        await _refuse(interaction, "nothing is playing in your call.")
+    return session
+
+
 def call_control_handler(action):
     """A dock control acts on the party in the call it was used in, through the same path as a panel button."""
 
     async def handler(interaction):
-        bot = interaction.bot
-        session = session_registry.session_for_channel(interaction.channel_id)
-        if session is None:
-            voice_channel_id = await bot.voice.find_member(interaction.user_id)
-            session = session_registry.session_for_channel(voice_channel_id)
-        if session is None:
-            await _refuse(interaction, "nothing is playing in your call.")
-            return
-        await run_control(interaction, session, action)
+        session = await _session_for(interaction)
+        if session is not None:
+            await run_control(interaction, session, action)
 
     return handler
+
+
+async def on_quality_control(interaction):
+    """The dock's Quality choice; the pick is the preset, through the panel's own quality path."""
+    if interaction.option_id is None:
+        await _refuse(interaction, "pick a quality from the list.")
+        return
+    session = await _session_for(interaction)
+    if session is not None:
+        await run_control(interaction, session, f"q:{interaction.option_id}")

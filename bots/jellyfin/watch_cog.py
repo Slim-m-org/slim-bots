@@ -194,6 +194,9 @@ def setup(bot):
     bot.button(prefix=picker.ID_PREFIX)(picker.on_pick_press)
     for control_id, label, icon, action in controls.CALL_CONTROLS:
         bot.call_control(control_id, label, icon=icon)(controls.call_control_handler(action))
+    bot.call_control(
+        controls.QUALITY_CONTROL_ID, "Quality", icon="settings", options=controls.quality_options(),
+    )(controls.on_quality_control)
 
     @bot.event
     async def on_voice_activity(event):

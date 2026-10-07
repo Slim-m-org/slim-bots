@@ -286,7 +286,9 @@ At most 5 menu entries and 8 call controls, a 32-character label and a 64-charac
 A label may not hold a control, a text-direction mark or a character that draws nothing (the set in `slimbots/hidden_chars.py`, the same one the server uses), and the decorator refuses those too.
 If the server still answers a registration (`PUT /bots/ui` or `PUT /bots/commands`) with a 400, the run logs the server's reason and exits with status 1 instead of reconnecting, because the same body would be refused every time.
 `permission=Permissions.X` hides the entry from members without that bit and the server refuses their use of it, so unlike a command's permission it is enforced.
-`icon` is for call controls and one of `play`, `pause`, `stop`, `skip_next`, `skip_previous`, `volume`, `volume_off`, `repeat`, `shuffle` or `list`.
+`icon` is for call controls and one of `play`, `pause`, `stop`, `skip_next`, `skip_previous`, `volume`, `volume_off`, `repeat`, `shuffle`, `list` or `settings`.
+`options=[("low", "Low 480p"), ("high", "High 1080p")]` on a call control makes it open a choice (2 to 8 options, ids and labels held to the same rules) instead of firing, and the member's pick arrives as `interaction.option_id`.
+A server older than slim-m migration 0100 ignores the options and shows a plain button, so a handler should treat an `option_id` of `None` as "no choice made".
 
 The handler is the same as a button's: it gets an `Interaction` with `kind` (`message_menu` or `call_control`), the member (`user_id`, `user_display_name`) and, for a menu entry, the `message_id` it was used on.
 A call control's `message_id` is `None` and `edit_components` raises on it.

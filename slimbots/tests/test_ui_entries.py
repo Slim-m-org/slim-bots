@@ -9,7 +9,7 @@ from slimbots.http import ApiError
 from slimbots.bot import Bot
 from slimbots.space import Space
 from slimbots.testing import FakeAsyncClient
-from slimbots.ui import UiEntry, register_ui
+from slimbots.ui import UiEntry, UiOption, register_ui
 
 
 def frame(kind, entry_id, **extra):
@@ -106,6 +106,42 @@ async def test_a_call_control_has_no_message_and_can_answer_privately():
     assert seen == [None]
     assert bot.client.ephemerals == [{"channel_id": "c1", "interaction_id": "i1", "content": "paused"}]
     assert bot.client.acks == []
+
+
+async def test_a_call_control_with_options_registers_them_and_hears_the_pick():
+    bot = make_bot()
+    picked = []
+
+    @bot.call_control("quality", "Quality", icon="settings", options=[("low", " Low 480p "), ("high", "High 1080p")])
+    async def quality(interaction):
+        picked.append(interaction.option_id)
+
+    @bot.call_control("pause", "Pause", icon="pause")
+    async def pause(interaction):
+        picked.append(interaction.option_id)
+
+    assert bot._ui.body()["call_controls"] == [
+        {"id": "quality", "label": "Quality", "icon": "settings",
+         "options": [{"id": "low", "label": "Low 480p"}, {"id": "high", "label": "High 1080p"}]},
+        {"id": "pause", "label": "Pause", "icon": "pause"},
+    ]
+    await deliver(bot, frame("call_control", "quality", option_id="high"))
+    await deliver(bot, frame("call_control", "pause"))
+    assert picked == ["high", None]
+
+
+def test_options_are_checked_before_the_server_sees_them():
+    bot = make_bot()
+    with pytest.raises(ValueError):
+        bot.call_control("q", "Quality", options=[("only", "Only one")])
+    with pytest.raises(ValueError):
+        bot.call_control("q", "Quality", options=[("a", "One"), ("a", "Two")])
+    with pytest.raises(ValueError):
+        bot.call_control("q", "Quality", options=[("a b", "One"), ("c", "Two")])
+    with pytest.raises(ValueError):
+        bot.call_control("q", "Quality", options=[(f"o{i}", "x") for i in range(9)])
+    with pytest.raises(ValueError):
+        bot._ui.add("message_menu", UiEntry("q", "Q", options=(UiOption("a", "A"), UiOption("b", "B"))), None)
 
 
 async def test_the_same_id_on_two_surfaces_routes_by_kind():

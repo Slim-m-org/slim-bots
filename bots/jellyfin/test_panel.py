@@ -243,11 +243,13 @@ def test_the_text_pause_command_redraws_the_panel():
     session_registry.clear()
 
 
-def use_control(client, session, control_id, *, user_id="u1", channel_id="v1"):
+def use_control(client, session, control_id, *, user_id="u1", channel_id="v1", option_id=None):
     frame = {
         "type": "interaction.created", "kind": "call_control", "interaction_id": f"c-{len(client.acks)}-{len(client.ephemerals)}",
         "channel_id": channel_id, "custom_id": control_id, "user_id": user_id, "user_display_name": user_id, "created_at": 1,
     }
+    if option_id is not None:
+        frame["option_id"] = option_id
 
     async def deliver():
         await jellyfin.bot._handle_frame(frame)
@@ -256,11 +258,26 @@ def use_control(client, session, control_id, *, user_id="u1", channel_id="v1"):
     asyncio.run(deliver())
 
 
-def test_the_call_dock_registers_play_pause_skips_and_stop():
+def test_the_call_dock_registers_play_pause_skips_stop_and_a_quality_choice():
     entries = [entry.to_wire() for entry, _ in jellyfin.bot._ui.controls.values()]
     assert [(e["id"], e["icon"]) for e in entries] == [
         ("jf-playpause", "pause"), ("jf-back", "skip_previous"), ("jf-forward", "skip_next"), ("jf-stop", "stop"),
+        ("jf-quality", "settings"),
     ]
+    assert entries[-1]["options"] == [
+        {"id": "low", "label": "Low 480p"}, {"id": "medium", "label": "Medium 720p"}, {"id": "high", "label": "High 1080p"},
+    ]
+
+
+def test_the_dock_quality_choice_switches_the_preset():
+    client = client_in_call()
+    session = started_session(client)
+    use_control(client, session, "jf-quality", option_id="low")
+    assert session.quality.name == "low"
+    use_control(client, session, "jf-quality")
+    assert client.ephemerals[-1]["content"] == "pick a quality from the list."
+    assert session.quality.name == "low"
+    session_registry.clear()
 
 
 def test_dock_play_pause_and_skips_share_the_panel_handlers():

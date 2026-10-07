@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from types import ModuleType
-from typing import Any, Awaitable, Callable, Coroutine
+from typing import Any, Awaitable, Callable, Coroutine, Sequence
 
 from . import catchup, cursor
 from . import events as ev
@@ -27,7 +27,7 @@ from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
 from .lifecycle import guard_dispatch, run_with_shutdown
 from .models import Member
 from .registration import RegistrationRejected, register_commands
-from .ui import UiEntry, UiHandler, UiRoutes, register_ui
+from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
 from .store import Store
 from .voice import Voice
@@ -304,10 +304,15 @@ class Bot:
 
     def call_control(
         self, entry_id: str, label: str, *, icon: str | None = None, permission: int | None = None,
+        options: Sequence[tuple[str, str]] = (),
     ) -> Callable[[UiHandler], UiHandler]:
-        """`@bot.call_control("pause", "Pause", icon="pause")` adds a button to the call dock while this bot is on the call."""
+        """`@bot.call_control("pause", "Pause", icon="pause")` adds a button to the call dock while this bot is on the call.
+        `options=[("low", "Low 480p"), ...]` makes it open a choice instead, and the pick arrives as `interaction.option_id`."""
+        choices = tuple(UiOption(option_id, option_label) for option_id, option_label in options)
+        entry = UiEntry(entry_id, label, icon=icon, permission=permission, options=choices)
+
         def decorator(func: UiHandler) -> UiHandler:
-            self._ui.add("call_control", UiEntry(entry_id, label, icon=icon, permission=permission), func)
+            self._ui.add("call_control", entry, func)
             return func
         return decorator
 
