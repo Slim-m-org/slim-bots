@@ -26,6 +26,8 @@ class Interaction:
         # A call control is used on a call, which has no message.
         self.message_id = frame.get("message_id")
         self.custom_id = frame["custom_id"]
+        # The pick on a call control registered with options; None from a server too old to send it.
+        self.option_id = frame.get("option_id")
         self.user_id = frame["user_id"]
         self.user_display_name = frame.get("user_display_name")
         self.created_at = frame.get("created_at")
