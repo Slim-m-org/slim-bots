@@ -11,6 +11,7 @@ from slimbots.limits import ValidationError, require_len
 from slimbots.voice import VoiceError
 
 import accounts
+import answers
 import jellyfin_core
 import panel
 import picker
@@ -29,9 +30,9 @@ async def _refuse_if_busy(ctx, voice_channel_id):
         return False
     name = session_registry.channel_name(ctx.bot, voice_channel_id)
     if running is None:
-        await ctx.reply(f"a watch party is already starting in {name} - give it a moment.")
+        await answers.tell(ctx, f"a watch party is already starting in {name} - give it a moment.")
         return True
-    await ctx.reply(f"already watching **{running.title}** in {name} - `{ctx.bot.prefix}stop` it first. another call can have its own stream.")
+    await answers.tell(ctx, f"already watching **{running.title}** in {name} - `{ctx.bot.prefix}stop` it first. another call can have its own stream.")
     return True
 
 
@@ -41,16 +42,16 @@ async def _find_item(ctx, query):
         user_id = await accounts.user_for(ctx.bot, ctx.author.id)
         last = await asyncio.to_thread(playback_progress.fetch_last_watched, user_id)
         if last is None:
-            await ctx.reply(f"nothing to resume - `{ctx.bot.prefix}watch <title>` to pick something.")
+            await answers.tell(ctx, f"nothing to resume - `{ctx.bot.prefix}watch <title>` to pick something.")
         return last
     try:
         query = require_len(query.strip(), max_len=jellyfin_core.MAX_QUERY_LENGTH, field="a title")
     except ValidationError as err:
-        await ctx.reply(str(err))
+        await answers.tell(ctx, str(err))
         return None
     results = await asyncio.to_thread(jellyfin_core.watch_search, query, jellyfin_core.MAX_SEARCH_RESULTS)
     if not results:
-        await ctx.reply(f'nothing playable found for "{query}".')
+        await answers.tell(ctx, f'nothing playable found for "{query}".')
         return None
     if len(results) == 1 and results[0].get("Type") in PLAYABLE:
         return results[0]
@@ -66,7 +67,7 @@ async def _load_for_playback(ctx, item):
     user_id = await accounts.user_for(ctx.bot, ctx.author.id)
     full_item = await asyncio.to_thread(jellyfin_core.fetch_item_for_playback, item["Id"], user_id)
     if full_item is None:
-        await ctx.reply("could not load that title from jellyfin.")
+        await answers.tell(ctx, "could not load that title from jellyfin.")
     return full_item
 
 
@@ -75,7 +76,7 @@ async def begin(ctx, item):
     try:
         full_item = await _load_for_playback(ctx, item)
     except jellyfin_core.JellyfinAuthError:
-        await ctx.reply("jellyfin is unavailable right now.")
+        await answers.tell(ctx, "jellyfin is unavailable right now.")
         return
     if full_item is None:
         return
@@ -96,7 +97,7 @@ async def launch(ctx, full_item, start_seconds):
     """Joins the invoker's call as it is now and starts the stream, with the panel as the reply."""
     voice_channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if voice_channel_id is None:
-        await ctx.reply(f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
+        await answers.tell(ctx, f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
         return
     if await _refuse_if_busy(ctx, voice_channel_id):
         return
@@ -112,11 +113,11 @@ async def _join_and_start(ctx, full_item, start_seconds, voice_channel_id):
     try:
         voice_session = await ctx.bot.voice.join(voice_channel_id)
     except VoiceError as err:
-        await ctx.reply(f"can't join {voice_channel_name}: {err}")
+        await answers.tell(ctx, f"can't join {voice_channel_name}: {err}")
         return
     if not voice_session.can_publish:
         await voice_session.leave()
-        await ctx.reply(f"I can join {voice_channel_name} but can't speak there - I need SPEAK to stream video/audio.")
+        await answers.tell(ctx, f"I can join {voice_channel_name} but can't speak there - I need SPEAK to stream video/audio.")
         return
     session = WatchSession(ctx.bot, ctx.channel_id, voice_channel_id, full_item, ctx.author.id, voice_session)
     try:
@@ -127,7 +128,7 @@ async def _join_and_start(ctx, full_item, start_seconds, voice_channel_id):
             raise
         if not isinstance(err, (StreamError, VoiceError)):
             print(f"{type(err).__name__} starting a watch party: {err}", file=sys.stderr)
-        await ctx.reply(f"could not start streaming: {err}")
+        await answers.tell(ctx, f"could not start streaming: {err}")
         return
     session.jellyfin_user_id = await accounts.user_for(ctx.bot, ctx.author.id)
     session_registry.add(session)
@@ -140,14 +141,14 @@ async def run_watch(ctx, query):
         return
     voice_channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if voice_channel_id is None:
-        await ctx.reply(f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
+        await answers.tell(ctx, f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
         return
     if await _refuse_if_busy(ctx, voice_channel_id):
         return
     try:
         item = await _find_item(ctx, query)
     except jellyfin_core.JellyfinAuthError:
-        await ctx.reply("jellyfin is unavailable right now.")
+        await answers.tell(ctx, "jellyfin is unavailable right now.")
         return
     if item is not None:
         await begin(ctx, item)

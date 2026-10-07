@@ -153,7 +153,7 @@ def test_watch_with_no_title_and_nothing_to_resume_says_so():
     with Patched((playback_progress, "fetch_last_watched", lambda user_id=None: None)):
         started = run_watch_pressing("!watch")
     assert started == []
-    assert client.sent[-1]["content"].startswith("nothing to resume")
+    assert client.ephemerals[-1]["content"].startswith("nothing to resume")
 
 
 def test_an_item_with_no_saved_position_starts_without_a_prompt():

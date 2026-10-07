@@ -24,8 +24,13 @@ class Ctx:
         self.bot = ts.jellyfin.bot
         self.author = Author()
         self.replies = []
+        self.channel_id = "c1"
+        self.message = {"id": "m1"}
 
     async def reply(self, text=None, **_kwargs):
+        self.replies.append(text)
+
+    async def reply_ephemeral(self, text="", **_kwargs):
         self.replies.append(text)
 
 

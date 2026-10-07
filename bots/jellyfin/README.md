@@ -88,6 +88,16 @@ channel this bot listens on and act on the call the person who typed them
 is in. Someone in no call reaches the party if only one is running, and is
 asked to join the call they mean if several are.
 
+Their answers ("paused.", "subtitles off.", a refusal) go only to the person
+who typed the command, so a run of commands leaves nothing for the room to
+scroll past; the room sees the change on the panel and in the call. Once a
+control command works the bot also deletes it, which needs `MANAGE_MESSAGES`
+in that channel and is skipped without it. A refused command stays, so its
+author can see what they typed. `!watch`'s own errors are private too, but
+the `!watch` line stays, since the panel and the chooser reply to it. A
+private answer the server will not deliver (past its 15-minute window) is
+posted publicly instead, so an error is never lost.
+
 - `!watch <title>` - find the invoker's voice channel, join it, and start
   playing; confirms with "streaming **title** into #channel-name". If
   jellyfin already has a saved position for it (past 30 seconds, not in the

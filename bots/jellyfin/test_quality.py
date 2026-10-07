@@ -45,7 +45,7 @@ def test_quality_alone_reports_the_current_setting():
     running_session()
     try:
         process(client, message("!quality"))
-        reply = client.sent[-1]["content"]
+        reply = client.ephemerals[-1]["content"]
         assert "quality is default (" in reply and "low|medium|high" in reply
     finally:
         session_registry.clear()
@@ -54,7 +54,7 @@ def test_quality_alone_reports_the_current_setting():
 def test_quality_needs_a_running_stream():
     client = setup_with_voice()
     process(client, message("!quality high"))
-    assert client.sent[-1]["content"] == "nothing is playing."
+    assert client.ephemerals[-1]["content"] == "nothing is playing."
 
 
 def test_quality_rejects_an_unknown_preset():
@@ -62,7 +62,7 @@ def test_quality_rejects_an_unknown_preset():
     running_session()
     try:
         process(client, message("!quality ultra"))
-        assert 'no quality called "ultra"' in client.sent[-1]["content"]
+        assert 'no quality called "ultra"' in client.ephemerals[-1]["content"]
     finally:
         session_registry.clear()
 
@@ -73,7 +73,7 @@ def test_quality_refuses_a_non_starter_non_manager():
     session.started_by_id = "someone-else"
     try:
         process(client, message("!quality low"))
-        assert "only the person who started this" in client.sent[-1]["content"]
+        assert "only the person who started this" in client.ephemerals[-1]["content"]
         assert session.quality.name == "default"
     finally:
         session_registry.clear()
@@ -95,7 +95,7 @@ def test_quality_republishes_at_the_preset_size_and_keeps_the_position():
     assert (voice_session.published["width"], voice_session.published["height"]) == (854, 480)
     assert voice_session.published["video_max_bitrate"] == 1_500_000
     assert session.paused and abs(session.position_seconds - 600) < 1
-    assert client.sent[-1]["content"] == "quality set to low (854x480, up to 1500 kbps), resumed at 10:00."
+    assert client.ephemerals[-1]["content"] == "quality set to low (854x480, up to 1500 kbps), resumed at 10:00."
 
 
 def test_a_1080p_preset_warns_about_the_cpu_cost():
@@ -106,7 +106,7 @@ def test_a_1080p_preset_warns_about_the_cpu_cost():
         process(client, message("!quality high"))
     finally:
         restore_pipeline(original)
-    assert quality.HEAVY_WARNING in client.sent[-1]["content"]
+    assert quality.HEAVY_WARNING in client.ephemerals[-1]["content"]
 
 
 def test_the_high_preset_publishes_just_under_the_vp8_eight_thread_cutoff():
@@ -141,7 +141,7 @@ def test_a_failed_republish_is_reported_not_raised():
         process(client, message("!quality low"))
     finally:
         restore_pipeline(original)
-    assert client.sent[-1]["content"].startswith("could not switch quality:")
+    assert client.ephemerals[-1]["content"].startswith("could not switch quality:")
 
 
 def test_the_stream_url_and_np_embed_follow_the_preset():
