@@ -26,11 +26,13 @@ FRAMES = 5
 STAND_IN = """#!/bin/sh
 audio=/dev/null
 for out; do case "$out" in pipe:1) ;; pipe:*) audio=/dev/fd/${out#pipe:};; esac; done
+# An audio writer aimed at /dev/null never gets SIGPIPE, so teardown, which ends only this process, would orphan it.
+[ "$audio" = /dev/null ] && audio=
 case "$STAND_IN_MODE" in
 dead) exit 1;;
-endless) cat /dev/zero > "$audio" & exec cat /dev/zero;;
-slowstart) sleep 0.6; cat /dev/zero > "$audio" & exec cat /dev/zero;;
-lateaudio) (sleep 0.6; exec cat /dev/zero > "$audio") & exec cat /dev/zero;;
+endless) if [ -n "$audio" ]; then cat /dev/zero > "$audio" & fi; exec cat /dev/zero;;
+slowstart) sleep 0.6; if [ -n "$audio" ]; then cat /dev/zero > "$audio" & fi; exec cat /dev/zero;;
+lateaudio) if [ -n "$audio" ]; then (sleep 0.6; exec cat /dev/zero > "$audio") & fi; exec cat /dev/zero;;
 *)
   head -c $((FRAME_BYTES * FRAMES)) /dev/zero
   [ "$STAND_IN_MODE" = clean ] && exit 0
