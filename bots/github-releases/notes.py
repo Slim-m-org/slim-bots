@@ -8,6 +8,7 @@ MAX_LINE = 200
 
 _TRAILING_LINK = re.compile(r"\s*\(\[[^\]]*\]\([^)]*\)\)\s*$")
 _BARE_PR = re.compile(r"\s*\(#\d+\)\s*$")
+_CLOSES = re.compile(r",?\s*closes(\s+\[#\d+\]\([^)]*\))+\s*$", re.IGNORECASE)
 _SCOPE = re.compile(r"^\*\*[^*]+:\*\*\s*")
 _INLINE_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
@@ -17,7 +18,7 @@ def _clean(line):
     previous = None
     while previous != text:
         previous = text
-        text = _BARE_PR.sub("", _TRAILING_LINK.sub("", text))
+        text = _BARE_PR.sub("", _TRAILING_LINK.sub("", _CLOSES.sub("", text)))
     text = _INLINE_LINK.sub(r"\1", _SCOPE.sub("", text)).replace("**", "")
     text = " ".join(text.split())
     return text if len(text) <= MAX_LINE else text[: MAX_LINE - 3].rstrip() + "..."

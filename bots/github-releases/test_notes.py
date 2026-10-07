@@ -86,6 +86,14 @@ def test_multi_scope_markup_is_stripped():
     assert notes.condense("* **server,client:** rotate it ([1b09059](https://x/1b09059))") == "- rotate it"
 
 
+def test_a_closes_clause_after_the_links_is_dropped_with_them():
+    line = (
+        "* batch 4 of the october audit ([#2014](https://github.com/Slim-m-org/slim-m/issues/2014)) "
+        "([1787c95](https://github.com/Slim-m-org/slim-m/commit/1787c95332ae)), closes "
+        "[#1621](https://github.com/Slim-m-org/slim-m/issues/1621) [#1622](https://github.com/Slim-m-org/slim-m/issues/1622)"
+    )
+    assert notes.bullets(line) == ["batch 4 of the october audit"]
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:
