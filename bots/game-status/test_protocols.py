@@ -147,7 +147,11 @@ def test_a_silent_udp_server_times_out_as_down():
 def test_a_hung_tcp_status_server_times_out_and_garbage_is_down():
     async def run():
         async def hang(reader, writer):
-            await asyncio.sleep(5)
+            # Closed in the end: since Python 3.12 leaving `async with server` waits for every connection.
+            try:
+                await asyncio.sleep(1)
+            finally:
+                writer.close()
 
         async def garbage(reader, writer):
             writer.write(b"\x05hello")
