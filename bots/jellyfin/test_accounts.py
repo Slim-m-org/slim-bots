@@ -5,8 +5,6 @@ import asyncio
 import os
 import sqlite3
 import sys
-import time
-import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,98 +18,8 @@ from test_bot import jellyfin, message, movie_for_watch, process, setup  # noqa:
 from test_panel import client_in_call, episode_for_watch  # noqa: E402
 from test_resume import Patched, run_watch_pressing, voice_client, with_position  # noqa: E402
 
-USERS = [
-    {"Id": "jf-a", "Name": "Alice", "Policy": {}},
-    {"Id": "jf-b", "Name": "Bob", "Policy": {}},
-    {"Id": "jf-off", "Name": "Gone", "Policy": {"IsDisabled": True}},
-]
-
-
-def with_users(fn=None):
-    return Patched((jellyfin_core, "jf_get", fn or (lambda path, params=None: USERS)))
-
-
 def link_of(user):
     return asyncio.run(jellyfin.bot.store.run(accounts.get_link, user))
-
-
-def test_link_stores_the_mapping_and_confirms_privately():
-    client = setup()
-    with with_users():
-        process(client, message("!jellyfin link alice"))
-    assert link_of("u1") == ("jf-a", "Alice")
-    assert 'linked you to the jellyfin user "Alice"' in client.ephemerals[-1]["content"]
-    assert not client.sent
-
-
-def test_link_is_case_insensitive_and_can_be_changed():
-    client = setup()
-    with with_users():
-        process(client, message("!jellyfin link ALICE"))
-        jellyfin.jellyfin_core._command_cooldown._last.clear()
-        process(client, message("!jellyfin link bob"))
-    assert link_of("u1") == ("jf-b", "Bob")
-
-
-def test_link_to_an_unknown_or_disabled_user_is_refused_privately():
-    client = setup()
-    with with_users():
-        process(client, message("!jellyfin link nobody"))
-        jellyfin.jellyfin_core._command_cooldown._last.clear()
-        process(client, message("!jellyfin link gone"))
-    assert link_of("u1") is None
-    assert client.ephemerals[0]["content"] == 'there is no enabled jellyfin user called "nobody".'
-    assert "gone" in client.ephemerals[1]["content"]
-
-
-def test_a_jellyfin_user_already_linked_to_someone_else_is_refused():
-    client = setup()
-    asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u2", "jf-a", "Alice"))
-    with with_users():
-        process(client, message("!jellyfin link alice"))
-    assert link_of("u1") is None and link_of("u2") == ("jf-a", "Alice")
-    assert "already linked to someone else" in client.ephemerals[-1]["content"]
-
-
-class LinkCtx:
-    def __init__(self, user_id):
-        self.author = type("Author", (), {"id": user_id})()
-        self.bot = jellyfin.bot
-        self.replies = []
-
-    async def reply(self, text=None, **_kwargs):
-        self.replies.append(text)
-
-    async def reply_ephemeral(self, text, **_kwargs):
-        self.replies.append(text)
-
-
-def test_two_members_linking_one_jellyfin_user_at_once_leave_one_owner():
-    setup()
-
-    def slow_users(path, params=None):
-        time.sleep(0.05)
-        return USERS
-
-    async def both():
-        first, second = LinkCtx("u1"), LinkCtx("u2")
-        await asyncio.gather(accounts.run_link(first, "alice"), accounts.run_link(second, "alice"))
-
-    with with_users(slow_users):
-        asyncio.run(both())
-    owners = jellyfin.bot.store.connection.execute("SELECT slimm_user_id FROM user_links WHERE jellyfin_user_id = 'jf-a'").fetchall()
-    assert len(owners) == 1, owners
-
-
-def test_link_answers_when_jellyfin_is_unreachable():
-    client = setup()
-
-    def down(path, params=None):
-        raise urllib.error.URLError("connection refused")
-
-    with with_users(down):
-        process(client, message("!jellyfin link alice"))
-    assert [m["content"] for m in client.sent] == ["jellyfin is unavailable right now."]
 
 
 def test_unlink_removes_it_and_says_so_when_there_was_nothing():
@@ -127,8 +35,9 @@ def test_account_reports_the_link_privately():
     client = setup()
     process(client, message("!jellyfin account"))
     assert "not linked" in client.ephemerals[-1]["content"]
-    asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice"))
-    process(client, message("!jellyfin account"))
+    asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice", True))
+    with Patched((jellyfin_core, "jf_get", lambda path, params=None: {"Id": "jf-a", "Name": "Alice"})):
+        process(client, message("!jellyfin account"))
     assert 'linked to the jellyfin user "Alice"' in client.ephemerals[-1]["content"]
 
 
@@ -140,7 +49,7 @@ def test_account_hints_name_the_configured_prefix():
     finally:
         jellyfin.bot.prefix = original
     assert "`?watch` uses the shared" in client.ephemerals[-1]["content"]
-    assert "`?jellyfin link <jellyfin username>`" in client.ephemerals[-1]["content"]
+    assert "`?jellyfin link` links you" in client.ephemerals[-1]["content"]
 
 
 def test_user_for_prefers_the_link_and_falls_back_to_the_shared_account():

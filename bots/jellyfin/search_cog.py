@@ -65,7 +65,7 @@ async def run_recent(ctx, days_text):
 
 
 def setup(bot):
-    @bot.command(name="jellyfin", help="`search`, `recent`, `link <jellyfin user>`, `unlink`, `account` or `help`", usage="search|recent|link|unlink|account|help ...")
+    @bot.command(name="jellyfin", help="`search`, `recent`, `link` (then `link confirm`), `unlink`, `account` or `help`", usage="search|recent|link|unlink|account|help ...")
     async def jellyfin_cmd(ctx, sub: str = "help", rest: str = None):
         sub = sub.lower()
         if sub == "search" and rest:
