@@ -47,7 +47,7 @@ Only the standard library is used (asyncio sockets); no dependency was added.
 | `GAMESTATUS_TIMEOUT` | `5` | Seconds each query may take before the server counts as down. |
 | `SLIMM_DB_PATH` | `game-status.db` | Where the server list and status message ids are kept. |
 
-At most 25 servers fit in one embed.
+At most 25 servers can be added (the cap the on-demand embed needs).
 A config entry that already exists by name is overwritten at start; one removed with `!gameserver remove` comes back on restart while it is still in `GAMESTATUS_SERVERS`.
 
 ## The status message
