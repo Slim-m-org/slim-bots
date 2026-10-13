@@ -1,0 +1,11 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {"say": "!feed", "expect_contains": ["feed add"], "timeout": 15},
+    {"say": "!feed list", "expect_contains": ["no feeds yet"], "timeout": 15},
+    {"say": "!feed add not-a-url", "expect_contains": ["http"], "timeout": 15},
+    {"say": "!feed remove 999", "expect_contains": ["no feed"], "timeout": 15},
+    {"say": "!feed filter 999 rust", "expect_contains": ["no feed"], "timeout": 15},
+    {"say": "!feed interval 999 1m", "expect_contains": ["pick between"], "timeout": 15}
+  ]
+}
