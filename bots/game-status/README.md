@@ -52,9 +52,9 @@ A config entry that already exists by name is overwritten at start; one removed 
 
 ## The status message
 
-The embed has one field per server (`[up]` or `[down]`, then players, map, version or the reason it did not answer) and a footer with the last check time.
+The board has one line per server (`[up]` or `[down]`, then players, map, version or the reason it did not answer) and a last-checked line.
 Its message id is stored per channel, so a restart keeps editing the same message, and a deleted message is posted again.
-The edit sends the embed in a `PATCH`; if the server answers 400 the bot edits in the plain text rendering instead.
+The board is plain markdown text, because the server's edit route changes only `content`; the embed is used only for the one-off `!gamestatus` reply.
 A channel the bot cannot write to is logged and skipped, and an exception in one poll cycle never stops the loop.
 Only a revoked bot token ends the bot.
 

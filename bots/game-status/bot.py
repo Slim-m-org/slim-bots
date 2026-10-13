@@ -14,7 +14,6 @@ import gs_core as core
 import queries
 
 LIST_COOLDOWN_SECONDS = 10
-BOARD_HEADLINE = "Game server status"
 
 bot = Bot(prefix="!", default_data_path="game-status.db", store_migrate=core.init_db)
 core.configure(bot)
@@ -31,35 +30,24 @@ async def poll(servers):
     return list(zip(servers, results))
 
 
-async def edit_board(channel_id, message_id, text, embed):
-    """Edits in place with the embed; a server that refuses embeds on edit gets the plain text instead."""
-    path = f"/channels/{channel_id}/messages/{message_id}"
-    try:
-        await bot.client.call("PATCH", path, {"content": BOARD_HEADLINE, "embeds": [embed.to_wire()]})
-    except ApiError as err:
-        if err.status != 400:
-            raise
-        await bot.client.call("PATCH", path, {"content": text})
-
-
-async def create_board(channel_id, text, embed):
+async def create_board(channel_id, text):
     message_id = str(uuid.uuid4())
-    await bot.client.send(channel_id, BOARD_HEADLINE, message_id=message_id, embeds=[embed.to_wire()], fallback_content=text)
+    await bot.client.send(channel_id, text, message_id=message_id)
     store = await bot.open_store()
     await store.run(core.txn_set_board, channel_id, message_id)
 
 
 async def publish_board(channel_id, message_id, rows, stamp):
-    """Edits the channel's status message, or posts a fresh one if it is missing or was deleted."""
-    text, embed = core.status_text(rows, stamp), core.status_embed(rows, stamp)
+    """Edits the channel's plain-text status message (edits carry content only), or posts a fresh one if it was deleted."""
+    text = core.status_text(rows, stamp)
     if message_id:
         try:
-            await edit_board(channel_id, message_id, text, embed)
+            await bot.client.edit_message(channel_id, message_id, text)
             return
         except ApiError as err:
             if not is_not_found(err):
                 raise
-    await create_board(channel_id, text, embed)
+    await create_board(channel_id, text)
 
 
 async def publish_all(rows, stamp):

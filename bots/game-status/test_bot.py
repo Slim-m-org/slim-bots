@@ -135,7 +135,8 @@ def test_first_publish_creates_a_message_and_remembers_it():
     client = setup()
     core.GAMESTATUS_CHANNELS = ["c9"]
     asyncio.run(game_status.poll_once())
-    assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c9" and client.sent[0]["embeds"]
+    assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c9" and "embeds" not in client.sent[0]
+    assert client.sent[0]["content"].startswith("**Game servers**")
     boards = asyncio.run(game_status.bot.store.run(core.txn_list_boards))
     assert boards == {"c9": client.sent[0]["id"]}
 
@@ -149,7 +150,7 @@ def test_later_polls_edit_in_place_and_post_nothing_new():
     assert len(client.sent) == 1
     edits = patches(client)
     assert len(edits) == 2 and all(e[1] == f"/channels/c9/messages/{client.sent[0]['id']}" for e in edits)
-    assert edits[0][2]["embeds"][0]["fields"][0]["name"] == "[up] Valheim"
+    assert set(edits[0][2]) == {"content"} and "[up] Valheim" in edits[0][2]["content"]
 
 
 def test_a_deleted_status_message_is_recreated_and_the_new_id_stored():
@@ -161,24 +162,6 @@ def test_a_deleted_status_message_is_recreated_and_the_new_id_stored():
     asyncio.run(game_status.poll_once())
     assert len(client.sent) == 2 and client.sent[1]["id"] != old
     assert asyncio.run(game_status.bot.store.run(core.txn_list_boards)) == {"c9": client.sent[1]["id"]}
-
-
-def test_a_server_refusing_embeds_on_edit_gets_the_plain_text():
-    client = setup()
-    core.GAMESTATUS_CHANNELS = ["c9"]
-    asyncio.run(game_status.poll_once())
-    calls_before = len(client.calls)
-    original = client.call
-
-    async def refuse_embeds(method, path, body=None, **kwargs):
-        if method == "PATCH" and body and "embeds" in body:
-            client.calls.append((method, path, body, None))
-            raise ApiError(400, "embeds not supported")
-        return await original(method, path, body, **kwargs)
-
-    client.call = refuse_embeds
-    asyncio.run(game_status.poll_once())
-    assert patches(client)[-1][2]["content"].startswith("**Game servers**") and len(client.calls) > calls_before
 
 
 def test_one_unreachable_channel_does_not_stop_the_others():
