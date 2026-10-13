@@ -12,6 +12,7 @@ import uuid
 
 from slimbots import Embed
 from slimbots.limits import Cooldown
+from slimbots.migrations import ensure_columns
 
 MAX_ITEMS_PER_POLL = 500
 PAGE_SIZE = 200
@@ -31,7 +32,7 @@ RECENT_MAX_DAYS = 30
 HELP_TEXT = (
     "commands: `!jellyfin search <query>`, "
     f"`!jellyfin recent [days]` (default {RECENT_DEFAULT_DAYS}, max {RECENT_MAX_DAYS}), "
-    "`!jellyfin link <jellyfin username>`, `!jellyfin unlink`, `!jellyfin account`."
+    "`!jellyfin link` (then `!jellyfin link confirm`), `!jellyfin unlink`, `!jellyfin account`."
 )
 
 # What `!watch`/`!subs` need beyond FIELDS: total runtime, and the audio/subtitle track list.
@@ -194,6 +195,13 @@ def init_db(conn):
         );
         """
     )
+    ensure_columns(conn, "user_links", {"verified": "INTEGER NOT NULL DEFAULT 0"})
+    # Before the unique index, a jellyfin user claimed twice keeps only its oldest claim.
+    conn.execute(
+        "DELETE FROM user_links WHERE EXISTS (SELECT 1 FROM user_links AS older WHERE older.jellyfin_user_id = user_links.jellyfin_user_id "
+        "AND (older.linked_at < user_links.linked_at OR (older.linked_at = user_links.linked_at AND older.rowid < user_links.rowid)))"
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS user_links_jellyfin_user ON user_links (jellyfin_user_id)")
     conn.commit()
 
 

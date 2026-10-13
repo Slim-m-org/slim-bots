@@ -52,15 +52,27 @@ tested here - there was only the one live server to test against.
 - `!jellyfin recent [days]` (default 7, max 30) - reuses the same
   `DateCreated` paging the poll loop uses, against a wall-clock cutoff
   instead of the stored cursor.
-- `!jellyfin link <jellyfin username>` - maps you to that jellyfin account (the admin key lists users; disabled ones are refused).
+- `!jellyfin link` - links you to your jellyfin account with a Quick Connect code, sent to you privately.
+  Enter it in jellyfin (your profile, then Quick Connect); the bot then tells you which jellyfin user approved it, and
+  `!jellyfin link confirm` links you to that user. `!jellyfin link cancel` drops a code you no longer want.
   Resume position, "continue watching" (`!watch` with no title) and the season and episode lists then use your account, and
-  progress from a stream you started is written to it. Everyone else keeps using the shared account. The answer is private.
-- `!jellyfin unlink` - removes the mapping. `!jellyfin account` - shows which account you are on, privately.
+  progress from a stream you started is written to it. Everyone else keeps using the shared account.
+- `!jellyfin unlink` - removes the link. `!jellyfin account` - shows which account you are on, privately.
 - `!jellyfin help` (or any unrecognised `!jellyfin ...`) - the list.
 
-The mapping lives in the bot's own sqlite (`user_links`, added with `CREATE TABLE IF NOT EXISTS`, so an existing database picks it up on start).
-One jellyfin user can be linked to one member at a time. There is no password check, so a link is a claim: anyone can link to an
-account nobody else has claimed yet. That is fine for a home server and worth knowing before pointing this at a larger one.
+The link lives in the bot's own sqlite (`user_links`); `init_db` adds the `verified` column and a unique index on
+`jellyfin_user_id` to an older database in place, keeping the oldest claim if one jellyfin user was claimed twice.
+One jellyfin user can be linked to one member at a time.
+
+Quick Connect has to be on in the jellyfin dashboard. The bot asks for the code under a device named
+"slim-m link for <member>", so whoever approves it can see who asked. The identity comes from jellyfin's own answer, never
+from anything the member typed, and the member confirms it before it counts. Jellyfin hands back an access token with that
+answer; the bot logs that session out straight away (or deletes the device with the admin key if logout fails) and stores
+no token, since it already reads and writes progress with the admin key. So the gain is proof of identity at link time,
+not a safer credential store.
+
+A link made by typing a username, before Quick Connect, keeps working for resume and progress but is not verified:
+`!jellyfin account` says so, and `accounts.verified_link` - what direct play will check - ignores it.
 Progress goes to the account of whoever started the stream, not to everyone watching it.
 
 Both real commands share one `cooldown=` on the command itself, and their
