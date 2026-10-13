@@ -111,7 +111,7 @@ async def on_panel_press(interaction):
 
 
 CALL_CONTROLS = (
-    ("jf-playpause", "Play or pause", "pause", "toggle"),
+    ("jf-playpause", "Pause", "pause", "toggle"),
     ("jf-back", f"Back {SKIP_SECONDS}s", "skip_previous", "back"),
     ("jf-forward", f"Forward {SKIP_SECONDS}s", "skip_next", "fwd"),
     ("jf-stop", "Stop", "stop", "stop"),
