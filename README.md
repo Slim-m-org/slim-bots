@@ -55,6 +55,7 @@ All of them live under [`bots/`](bots/).
 | [`bots/seerr`](bots/seerr/) | A request flow for Seerr: `!request` with a button chooser, announcements of requests and availability, and Approve/Decline buttons gated on a slim-m permission. |
 | [`bots/starboard`](bots/starboard/) | Reposting a well-reacted message to a highlights channel, keeping it in sync as the count and the original change, and a weekly digest. |
 | [`bots/github-releases`](bots/github-releases/) | Polling an outside service with an ETag, rate-limit backoff and a first-run-posts-nothing rule, to post each new GitHub release with its notes condensed to a short list. |
+| [`bots/tickets`](bots/tickets/) | A support-ticket flow: an Open a ticket button makes a private restricted channel for the member and a staff role, staff Claim and Close it, and a transcript is kept in sqlite. |
 
 Every template's README says what it deliberately does not do. That section is
 usually the more useful half.
