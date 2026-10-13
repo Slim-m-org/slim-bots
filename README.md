@@ -57,6 +57,7 @@ All of them live under [`bots/`](bots/).
 | [`bots/github-releases`](bots/github-releases/) | Polling an outside service with an ETag, rate-limit backoff and a first-run-posts-nothing rule, to post each new GitHub release with its notes condensed to a short list. |
 | [`bots/feeds`](bots/feeds/) | Following RSS, Atom, YouTube, Reddit, Mastodon and Forgejo release feeds into channels from chat commands, with per-feed intervals, keyword filters, conditional GET, dedupe in sqlite and failing feeds surfaced in `!feed list`. |
 | [`bots/game-status`](bots/game-status/) | Asking game servers directly (Steam A2S, Minecraft ping, plain TCP) on a background loop, with timeouts per server, and one plain-text status message per channel edited in place and recreated if deleted. |
+| [`bots/uptime-relay`](bots/uptime-relay/) | Taking Uptime Kuma, Grafana and Healthchecks webhooks on a small listener behind a shared secret, posting one alert per outage with Acknowledge and Silence buttons, and editing it with repeats and recovery. |
 
 Every template's README says what it deliberately does not do. That section is
 usually the more useful half.
