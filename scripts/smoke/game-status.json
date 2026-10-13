@@ -1,0 +1,10 @@
+{
+  "ready_seconds": 8,
+  "env": {"GAMESTATUS_SERVERS": "Smoke=tcp:127.0.0.1:9", "GAMESTATUS_TIMEOUT": "2"},
+  "steps": [
+    {"say": "!help", "expect_contains": ["gamestatus"], "timeout": 15},
+    {"say": "!gamestatus", "expect_contains": ["Smoke"], "timeout": 20},
+    {"say": "!gameserver add tcp bad/host 1 X", "expect_contains": ["host"], "timeout": 15},
+    {"say": "!gameserver list", "expect_contains": ["Smoke"], "timeout": 15}
+  ]
+}

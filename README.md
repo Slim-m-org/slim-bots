@@ -55,6 +55,7 @@ All of them live under [`bots/`](bots/).
 | [`bots/seerr`](bots/seerr/) | A request flow for Seerr: `!request` with a button chooser, announcements of requests and availability, and Approve/Decline buttons gated on a slim-m permission. |
 | [`bots/starboard`](bots/starboard/) | Reposting a well-reacted message to a highlights channel, keeping it in sync as the count and the original change, and a weekly digest. |
 | [`bots/github-releases`](bots/github-releases/) | Polling an outside service with an ETag, rate-limit backoff and a first-run-posts-nothing rule, to post each new GitHub release with its notes condensed to a short list. |
+| [`bots/game-status`](bots/game-status/) | Asking game servers directly (Steam A2S, Minecraft ping, plain TCP) on a background loop, with timeouts per server, and one status embed per channel edited in place and recreated if deleted. |
 
 Every template's README says what it deliberately does not do. That section is
 usually the more useful half.
