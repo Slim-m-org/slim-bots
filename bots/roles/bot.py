@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""bot-roles: self-service roles - `!role <name>`, `!role remove <name>`, `!role mine`, `!roles`, `!roles status`; see README.md."""
+"""bot-roles: self-service roles - `!role <name>`, `!role remove <name>`, `!role mine`, `!roles`, `!roles status`, `!rolemenu`; see README.md."""
 
 import uuid
 
-from slimbots import Bot, Permissions
+import menu_store
+from slimbots import Bot, Button, Permissions, rows
 from slimbots.http import ApiError, is_forbidden, is_not_found
 
 # Namespace for deriving a stable listing-message id from the channel id, so nothing needs to be persisted to disk.
 LISTING_NAMESPACE = uuid.UUID("d1f6a9d0-0f0f-4b6a-9b0f-2f6b6f0f9a10")
 
 
-bot = Bot(prefix="!", require_channels=True)
+bot = Bot(prefix="!", require_channels=True, default_data_path="roles.db", store_migrate=menu_store.init_db)
 ROLES = bot.setting("SLIMM_ROLES", {}, type=dict)
+
+# The server allows 5 rows of 5 buttons per message (components.rs MAX_ROWS * MAX_BUTTONS_PER_ROW).
+MAX_MENU_ROLES = 25
+MAX_BUTTONS_PER_ROW = 5
+MAX_TITLE = 200
+MENU_PREFIX = "rolemenu:"
 
 
 def normalize(name):
@@ -183,6 +190,220 @@ async def role_cmd(ctx, name: str):
         await revoke(ctx, rest.strip())
         return
     await grant(ctx, name.strip())
+
+
+def menu_layout(menu_roles):
+    buttons = [Button(label[:80], f"{MENU_PREFIX}{role_id}") for label, role_id in menu_roles]
+    return rows(*[buttons[i:i + MAX_BUTTONS_PER_ROW] for i in range(0, len(buttons), MAX_BUTTONS_PER_ROW)])
+
+
+def self_assignable(role_id):
+    return role_id in ROLES.values()
+
+
+def name_of(role_id):
+    return next((name for name, known in ROLES.items() if known == role_id), role_id)
+
+
+async def private(ctx, text):
+    await ctx.reply_ephemeral(text, public_fallback=True)
+
+
+async def require_manager(ctx):
+    if ctx.author.has_permission(Permissions.MANAGE_ROLES):
+        return True
+    await private(ctx, "only someone with Manage Roles can manage role menus.")
+    return False
+
+
+def parse_create(arg):
+    """(pick_one, title, [typed role names]) from `[--one] <title> | <role>, <role>`."""
+    text = arg.strip()
+    pick_one = text.startswith("--one ")
+    if pick_one:
+        text = text[len("--one "):]
+    title, _, names = text.partition("|")
+    return pick_one, " ".join(title.split()), [n.strip() for n in names.split(",") if n.strip()]
+
+
+def resolve_roles(typed_names):
+    """([(configured name, role id)], refusal text or None); only self-assignable roles, each at most once."""
+    entries = []
+    for typed in typed_names:
+        found = find_role(typed)
+        if found is None:
+            return [], f"`{typed}` is not on the self-assignable list, so it cannot go in a menu - see `{bot.prefix}roles`."
+        if found[1] not in [role_id for _, role_id in entries]:
+            entries.append(found)
+    return entries, None
+
+
+async def create_menu(ctx, arg):
+    pick_one, title, names = parse_create(arg)
+    if not title or not names:
+        await private(ctx, f"usage: `{bot.prefix}rolemenu create [--one] <title> | <role>, <role>`")
+        return
+    if len(title) > MAX_TITLE:
+        await private(ctx, f"keep the title under {MAX_TITLE} characters.")
+        return
+    entries, refusal = resolve_roles(names)
+    if refusal is None and len(entries) > MAX_MENU_ROLES:
+        refusal = f"a menu holds at most {MAX_MENU_ROLES} roles."
+    if refusal:
+        await private(ctx, refusal)
+        return
+    message_id = str(uuid.uuid4())
+    store = await bot.open_store()
+    await store.run(menu_store.create_menu, message_id, ctx.channel_id, title, pick_one, entries)
+    try:
+        await bot.client.send(ctx.channel_id, title, message_id=message_id, components=menu_layout(entries))
+    except Exception:
+        await store.run(menu_store.delete_menu, message_id)
+        raise
+    await private(ctx, f"menu created. its id is `{message_id}`; use it to edit or delete the menu.")
+
+
+async def load_menu(ctx, message_id):
+    store = await bot.open_store()
+    menu = await store.run(menu_store.get_menu, message_id.strip())
+    if menu is None:
+        await private(ctx, f"no role menu has the id `{message_id.strip()}`.")
+    return menu
+
+
+async def redraw(message_id, menu):
+    await bot.client.edit_components(menu["channel_id"], message_id, menu_layout(menu["roles"]))
+
+
+async def add_to_menu(ctx, args):
+    message_id, _, typed = args.strip().partition(" ")
+    menu = await load_menu(ctx, message_id) if typed.strip() else None
+    if menu is None:
+        if not typed.strip():
+            await private(ctx, f"usage: `{bot.prefix}rolemenu add <menu id> <role>`")
+        return
+    found = find_role(typed)
+    if found is None:
+        await private(ctx, f"`{typed.strip()}` is not on the self-assignable list, so it cannot go in a menu.")
+        return
+    if found[1] in [role_id for _, role_id in menu["roles"]]:
+        await private(ctx, f"`{found[0]}` is already in that menu.")
+        return
+    if len(menu["roles"]) >= MAX_MENU_ROLES:
+        await private(ctx, f"a menu holds at most {MAX_MENU_ROLES} roles.")
+        return
+    store = await bot.open_store()
+    await store.run(menu_store.add_role, message_id.strip(), found[0], found[1])
+    menu["roles"].append(found)
+    await redraw(message_id.strip(), menu)
+    await private(ctx, f"added `{found[0]}` to the menu.")
+
+
+async def remove_from_menu(ctx, args):
+    message_id, _, typed = args.strip().partition(" ")
+    menu = await load_menu(ctx, message_id) if typed.strip() else None
+    if menu is None:
+        if not typed.strip():
+            await private(ctx, f"usage: `{bot.prefix}rolemenu remove <menu id> <role>`")
+        return
+    found = find_role(typed)
+    in_menu = [entry for entry in menu["roles"] if found and entry[1] == found[1]]
+    if not in_menu:
+        await private(ctx, f"`{typed.strip()}` is not in that menu.")
+        return
+    if len(menu["roles"]) == 1:
+        await private(ctx, f"a menu needs at least one role - use `{bot.prefix}rolemenu delete` to remove it.")
+        return
+    store = await bot.open_store()
+    await store.run(menu_store.remove_role, message_id.strip(), found[1])
+    menu["roles"].remove(in_menu[0])
+    await redraw(message_id.strip(), menu)
+    await private(ctx, f"removed `{found[0]}` from the menu.")
+
+
+async def delete_menu(ctx, message_id):
+    menu = await load_menu(ctx, message_id)
+    if menu is None:
+        return
+    store = await bot.open_store()
+    await store.run(menu_store.delete_menu, message_id.strip())
+    try:
+        await bot.client.delete_message(menu["channel_id"], message_id.strip())
+    except ApiError as err:
+        if not is_not_found(err):
+            raise
+    await private(ctx, "menu deleted.")
+
+
+async def list_channel_menus(ctx):
+    store = await bot.open_store()
+    found = await store.run(menu_store.list_menus, ctx.channel_id)
+    if not found:
+        await private(ctx, "no role menus in this channel.")
+        return
+    await private(ctx, "\n".join(f"`{m}` - {t}{' (pick one)' if p else ''}" for m, t, p in found))
+
+
+MENU_USAGE = "create [--one] <title> | <role>, <role> | add <menu id> <role> | remove <menu id> <role> | delete <menu id> | list"
+
+
+@bot.command(name="rolemenu", help="Manage role menus (buttons on a message); needs Manage Roles", usage=MENU_USAGE)
+async def rolemenu_cmd(ctx, args: str = ""):
+    if not await require_manager(ctx):
+        return
+    sub, _, rest = args.strip().partition(" ")
+    handlers = {"create": create_menu, "add": add_to_menu, "remove": remove_from_menu, "delete": delete_menu}
+    if sub.lower() == "list":
+        await list_channel_menus(ctx)
+    elif sub.lower() in handlers:
+        await handlers[sub.lower()](ctx, rest)
+    else:
+        await private(ctx, f"usage: `{bot.prefix}rolemenu {MENU_USAGE}`")
+
+
+async def toggle_role(interaction, member, menu, role_id):
+    """Grants or revokes one menu role for the presser and returns the text to answer with."""
+    name = name_of(role_id)
+    held = set(member.role_ids)
+    if role_id in held:
+        await bot.space.revoke_role(member, role_id)
+        return f"removed `{name}`."
+    await bot.space.grant_role(member, role_id)
+    dropped = []
+    if menu["pick_one"]:
+        for _, other in menu["roles"]:
+            if other != role_id and other in held:
+                await bot.space.revoke_role(member, other)
+                dropped.append(f"`{name_of(other)}`")
+    return f"added `{name}`." + (f" removed {', '.join(dropped)}." if dropped else "")
+
+
+@bot.button(prefix=MENU_PREFIX)
+async def on_menu_press(interaction):
+    """The role comes from the stored menu, so a forged custom id can only name a role that menu already holds."""
+    role_id = interaction.custom_id.removeprefix(MENU_PREFIX)
+    store = await bot.open_store()
+    menu = await store.run(menu_store.get_menu, interaction.message_id)
+    if menu is None:
+        await interaction.reply_ephemeral("this role menu no longer exists.")
+        return
+    if role_id not in [known for _, known in menu["roles"]]:
+        await interaction.reply_ephemeral("that button is not part of this menu any more.")
+        return
+    if not self_assignable(role_id):
+        await interaction.reply_ephemeral(f"`{name_of(role_id)}` is no longer offered as a self-service role, so I can't change it.")
+        return
+    member = await bot.space.resolve_member(interaction.user_id)
+    try:
+        text = await toggle_role(interaction, member, menu, role_id)
+    except ApiError as err:
+        if is_forbidden(err):
+            text = await escalation_explanation(name_of(role_id), role_id)
+        elif is_not_found(err):
+            text = f"`{name_of(role_id)}` no longer exists in this space - ask an admin to take it off the menu."
+        else:
+            raise
+    await interaction.reply_ephemeral(text)
 
 
 @bot.event

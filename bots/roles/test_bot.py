@@ -4,12 +4,15 @@
 import asyncio
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("SLIMM_ROLES", "member:r-member,helper:r-helper")
 
 import bot as roles  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
+from slimbots.http import ApiError  # noqa: E402
+from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.space import Space  # noqa: E402
 from slimbots.testing import FakeAsyncClient  # noqa: E402
 
@@ -244,6 +247,184 @@ def test_another_bot_is_ignored_by_default():
     asyncio.run(roles.bot.space.refresh_members())
     process(client, message("bot-2", "!role member"))
     assert client.sent == []
+
+
+def setup_menu(*, manager=True):
+    """A fresh store per test, and u1 holding Manage Roles unless `manager` is False."""
+    client = setup()
+    roles.bot.store = None
+    roles.bot.data_path = os.path.join(tempfile.mkdtemp(), "roles.db")
+    asyncio.run(roles.bot.open_store(migrate=roles.menu_store.init_db))
+    member = roles.bot.space.members["u1"]
+    member.role_ids = []
+    member._base_permissions = Permissions.MANAGE_ROLES if manager else 0
+    return client
+
+
+def make_menu(client, args="Pick your roles | member, helper", msg_id="m1"):
+    process(client, message("u1", f"!rolemenu create {args}", msg_id))
+    return client.sent[-1]["id"] if client.sent else None
+
+
+def press(client, menu_id, role_id, interaction_id="i1"):
+    frame = {
+        "type": "interaction.created", "interaction_id": interaction_id, "channel_id": "c1", "message_id": menu_id,
+        "custom_id": f"rolemenu:{role_id}", "user_id": "u1", "user_display_name": "Nick", "created_at": 1,
+    }
+
+    async def run():
+        await roles.bot._handle_frame(frame)
+        await asyncio.gather(*list(roles.bot._background_tasks))
+
+    asyncio.run(run())
+
+
+def button_ids(sent):
+    return [b["custom_id"] for row in sent["components"] for b in row["buttons"]]
+
+
+def test_a_manager_creates_a_menu_with_one_button_per_role():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    sent = client.sent[-1]
+    assert sent["content"] == "Pick your roles"
+    assert button_ids(sent) == ["rolemenu:r-member", "rolemenu:r-helper"]
+    assert menu_id in client.ephemerals[-1]["content"]
+
+
+def test_a_role_off_the_self_assignable_list_cannot_go_in_a_menu():
+    client = setup_menu()
+    make_menu(client, "Pick | member, admin")
+    assert "`admin` is not on the self-assignable list" in client.ephemerals[-1]["content"]
+    assert not client.sent
+
+
+def test_a_non_manager_cannot_create_a_menu():
+    client = setup_menu(manager=False)
+    make_menu(client)
+    assert "Manage Roles" in client.ephemerals[-1]["content"]
+    assert not client.sent
+
+
+def test_title_and_role_count_are_limited():
+    client = setup_menu()
+    make_menu(client, "x" * 201 + " | member")
+    assert "under 200" in client.ephemerals[-1]["content"]
+    many = {f"r{i}": f"id-{i}" for i in range(26)}
+    with_roles(many)
+    make_menu(client, "Big | " + ", ".join(many))
+    assert "at most 25" in client.ephemerals[-1]["content"]
+    assert not client.sent
+
+
+def test_a_press_grants_then_a_second_press_removes():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    press(client, menu_id, "r-member")
+    assert ("PUT", "/members/u1/roles/r-member") in [(m, p) for m, p, *_ in client.calls]
+    assert "added `member`" in client.ephemerals[-1]["content"]
+    press(client, menu_id, "r-member", "i2")
+    assert ("DELETE", "/members/u1/roles/r-member") in [(m, p) for m, p, *_ in client.calls]
+    assert "removed `member`" in client.ephemerals[-1]["content"]
+
+
+def test_pick_one_swaps_the_other_menu_role():
+    client = setup_menu()
+    menu_id = make_menu(client, "--one Pick one | member, helper")
+    press(client, menu_id, "r-member")
+    press(client, menu_id, "r-helper", "i2")
+    calls = [(m, p) for m, p, *_ in client.calls]
+    assert ("PUT", "/members/u1/roles/r-helper") in calls
+    assert ("DELETE", "/members/u1/roles/r-member") in calls
+    assert "added `helper`" in client.ephemerals[-1]["content"]
+    assert "removed `member`" in client.ephemerals[-1]["content"]
+
+
+def test_a_menu_without_pick_one_keeps_the_other_role():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    press(client, menu_id, "r-member")
+    press(client, menu_id, "r-helper", "i2")
+    assert ("DELETE", "/members/u1/roles/r-member") not in [(m, p) for m, p, *_ in client.calls]
+
+
+def test_a_press_for_a_role_no_longer_self_assignable_is_refused():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    with_roles({"member": "r-member"})
+    press(client, menu_id, "r-helper")
+    assert "no longer offered" in client.ephemerals[-1]["content"]
+    assert not [c for c in client.calls if c[0] == "PUT" and "/roles/" in c[1]]
+
+
+def test_a_forged_custom_id_cannot_grant_a_role_outside_the_menu():
+    client = setup_menu()
+    menu_id = make_menu(client, "Only member | member")
+    with_roles({"member": "r-member", "helper": "r-helper"})
+    press(client, menu_id, "r-helper")
+    assert "not part of this menu" in client.ephemerals[-1]["content"]
+    assert not [c for c in client.calls if c[0] == "PUT" and "/roles/" in c[1]]
+    press(client, "unknown-message", "r-member", "i2")
+    assert "no longer exists" in client.ephemerals[-1]["content"]
+
+
+def test_a_role_deleted_from_the_space_answers_privately():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    client.respond("PUT", "/members/u1/roles/r-member", ApiError(404))
+    press(client, menu_id, "r-member")
+    assert "no longer exists in this space" in client.ephemerals[-1]["content"]
+
+
+def test_a_role_the_bot_cannot_manage_explains_why():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    client.respond("PUT", "/members/u1/roles/r-helper", ApiError(403))
+    press(client, menu_id, "r-helper")
+    assert "MANAGE_MESSAGES" in client.ephemerals[-1]["content"]
+
+
+def test_menus_survive_a_restart_of_the_store():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    path = roles.bot.data_path
+    roles.bot.store = None
+    asyncio.run(roles.bot.open_store(migrate=roles.menu_store.init_db))
+    assert roles.bot.data_path == path
+    press(client, menu_id, "r-member")
+    assert "added `member`" in client.ephemerals[-1]["content"]
+
+
+def test_adding_and_removing_a_role_edits_the_buttons_in_place():
+    client = setup_menu()
+    menu_id = make_menu(client, "Pick | member")
+    process(client, message("u1", f"!rolemenu add {menu_id} helper", "m2"))
+    assert [b["custom_id"] for r in client.component_edits[-1]["components"] for b in r["buttons"]] == ["rolemenu:r-member", "rolemenu:r-helper"]
+    process(client, message("u1", f"!rolemenu remove {menu_id} member", "m3"))
+    assert [b["custom_id"] for r in client.component_edits[-1]["components"] for b in r["buttons"]] == ["rolemenu:r-helper"]
+    process(client, message("u1", f"!rolemenu remove {menu_id} helper", "m4"))
+    assert "at least one role" in client.ephemerals[-1]["content"]
+    process(client, message("u1", f"!rolemenu add {menu_id} admin", "m5"))
+    assert "not on the self-assignable list" in client.ephemerals[-1]["content"]
+
+
+def test_deleting_a_menu_removes_the_message_and_stops_presses():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    process(client, message("u1", f"!rolemenu delete {menu_id}", "m2"))
+    assert ("DELETE", f"/channels/c1/messages/{menu_id}") in [(m, p) for m, p, *_ in client.calls]
+    press(client, menu_id, "r-member")
+    assert "no longer exists" in client.ephemerals[-1]["content"]
+
+
+def test_only_a_manager_can_edit_or_delete_a_menu():
+    client = setup_menu()
+    menu_id = make_menu(client)
+    roles.bot.space.members["u1"]._base_permissions = 0
+    process(client, message("u1", f"!rolemenu delete {menu_id}", "m2"))
+    assert "Manage Roles" in client.ephemerals[-1]["content"]
+    press(client, menu_id, "r-member")
+    assert "added `member`" in client.ephemerals[-1]["content"]
 
 
 if __name__ == "__main__":
