@@ -259,3 +259,38 @@ async def test_a_message_menu_use_in_an_unscoped_channel_is_still_dropped(monkey
 
     await deliver(bot, frame("message_menu", "translate", channel_id="elsewhere"))
     assert heard == []
+
+
+async def test_updating_a_call_control_resends_the_whole_set_and_skips_an_unchanged_one():
+    bot = make_bot()
+    bot._ui_registered = True
+
+    @bot.call_control("pp", "Pause", icon="pause")
+    async def pp(interaction):
+        pass
+
+    assert await bot.update_call_control("pp", icon="play", label="Play") is True
+    method, path, body, _ = bot.client.calls[-1]
+    assert (method, path) == ("PUT", "/bots/ui")
+    assert body["call_controls"] == [{"id": "pp", "label": "Play", "icon": "play"}]
+    sent = len(bot.client.calls)
+    assert await bot.update_call_control("pp", icon="play", label="Play") is False
+    assert len(bot.client.calls) == sent
+    assert bot._ui.handler("call_control", "pp") is pp
+
+
+async def test_updating_before_the_set_is_registered_only_changes_it_locally():
+    bot = make_bot()
+    bot.call_control("pp", "Pause", icon="pause")(lambda interaction: None)
+    assert await bot.update_call_control("pp", icon="play") is True
+    assert bot.client.calls == []
+    assert bot._ui.body()["call_controls"][0]["icon"] == "play"
+
+
+async def test_updating_an_unknown_control_or_icon_is_refused():
+    bot = make_bot()
+    with pytest.raises(KeyError):
+        await bot.update_call_control("nope", icon="play")
+    bot.call_control("pp", "Pause", icon="pause")(lambda interaction: None)
+    with pytest.raises(ValueError):
+        await bot.update_call_control("pp", icon="skull")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .hidden_chars import has_hidden_char
@@ -105,6 +105,18 @@ class UiRoutes:
         table = self.menu if kind == "message_menu" else self.controls
         found = table.get(entry_id)
         return found[1] if found else None
+
+    def restyle(self, entry_id: str, *, icon: str | None, label: str | None) -> bool:
+        """Swaps a registered control's icon and/or label; False when nothing changed."""
+        found = self.controls.get(entry_id)
+        if found is None:
+            raise KeyError(f"no call control `{entry_id}` is registered")
+        entry, func = found
+        changed = replace(entry, icon=entry.icon if icon is None else icon, label=entry.label if label is None else label)
+        if changed == entry:
+            return False
+        self.controls[entry_id] = (changed, func)
+        return True
 
     def body(self) -> dict[str, Any]:
         return {

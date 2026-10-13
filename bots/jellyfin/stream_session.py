@@ -12,6 +12,7 @@ import uuid
 
 from slimbots import Embed
 
+import dock_state
 import jellyfin_core
 import playback_progress
 from pump_sync import AudioPipe, StartLine, reap
@@ -363,6 +364,7 @@ class WatchSession:
     async def refresh_panel(self):
         if self.panel is not None:
             await self.panel.refresh(self)
+        await dock_state.sync(self.bot)
 
     async def set_subtitle(self, stream_index, label):
         position = self.position_seconds
@@ -445,6 +447,7 @@ class WatchSession:
         if announce and self.panel is None:
             with contextlib.suppress(Exception):
                 await self.bot.client.send(self.text_channel_id, f"stopped **{self.title}** ({reason}).")
+        await dock_state.sync(self.bot)
 
     async def _monitor_loop(self):
         while True:
