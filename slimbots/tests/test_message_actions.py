@@ -28,6 +28,17 @@ async def test_message_edit_updates_its_own_content_and_calls_the_right_route():
     ]
 
 
+async def test_message_edit_sends_embeds_only_when_given():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/messages", {"id": "m1", "content": "old"})
+    client.respond("PATCH", "/channels/c1/messages/m1", {"id": "m1", "content": "new"})
+    message = await client.send("c1", "old")
+    await message.edit("new", embeds=[{"title": "Up"}])
+    await message.edit("new", embeds=[])
+    bodies = [b for m, p, b, _ in client.calls if m == "PATCH"]
+    assert bodies == [{"content": "new", "embeds": [{"title": "Up"}]}, {"content": "new", "embeds": []}]
+
+
 async def test_message_delete_calls_the_right_route():
     client = FakeAsyncClient()
     client.respond("POST", "/channels/c1/messages", {"id": "m1"})

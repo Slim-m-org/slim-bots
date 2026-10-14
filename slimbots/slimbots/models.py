@@ -119,9 +119,9 @@ class Message:
         """One message by id, even one this bot never saw live; see `AsyncClient.get_message`."""
         return await client.get_message(channel_id, message_id)
 
-    async def edit(self, content: str) -> Message:
+    async def edit(self, content: str, *, embeds: list[dict[str, Any]] | None = None) -> Message:
         """Edits this message; allowed for the author, or a member with MANAGE_MESSAGES."""
-        data = await self._client.edit_message(self.channel_id, self.id, content)
+        data = await self._client.edit_message(self.channel_id, self.id, content, embeds=embeds)
         self.content = data.get("content", content)
         return self
 

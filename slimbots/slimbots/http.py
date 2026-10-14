@@ -228,8 +228,14 @@ class AsyncClient:
         data = await self.call("GET", f"/channels/{channel_id}/messages/{message_id}")
         return Message(data, client=self, channel_id=channel_id)
 
-    async def edit_message(self, channel_id: str, message_id: str, content: str) -> Any:
-        return await self.call("PATCH", f"/channels/{channel_id}/messages/{message_id}", {"content": content})
+    async def edit_message(
+        self, channel_id: str, message_id: str, content: str, *, embeds: list[dict[str, Any]] | None = None,
+    ) -> Any:
+        """Edits a message; `embeds` replaces its embeds (an empty list clears them), None leaves them."""
+        body: dict[str, Any] = {"content": content}
+        if embeds is not None:
+            body["embeds"] = embeds
+        return await self.call("PATCH", f"/channels/{channel_id}/messages/{message_id}", body)
 
     async def delete_message(self, channel_id: str, message_id: str) -> None:
         await self.call("DELETE", f"/channels/{channel_id}/messages/{message_id}")
