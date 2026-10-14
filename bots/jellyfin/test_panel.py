@@ -259,6 +259,7 @@ def use_control(client, session, control_id, *, user_id="u1", channel_id="v1", o
 
 
 def test_the_call_dock_registers_play_pause_skips_stop_and_a_quality_choice():
+    asyncio.run(jellyfin.bot.update_call_control("jf-playpause", icon="pause", label="Pause"))
     entries = [entry.to_wire() for entry, _ in jellyfin.bot._ui.controls.values()]
     assert [(e["id"], e["icon"]) for e in entries] == [
         ("jf-playpause", "pause"), ("jf-back", "skip_previous"), ("jf-forward", "skip_next"), ("jf-stop", "stop"),

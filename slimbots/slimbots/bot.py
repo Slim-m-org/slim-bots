@@ -128,6 +128,8 @@ class Bot:
         self._listeners: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
         self._buttons = ButtonRoutes()
         self._ui = UiRoutes()
+        self._ui_registered = False
+        self._ui_lock = asyncio.Lock()
         self._global_checks: list[Callable[[Context], Awaitable[str | None]]] = []
         self.client: AsyncClient | None = None
         self.space: Space | None = None
@@ -315,6 +317,15 @@ class Bot:
             self._ui.add("call_control", entry, func)
             return func
         return decorator
+
+    async def update_call_control(self, entry_id: str, *, icon: str | None = None, label: str | None = None) -> bool:
+        """Changes a registered control's icon or label and re-sends the set; a no-op, returning False, when unchanged."""
+        if not self._ui.restyle(entry_id, icon=icon, label=label):
+            return False
+        async with self._ui_lock:
+            if self.client is not None and self._ui_registered:
+                await register_ui(self.client, self._ui)
+        return True
 
     async def wait_for(
         self, event: str, *, check: Callable[..., bool] | None = None, timeout: float | None = None,
@@ -592,7 +603,7 @@ class Bot:
         await self.space.refresh_members()
         await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
         if self._ui:
-            await register_ui(self.client, self._ui)
+            self._ui_registered = await register_ui(self.client, self._ui)
         await self._dispatch_event("on_connect")
         async with await Gateway.open(self.client) as gateway:
             self._gateway = gateway

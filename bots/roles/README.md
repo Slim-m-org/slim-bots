@@ -33,6 +33,24 @@ watches and posts in. See "Getting a token" and "What your bot may do" in
 `docs/bots/building-bots.md` for how to find channel and role ids, and how
 to grant the bot `SEND_MESSAGES`/`VIEW_CHANNEL` there.
 
+## Role menus
+
+A role menu is one message with a button per role; pressing a button toggles that role for the presser.
+Someone with Manage Roles runs these in the channel where the menu should live:
+
+- `!rolemenu create [--one] <title> | <role>, <role>` posts the menu. `--one` makes it pick-one: choosing a role removes the presser's other roles from that menu.
+- `!rolemenu add <menu id> <role>` and `!rolemenu remove <menu id> <role>` change the buttons in place.
+- `!rolemenu delete <menu id>` deletes the message and forgets the menu.
+- `!rolemenu list` shows the menus in this channel with their ids.
+
+Only roles from `SLIMM_ROLES` may go in a menu; anything else is refused privately with the reason.
+A menu holds at most 25 roles (the server allows 5 rows of 5 buttons, `components.rs`), and a title is at most 200 characters.
+Every reply to these commands, and to a button press, is private ("added `x`" / "removed `x`").
+
+Menus are stored in a sqlite file (`SLIMM_DB_PATH`, default `roles.db`), so buttons keep working after a restart.
+A press is checked against the stored menu: the role comes from the menu row for that message, never from the custom id alone, so a forged id naming a role outside the menu is refused.
+If the role has since left `SLIMM_ROLES`, was deleted from the space, or is above what the bot may grant, the presser gets a private explanation instead of a silent failure.
+
 ## The no-escalation rule
 
 `crates/slimm-server/src/http/roles.rs` refuses to grant a role that carries
@@ -90,7 +108,7 @@ skipping that check would have it react to its own listing message forever.
   instead. This was checked twice already, once statically against the
   frame types and once live against a running deployment - it is a platform
   property, not a missing feature waiting on this example.
-- **Its own business-data store.** A reminder is a promise to act later and
+- **A store for role grants.** (Role menus do keep a small sqlite file, as above.) A reminder is a promise to act later and
   must survive a restart, or it silently never fires, so `bot-reminders`
   needs its own sqlite file. A role grant needs nothing of its own: it is
   acted on immediately, and if the bot is offline when it arrives, the
