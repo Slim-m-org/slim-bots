@@ -3,6 +3,11 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.12.0
+
+- `bot.update_call_control(entry_id, icon=..., label=...)` changes a registered call control's icon or label and re-sends the set, so a play button can turn into a pause button. Returns False when nothing changed, and raises `KeyError` for an id that was never registered.
+- `edit_message(..., embeds=[...])` and `Message.edit(content, embeds=[...])` replace a message's embeds; an empty list clears them and leaving it out keeps them. It needs a slim-m server that takes embeds on an edit; an older one ignores the field.
+
 ## 0.11.0
 
 - `@bot.call_control(..., options=[(id, label), ...])` registers a call control that opens a choice instead of firing, 2 to 8 options, and the pick arrives as `interaction.option_id`. It needs a slim-m server with migration 0100; an older one shows a plain button and `option_id` is `None`.
