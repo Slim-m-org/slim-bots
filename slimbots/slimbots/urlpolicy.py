@@ -30,10 +30,28 @@ def is_loopback_host(host: str) -> bool:
     return host.lower() == "localhost" or (ip is not None and ip.is_loopback)
 
 
+def _embedded_v4(ip: ipaddress.IPv6Address) -> list[ipaddress.IPv4Address]:
+    """The IPv4 addresses an IPv6 one can carry: 6to4, Teredo's client and the NAT64 well-known prefix."""
+    found = []
+    if ip.sixtofour is not None:
+        found.append(ip.sixtofour)
+    if ip.teredo is not None:
+        found.append(ip.teredo[1])
+    if ip in ipaddress.IPv6Network("64:ff9b::/96"):
+        found.append(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+    return found
+
+
 def is_public_address(address: str) -> bool:
-    """True only for a globally routable address, so private, loopback, link-local, CGNAT, multicast and reserved all fail."""
+    """True only for a globally routable address, so private, loopback, link-local, CGNAT, multicast and reserved all fail.
+    The checks are listed out instead of trusting `is_global` alone, which differs between Python versions for multicast."""
     ip = _address(address)
-    return ip is not None and ip.is_global and not ip.is_multicast
+    if ip is None:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and not all(is_public_address(str(v4)) for v4 in _embedded_v4(ip)):
+        return False
+    flagged = (ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)
+    return ip.is_global and not any(flagged)
 
 
 def service_url_problem(
