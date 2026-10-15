@@ -168,6 +168,13 @@ The replay follows the server's `has_more` page by page until the backlog is dra
 
 The functions passed to `run()` are unchanged from before this - `get_balance(conn, user_id)`, `due_reminders(conn, now)`, and so on all still take a raw `sqlite3.Connection` and run synchronously; `run()` just moves *where* that call happens.
 That is why `bots/casino/test_concurrency.py` did not need to change at all: it drives those same functions directly against its own real connections on real threads, never through `Bot` or `Store`.
+Two tables nearly every polling bot used to hand-build are in the box.
+`await bot.store.kv("state")` is a `(key TEXT, value TEXT)` table with `get`, `set` and `advance(key, n)`, which only ever moves a cursor forward (ints compare as numbers, strings as text).
+`await bot.store.ledger("announced")` is an "already handled" table with `has`, `add` (True when the key was new), `unseen(keys)` and `prune(older_than)`.
+Both create the table if it is missing and reuse an existing one as is: `ledger(table, key="release_id", detail="tag", at="at")` names the columns of a table a bot already had, and `detail=None` is a ledger with no detail column, so an old database keeps working.
+Each async call commits.
+Inside a `run()` function or a migration, use `KeyValueTable` and `LedgerTable` directly: the same methods, connection first, and they never commit, so they sit inside a bot's own transaction.
+
 A background sweep that already ran on its own thread (`bot-jellyfin`'s poster refresh used to reach for `asyncio.to_thread` by hand) can just call `bot.store.connection` directly instead, since it was never blocking the event loop in the first place.
 
 ## Migrating an existing table
