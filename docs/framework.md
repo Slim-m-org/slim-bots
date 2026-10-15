@@ -143,6 +143,12 @@ A plain `asyncio.create_task(...)` is only weakly referenced by the event loop, 
 An exception out of a background task (a 401 included, which stays terminal exactly like one on the socket) is treated as fatal: it is logged, the bot's main loop is cancelled, and `bot.run()` exits non-zero so a container orchestrator restarts it, rather than the task's failure going unnoticed while the rest of the bot carries on.
 Call it from `on_connect`/`on_ready`, the same place a bot used to reach for `asyncio.create_task` directly.
 
+`@bot.every(seconds, *, name, fatal=(), delay_first=False, on="connect", enabled=None, before=None)` is the loop most bots want: it runs the decorated coroutine every `seconds` as a supervised background task, started once per process rather than once per reconnect.
+A failed cycle is logged and retried on the next one, whatever it raised; a revoked token and any exception type in `fatal` (a rejected service key, say) end the loop and so, as above, the bot.
+`seconds` may be a function, read every cycle; a number the coroutine returns is a minimum wait before the next one, which is how a rate-limited poll backs off.
+`delay_first=True` waits one interval before the first run, `on="ready"` starts it after the backlog replay instead of on connect, `enabled` is a function that keeps it off while false, and `before` is a coroutine awaited at each connect until the task has started (if it raises, the task starts on a later connect).
+`bot.periodic(name)` returns the loop for a test to drive without a connection.
+
 `Bot(default_data_path="casino.db")` gives `bot.data_path`: `SLIMM_DB_PATH` if set, else that default - the one place a bot's own sqlite file path is derived, instead of every bot re-deriving `os.environ.get("SLIMM_DB_PATH", "...")` by hand.
 
 A bot with `channels` set gets a persisted, cross-restart `seq` cursor for free, at `bot.data_path` when the bot has one (sharing the same file as its business data, the way `bot-casino` does) or a generic default (`slimbots-cursor.db`) otherwise; `Bot` bootstraps and `/sync`-replays the backlog through `process_message` on every connect, before `on_ready` fires (the socket is already open, so a replayed command can use `ctx.typing()` and `ctx.confirm`, and a live message that arrives meanwhile is held and processed once the replay ends) - no bot code calls `cursor`/`catchup` directly any more.

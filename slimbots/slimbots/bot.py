@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from types import ModuleType
-from typing import Any, Awaitable, Callable, Coroutine, Iterable, NoReturn, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, NoReturn, Sequence
 
 from . import catchup, cursor
 from . import events as ev
@@ -24,7 +24,7 @@ from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
 from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_ui
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
-from .lifecycle import guard_dispatch, run_with_shutdown
+from .lifecycle import Periodic, guard_dispatch, run_periodic, run_with_shutdown
 from .models import Member
 from .registration import RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
@@ -137,6 +137,8 @@ class Bot:
         self.me_id: str | None = None
         self._cursor_conn: sqlite3.Connection | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._periodic: dict[str, Periodic] = {}
+        self._periodic_started: set[str] = set()
         self._fatal_error: BaseException | None = None
         self._main_task: asyncio.Task[Any] | None = None
         self._gateway: Gateway | None = None
@@ -188,6 +190,33 @@ class Bot:
         self._background_tasks.add(task)
         task.add_done_callback(self._on_background_done)
         return task
+
+    def every(
+        self, seconds: float | Callable[[], float], *, name: str, fatal: tuple[type[BaseException], ...] = (),
+        delay_first: bool = False, on: Literal["connect", "ready"] = "connect",
+        enabled: Callable[[], bool] | None = None, before: Callable[[], Awaitable[Any]] | None = None,
+    ) -> Callable[[Callable[[], Awaitable[Any]]], Callable[[], Awaitable[Any]]]:
+        """Runs the decorated coroutine every `seconds` as a supervised task, started once per process, not per reconnect."""
+        def decorator(func: Callable[[], Awaitable[Any]]) -> Callable[[], Awaitable[Any]]:
+            if name in self._periodic:
+                raise ValueError(f"a periodic task called `{name}` is already registered")
+            self._periodic[name] = Periodic(func, seconds, tuple(fatal), delay_first)
+
+            async def start() -> None:
+                if name in self._periodic_started or (enabled is not None and not enabled()):
+                    return
+                if before is not None:
+                    await before()
+                self._periodic_started.add(name)
+                self.background(self.periodic(name), name=name)
+
+            self._listeners.setdefault(f"on_{on}", []).append(start)
+            return func
+        return decorator
+
+    def periodic(self, name: str) -> Coroutine[Any, Any, None]:
+        """The loop registered under `name` by `every`, for a test to drive without a connection."""
+        return run_periodic(name, self._periodic[name])
 
     def _on_background_done(self, task: asyncio.Task[Any]) -> None:
         self._background_tasks.discard(task)

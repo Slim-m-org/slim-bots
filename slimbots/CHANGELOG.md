@@ -8,6 +8,7 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 - `ValidationError` is a `BadArgument`, so a command that lets a `require_*` check raise replies with its text instead of each command catching it.
 - `requires=` is typed as the permission bit it holds, and `requires_message=` sets the reply a member without it gets. That reply (`MissingPermissions`) now goes only to them, falling back to a public reply on a server without ephemeral messages.
 - `bot.run_cli(check=...)` is the `__main__` entry point: it runs pre-flight checks, turns a config `RuntimeError` into an exit message, and exits with `run()`'s code.
+- `@bot.every(seconds, name=..., fatal=...)` runs a coroutine on an interval as a supervised background task, started once per process. A failed cycle is logged and retried, a revoked token or a `fatal` type stops the bot, and a returned number is a minimum wait before the next cycle.
 
 ## 0.12.0
 
