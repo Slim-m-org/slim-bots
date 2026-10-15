@@ -25,7 +25,7 @@ async def snapshot(servers):
 
     async def one(server):
         try:
-            return await asyncio.to_thread(core.fetch_resources, server["identifier"])
+            return await core.fetch_resources(server["identifier"])
         except core.PelicanAuthError:
             raise
         except core.PelicanError:
@@ -37,7 +37,7 @@ async def snapshot(servers):
 async def resolve(ctx, query):
     """The one server `query` names, or None after replying why not."""
     try:
-        servers = await asyncio.to_thread(core.list_servers)
+        servers = await core.list_servers()
     except core.PelicanError as err:
         await ctx.reply(f"can't reach the panel: {err}")
         return None
@@ -55,7 +55,7 @@ async def resolve(ctx, query):
 @bot.command(name="servers", help="List game servers with state, CPU and RAM", cooldown=LIST_COOLDOWN_SECONDS)
 async def servers_cmd(ctx):
     try:
-        servers = await asyncio.to_thread(core.list_servers)
+        servers = await core.list_servers()
         rows = await snapshot(servers)
     except core.PelicanError as err:
         await ctx.reply(f"can't reach the panel: {err}")
@@ -72,7 +72,7 @@ async def server_cmd(ctx, name: str):
     if server is None:
         return
     try:
-        stats = await asyncio.to_thread(core.fetch_resources, server["identifier"])
+        stats = await core.fetch_resources(server["identifier"])
     except core.PelicanError as err:
         await ctx.reply(f"can't read `{server['name']}`: {err}")
         return
@@ -111,7 +111,7 @@ async def power(ctx, signal, query):
         await ctx.reply("I can't write to the log channel, so I won't run this.")
         return
     try:
-        await asyncio.to_thread(core.api_power, server["identifier"], signal)
+        await core.api_power(server["identifier"], signal)
     except core.PelicanError as err:
         await send_audit(ctx, signal, server, f"failed ({err})")
         await ctx.reply(f"`{signal}` on `{server['name']}` failed: {err}")
@@ -161,7 +161,7 @@ async def publish_status(text):
 
 
 async def status_once():
-    servers = await asyncio.to_thread(core.list_servers)
+    servers = await core.list_servers()
     await publish_status(status_text(await snapshot(servers)))
 
 
