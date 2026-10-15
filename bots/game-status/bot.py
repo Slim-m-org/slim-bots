@@ -17,7 +17,6 @@ LIST_COOLDOWN_SECONDS = 10
 
 bot = Bot(prefix="!", default_data_path="game-status.db", store_migrate=core.init_db)
 core.configure(bot)
-_background_started = False
 
 
 def now():
@@ -63,24 +62,18 @@ async def publish_all(rows, stamp):
             print(f"game-status: channel {channel_id}: {type(err).__name__}: {err}", file=sys.stderr)
 
 
+async def seed_servers():
+    store = await bot.open_store()
+    for server in core.GAMESTATUS_SERVERS:
+        await store.run(core.txn_upsert_server, server)
+
+
+@bot.every(lambda: core.GAMESTATUS_INTERVAL, name="game-status-poll", before=seed_servers)
 async def poll_once():
     store = await bot.open_store()
     servers = await store.run(core.txn_list_servers)
     rows = await poll(servers)
     await publish_all(rows, now())
-
-
-async def poll_loop():
-    """Only a revoked slim-m token ends the loop; any other failure waits for the next cycle."""
-    while True:
-        try:
-            await poll_once()
-        except Exception as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"game-status: {type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(core.GAMESTATUS_INTERVAL)
 
 
 @bot.command(name="gamestatus", help="Show whether each game server is up, with players and map", cooldown=LIST_COOLDOWN_SECONDS, cooldown_bucket="channel")
@@ -143,22 +136,6 @@ async def gameserver_unboard(ctx):
     store = await bot.open_store()
     removed = await store.run(core.txn_remove_board, ctx.channel_id)
     await ctx.reply("no longer updating a status message here." if removed else "this channel has no status message.")
-
-
-async def seed_servers():
-    store = await bot.open_store()
-    for server in core.GAMESTATUS_SERVERS:
-        await store.run(core.txn_upsert_server, server)
-
-
-@bot.event
-async def on_connect():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    await seed_servers()
-    bot.background(poll_loop(), name="game-status-poll")
 
 
 if __name__ == "__main__":

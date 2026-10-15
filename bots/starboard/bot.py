@@ -363,24 +363,11 @@ async def post_digest_if_due(now):
     await bot.store.run(meta_set, "last_digest", now)
 
 
-async def _maintenance():
-    while True:
-        now = int(time.time())
-        await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
-        await guard_dispatch(post_digest_if_due, now)
-        await asyncio.sleep(MAINTENANCE_SECONDS)
-
-
-_background_started = False
-
-
-@bot.event
-async def on_ready():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    bot.background(_maintenance(), name="starboard-maintenance")
+@bot.every(lambda: MAINTENANCE_SECONDS, name="starboard-maintenance", on="ready")
+async def maintenance():
+    now = int(time.time())
+    await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
+    await guard_dispatch(post_digest_if_due, now)
 
 
 if __name__ == "__main__":

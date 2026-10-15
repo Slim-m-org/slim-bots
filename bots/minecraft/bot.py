@@ -25,7 +25,6 @@ bridge = None
 batcher = None
 rcon = None
 to_game_cap = None
-_background_started = False
 
 
 def setup_state(clock=None):
@@ -47,6 +46,7 @@ def bridge_channel():
     return next(iter(channels)) if len(channels) == 1 else None
 
 
+@bot.every(TICK_SECONDS, name="minecraft-pump")
 async def pump_once():
     """One pass: new log lines into the batcher, then at most one post out to the channel."""
     lines = await asyncio.to_thread(tail.read_new)
@@ -66,12 +66,7 @@ async def pump_once():
         print(f"{type(err).__name__}: {err}, dropped one post", file=sys.stderr)
 
 
-async def pump_loop():
-    while True:
-        await pump_once()
-        await asyncio.sleep(TICK_SECONDS)
-
-
+@bot.every(ROSTER_SYNC_SECONDS, name="minecraft-roster", enabled=lambda: rcon is not None)
 async def sync_roster():
     """Replaces the known-online set with the server's own answer; a failed call leaves it as it was."""
     try:
@@ -84,23 +79,6 @@ async def sync_roster():
         print("rcon `list` gave a reply that is not a player list, keeping the log-derived roster", file=sys.stderr)
         return
     bridge.online = set(names)
-
-
-async def roster_loop():
-    while True:
-        await sync_roster()
-        await asyncio.sleep(ROSTER_SYNC_SECONDS)
-
-
-@bot.event
-async def on_connect():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    bot.background(pump_loop(), name="minecraft-pump")
-    if rcon is not None:
-        bot.background(roster_loop(), name="minecraft-roster")
 
 
 async def relay_to_game(message):

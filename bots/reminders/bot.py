@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """bot-reminders: `!remind in/at/every ...`, `!reminders`, `!timezone`; see README.md."""
 
-import asyncio
 import sys
 import time
 import uuid
@@ -419,34 +418,15 @@ def is_refusal(err):
     return 400 <= err.status < 500
 
 
+@bot.every(lambda: DUE_CHECK_SECONDS, name="reminders-due-checker", delay_first=True, on="ready")
 async def deliver_due_reminders():
     for row in await bot.store.run(due_reminders, int(time.time())):
         await guard_dispatch(deliver_reminder, row, on_error=lambda err, row=row: park_undeliverable(row, err))
 
 
-async def due_checker():
-    while True:
-        await asyncio.sleep(DUE_CHECK_SECONDS)
-        await guard_dispatch(deliver_due_reminders)
-
-
-async def _maintenance():
-    while True:
-        await asyncio.sleep(PRUNE_INTERVAL_SECONDS)
-        await bot.store.run(prune_old_reminders, int(time.time()) - REMINDER_RETENTION_SECONDS)
-
-
-_background_started = False
-
-
-@bot.event
-async def on_ready():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    bot.background(due_checker(), name="reminders-due-checker")
-    bot.background(_maintenance(), name="reminders-maintenance")
+@bot.every(lambda: PRUNE_INTERVAL_SECONDS, name="reminders-maintenance", delay_first=True, on="ready")
+async def prune_reminders():
+    await bot.store.run(prune_old_reminders, int(time.time()) - REMINDER_RETENTION_SECONDS)
 
 
 if __name__ == "__main__":

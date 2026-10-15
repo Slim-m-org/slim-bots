@@ -279,10 +279,10 @@ def test_another_bot_is_ignored_by_default():
 
 def test_on_ready_starts_maintenance_as_a_supervised_background_task():
     setup()
-    casino._maintenance_started = False
+    casino.bot._periodic_started.clear()
 
     async def run():
-        await casino.on_ready()
+        await casino.bot._dispatch_event("on_ready")
         assert len(casino.bot._background_tasks) == 1
         task = next(iter(casino.bot._background_tasks))
         task.cancel()

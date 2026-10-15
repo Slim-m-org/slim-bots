@@ -147,34 +147,12 @@ async def poll_once(feed):
     return None
 
 
-def next_delay(wait, poll_seconds):
-    return max(wait or 0, poll_seconds)
+releases_feed = feedmod.Feed(config.repo, token=config.token)
 
 
-async def run_forever(feed):
-    while True:
-        wait = None
-        try:
-            wait = await poll_once(feed)
-        except ApiError as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(next_delay(wait, config.poll_seconds))
-
-
-started = []
-
-
-@bot.event
-async def on_connect():
-    if started:
-        return
-    started.append(True)
-    bot.background(run_forever(feedmod.Feed(config.repo, token=config.token)), name="github-releases-poll")
+@bot.every(lambda: config.poll_seconds, name="github-releases-poll")
+async def poll():
+    return await poll_once(releases_feed)
 
 
 if __name__ == "__main__":

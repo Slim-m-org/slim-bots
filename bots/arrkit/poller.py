@@ -1,4 +1,4 @@
-"""The poll loops: fatal on a rejected key or revoked token, otherwise retry next cycle."""
+"""The poll wiring: fatal on a rejected key or revoked token, otherwise retry next cycle."""
 
 import asyncio
 import sys
@@ -39,35 +39,9 @@ async def history_poll_once(bot, core):
     await bot.store.run(store.advance_cursor, records[-1]["id"])
 
 
-async def run_forever(poll_once, service):
-    """A rejected service key or revoked slimm token propagates out - bot.background() treats that as fatal."""
-    while True:
-        try:
-            await poll_once()
-        except AuthError:
-            print(f"{service.name} api key rejected - exiting", file=sys.stderr)
-            raise
-        except ApiError as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(service.poll_seconds)
-
-
 def install(bot, poll_once, service):
-    """Starts the poll loop the first time the bot connects; a reconnect must not start a second."""
-    started = []
-
-    async def on_connect():
-        if started:
-            return
-        started.append(True)
-        bot.background(run_forever(poll_once, service), name=f"{service.name}-poll")
-
-    bot.event(on_connect)
+    """Polls the service every `poll_seconds`; a rejected key is fatal, anything else retries next cycle."""
+    bot.every(lambda: service.poll_seconds, name=f"{service.name}-poll", fatal=(AuthError,))(poll_once)
 
 
 def main(bot, service, extra_problem=None):

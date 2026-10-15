@@ -173,39 +173,6 @@ def test_one_unreachable_channel_does_not_stop_the_others():
     assert asyncio.run(game_status.bot.store.run(core.txn_list_boards)).keys() == {"good"}
 
 
-def test_the_poll_loop_survives_an_exception_in_a_cycle():
-    setup()
-    calls = []
-
-    async def flaky():
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("boom")
-        raise asyncio.CancelledError
-
-    game_status.poll_once = flaky
-    core.GAMESTATUS_INTERVAL = 0
-    try:
-        asyncio.run(game_status.poll_loop())
-    except asyncio.CancelledError:
-        pass
-    assert len(calls) == 2
-
-
-def test_a_revoked_token_ends_the_poll_loop():
-    setup()
-
-    async def revoked():
-        raise ApiError(401, {"error": "invalid token"})
-
-    game_status.poll_once = revoked
-    try:
-        asyncio.run(game_status.poll_loop())
-    except ApiError:
-        return
-    raise AssertionError("loop swallowed a revoked token")
-
-
 def test_admin_commands_need_manage_server():
     client = setup(servers=())
     say(client, "!gameserver add tcp 10.0.0.7 34197 Factorio")

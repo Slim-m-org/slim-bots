@@ -2,7 +2,6 @@
 """bot-casino: chip balance, coinflip, and blackjack (hit/stand/double/split/surrender); see README.md.
 Split per docs/framework.md: this is the entry point, casino_core.py holds the primitives, economy.py/blackjack_cog.py are extensions."""
 
-import asyncio
 import secrets  # noqa: F401 - re-exported so test_bot.py can monkeypatch secrets.choice, as casino_core does
 import time
 
@@ -31,23 +30,10 @@ bot.load_extension("economy")
 bot.load_extension("blackjack_cog")
 
 
-_maintenance_started = False
-
-
-@bot.event
-async def on_ready():
-    global _maintenance_started
-    if _maintenance_started:
-        return
-    _maintenance_started = True
-    bot.background(_maintenance(), name="casino-maintenance")
-
-
-async def _maintenance():
+@bot.every(lambda: casino_core.PRUNE_INTERVAL_SECONDS, name="casino-maintenance", delay_first=True, on="ready")
+async def prune_processed():
     """Prunes processed_requests hourly; the row only needs to survive one reconnect gap."""
-    while True:
-        await asyncio.sleep(casino_core.PRUNE_INTERVAL_SECONDS)
-        await bot.store.run(casino_core.prune_processed_requests, int(time.time()) - casino_core.PROCESSED_REQUEST_RETENTION_SECONDS)
+    await bot.store.run(casino_core.prune_processed_requests, int(time.time()) - casino_core.PROCESSED_REQUEST_RETENTION_SECONDS)
 
 
 if __name__ == "__main__":

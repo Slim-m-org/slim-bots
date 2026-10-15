@@ -205,12 +205,6 @@ def test_malformed_json_and_a_rate_limit_do_not_raise_and_set_the_next_wait():
     assert rig.client.sent == []
 
 
-def test_a_rate_limit_wait_never_goes_below_the_poll_interval():
-    assert releases.next_delay(None, 600) == 600
-    assert releases.next_delay(30, 600) == 600
-    assert releases.next_delay(900, 600) == 900
-
-
 def test_the_poll_interval_is_never_under_a_minute():
     assert releases.clamp_poll(5) == 60
     assert releases.clamp_poll(600) == 600

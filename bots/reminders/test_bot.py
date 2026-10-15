@@ -234,10 +234,10 @@ def test_another_bot_is_ignored_by_default():
 
 def test_on_ready_starts_both_loops_as_supervised_background_tasks():
     setup()
-    reminders._background_started = False
+    reminders.bot._periodic_started.clear()
 
     async def run():
-        await reminders.on_ready()
+        await reminders.bot._dispatch_event("on_ready")
         assert len(reminders.bot._background_tasks) == 2
         for task in list(reminders.bot._background_tasks):
             task.cancel()
@@ -256,7 +256,7 @@ def run_due_checker_briefly():
     reminders.bot._main_task = None
 
     async def run():
-        task = reminders.bot.background(reminders.due_checker(), name="due")
+        task = reminders.bot.background(reminders.bot.periodic("reminders-due-checker"), name="due")
         await asyncio.sleep(0.3)
         died = task.done()
         task.cancel()

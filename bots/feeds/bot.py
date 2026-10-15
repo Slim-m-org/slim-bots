@@ -96,6 +96,7 @@ async def poll_feed(feed, first=False):
     return None
 
 
+@bot.every(lambda: TICK_SECONDS, name="feeds-poll")
 async def poll_due():
     for feed in await bot.store.run(db.due_feeds, int(time.time())):
         try:
@@ -112,30 +113,6 @@ async def poll_due():
 async def note_unexpected(feed, err):
     print(f"feed {feed['id']} failed: {type(err).__name__}, retrying later", file=sys.stderr)
     await bot.store.run(db.record_failure, feed["id"], f"internal error ({type(err).__name__})", feed["interval"])
-
-
-async def run_forever():
-    while True:
-        try:
-            await poll_due()
-        except ApiError as err:
-            if is_token_revoked(err):
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next tick", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next tick", file=sys.stderr)
-        await asyncio.sleep(TICK_SECONDS)
-
-
-started = []
-
-
-@bot.event
-async def on_connect():
-    if started:
-        return
-    started.append(True)
-    bot.background(run_forever(), name="feeds-poll")
 
 
 def fmt_interval(seconds):
