@@ -37,22 +37,24 @@ def is_public_address(address: str) -> bool:
 
 
 def service_url_problem(
-    setting: str, url: str, *, allow_http: bool = False, bare_hostnames: bool = False, opt_in: str | None = None
+    setting: str, url: str, *, allow_http: bool = False, bare_hostnames: bool = False, loopback_http: bool = True,
+    opt_in: str | None = None, key_setting: str | None = None,
 ) -> str | None:
     """Why `url` cannot be a keyed service address, or None.
-    http is accepted for loopback, for a dotless docker service name when `bare_hostnames`, and anywhere when the operator set `allow_http`."""
+    http is accepted for loopback (unless `loopback_http` is off), for a dotless docker service name when `bare_hostnames`, and anywhere when the operator set `allow_http`."""
     parts = urlsplit(url)
     host = parts.hostname or ""
     if parts.scheme not in ("https", "http") or not host:
         return f"{setting} must be an http(s) URL with a host"
     if parts.username or parts.password:
-        return f"{setting} must not embed credentials; the key goes in its own setting"
-    if parts.scheme == "https" or allow_http or is_loopback_host(host):
+        return f"{setting} must not embed credentials; the key goes in {key_setting or 'its own setting'}"
+    if parts.scheme == "https" or allow_http or (loopback_http and is_loopback_host(host)):
         return None
     if bare_hostnames and "." not in host and _address(host) is None:
         return None
     hint = f"; use https, or set {opt_in}=1 for a trusted LAN host" if opt_in else ": a key on the wire is a leak"
-    return f"refusing a plaintext {setting} to a non-loopback host{hint}"
+    where = " to a non-loopback host" if loopback_http else ""
+    return f"refusing a plaintext {setting}{where}{hint}"
 
 
 async def _resolve(host: str) -> list[str]:

@@ -119,3 +119,13 @@ def test_a_service_url_must_not_embed_credentials(url):
 def test_the_setting_name_leads_every_message():
     assert service_url_problem("MY_URL", "http://a.example").startswith("refusing a plaintext MY_URL")
     assert urlpolicy.host_of("HTTPS://Example.COM:99/x") == "example.com"
+
+
+def test_loopback_plaintext_can_be_switched_off_for_a_service_that_wants_the_flag_even_there():
+    assert service_url_problem("P_URL", "http://127.0.0.1:8080") is None
+    assert "plaintext" in service_url_problem("P_URL", "http://127.0.0.1:8080", loopback_http=False)
+    assert service_url_problem("P_URL", "http://127.0.0.1:8080", loopback_http=False, allow_http=True) is None
+
+
+def test_the_credentials_message_can_name_the_setting_the_key_belongs_in():
+    assert "goes in P_KEY" in service_url_problem("P_URL", "https://u:p@host", key_setting="P_KEY")
