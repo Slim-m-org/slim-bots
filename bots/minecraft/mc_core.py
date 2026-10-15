@@ -5,6 +5,8 @@ import json
 import re
 from collections import namedtuple
 
+from slimbots.text import break_mentions, clip
+
 EVENT_KINDS = ("chat", "join", "leave", "death", "advancement")
 MAX_GAME_CHAT = 256
 MAX_SLIM_LINE = 400
@@ -88,14 +90,10 @@ def strip_formatting(text):
     return " ".join(text.split())
 
 
-def clip(text, limit):
-    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
-
-
 def slim_safe(text, limit=MAX_SLIM_LINE):
     """Text fit for a code span in slim-m: no backtick, no live @mention, nothing that can break out or restyle."""
     text = strip_formatting(text).replace("`", "'")
-    return clip(text, limit).replace("@", "@​")
+    return break_mentions(clip(text, limit))
 
 
 def game_safe(text, limit=MAX_GAME_CHAT):

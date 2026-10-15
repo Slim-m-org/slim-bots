@@ -10,6 +10,7 @@ import uuid
 import relay
 from slimbots import ApiError, Bot, Button, rows
 from slimbots.http import is_token_revoked
+from slimbots.text import format_duration
 
 
 def init_db(conn):
@@ -89,14 +90,6 @@ def clock(epoch):
     return time.strftime("%H:%M UTC", time.gmtime(epoch))
 
 
-def duration(seconds):
-    minutes = max(1, round(seconds / 60))
-    if minutes < 60:
-        return f"{minutes} min"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours} h {minutes} min" if minutes else f"{hours} h"
-
-
 def render(row, silence=None):
     lines = [f"DOWN - {row['service']} ({row['source']})"]
     if row["message"]:
@@ -115,7 +108,7 @@ def render(row, silence=None):
 
 
 def render_resolved(row, now):
-    return f"RESOLVED - {row['service']} ({row['source']}) was down for {duration(now - row['since'])}."
+    return f"RESOLVED - {row['service']} ({row['source']}) was down for {format_duration(now - row['since'], 'minutes')}."
 
 
 def buttons(row, silence=None):

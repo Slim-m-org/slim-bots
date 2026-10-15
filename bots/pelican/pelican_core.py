@@ -4,6 +4,7 @@ Never imports `bot` (the entry point) - see "Splitting a bot across files" there
 import urllib.parse
 
 from slimbots import Permissions
+from slimbots.text import format_duration
 from slimbots.urlpolicy import service_url_problem
 from slimbots.web import JsonService, ServiceAuthError, ServiceError, ServiceHTTPError, ServiceUnreachable
 
@@ -150,13 +151,6 @@ def format_bytes(count):
     return f"{value:.1f} TiB"
 
 
-def format_uptime(milliseconds):
-    minutes = int(milliseconds // 60000)
-    days, minutes = divmod(minutes, 1440)
-    hours, minutes = divmod(minutes, 60)
-    return f"{days}d {hours}h" if days else f"{hours}h {minutes}m"
-
-
 def memory_text(server, resources):
     used = format_bytes(resources.get("memory_bytes", 0))
     limit_mb = (server.get("limits") or {}).get("memory") or 0
@@ -183,7 +177,7 @@ def detail_text(server, stats):
     lines = [summary_line(server, stats), f"id `{server['identifier']}` on node {server.get('node', '?')}"]
     resources = (stats or {}).get("resources")
     if resources:
-        lines.append(f"disk {format_bytes(resources.get('disk_bytes', 0))}, uptime {format_uptime(resources.get('uptime', 0))}")
+        lines.append(f"disk {format_bytes(resources.get('disk_bytes', 0))}, uptime {format_duration(resources.get('uptime', 0) // 1000, 'uptime')}")
         lines.append(
             f"network in {format_bytes(resources.get('network_rx_bytes', 0))}, out {format_bytes(resources.get('network_tx_bytes', 0))}"
         )

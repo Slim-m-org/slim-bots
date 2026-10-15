@@ -124,8 +124,7 @@ async def open_ticket(interaction):
     number = await bot.store.run(ticketdb.reserve, interaction.user_id, name)
     if number is None:
         _, channel_id = await bot.store.run(ticketdb.live_ticket, interaction.user_id)
-        channel = bot.space.get_channel(channel_id) if channel_id else None
-        where = f"#{channel.name}" if channel else "one that is still being set up"
+        where = bot.space.channel_label(channel_id, "one that is still being set up")
         await interaction.reply_ephemeral(f"you already have an open ticket: {where}. close it before opening another.")
         return
     try:

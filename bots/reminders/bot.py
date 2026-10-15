@@ -11,6 +11,7 @@ from slimbots.http import ApiError, is_rate_limited, is_token_revoked
 from slimbots.lifecycle import guard_dispatch
 from slimbots.limits import ValidationError, require_len, require_range
 from slimbots.migrations import ensure_columns
+from slimbots.text import format_duration
 
 import recurrence
 
@@ -200,21 +201,11 @@ def delivery_id(reminder_id, due_at):
 
 def format_recurrence(recur_kind, interval_seconds, weekday, hour, minute):
     if recur_kind == "interval":
-        return f" (every {format_duration_short(interval_seconds)})"
+        return f" (every {format_duration(interval_seconds, "exact")})"
     if recur_kind == "weekly":
         name = [k for k, v in recurrence.WEEKDAY_NAMES.items() if v == weekday][0]
         return f" (every {name} at {hour:02d}:{minute:02d})"
     return ""
-
-
-def format_duration_short(seconds):
-    if seconds % 86400 == 0:
-        return f"{seconds // 86400}d"
-    if seconds % 3600 == 0:
-        return f"{seconds // 3600}h"
-    if seconds % 60 == 0:
-        return f"{seconds // 60}m"
-    return f"{seconds}s"
 
 
 bot = Bot(prefix="!", require_channels=True, default_data_path="reminders.db", store_migrate=init_db)
