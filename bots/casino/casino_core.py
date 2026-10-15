@@ -2,10 +2,9 @@
 Never imports `bot` (the entry point) - see "Splitting a bot across files" there for why."""
 
 import secrets
-import time
 
 import blackjack
-from slimbots import BadArgument
+from slimbots import BadArgument, LedgerTable
 
 DAILY_AMOUNT = 500
 DAILY_COOLDOWN_SECONDS = 20 * 3600
@@ -23,6 +22,9 @@ SUITS = ["H", "D", "C", "S"]
 # --- durable state; test_concurrency.py imports these (via bot.py's re-export) by name, unchanged ---
 
 
+PROCESSED_REQUESTS = LedgerTable("processed_requests", key="request_id", detail=None, at="handled_at")
+
+
 def init_db(conn):
     conn.executescript(
         """
@@ -31,17 +33,14 @@ def init_db(conn):
             balance INTEGER NOT NULL DEFAULT 0,
             last_daily INTEGER NOT NULL DEFAULT 0
         );
-        CREATE TABLE IF NOT EXISTS processed_requests (
-            request_id TEXT PRIMARY KEY,
-            handled_at INTEGER NOT NULL
-        );
         """
     )
+    PROCESSED_REQUESTS.create(conn)
     blackjack.init_table(conn)
 
 
 def prune_processed_requests(conn, cutoff):
-    conn.execute("DELETE FROM processed_requests WHERE handled_at < ?", (cutoff,))
+    PROCESSED_REQUESTS.prune(conn, cutoff)
     conn.commit()
 
 
@@ -51,11 +50,7 @@ def begin(conn):
 
 def try_consume_request(conn, request_id):
     """First call inside every money-moving command's transaction; False means already handled."""
-    cur = conn.execute(
-        "INSERT OR IGNORE INTO processed_requests (request_id, handled_at) VALUES (?, ?)",
-        (request_id, int(time.time())),
-    )
-    return cur.rowcount == 1
+    return PROCESSED_REQUESTS.add(conn, request_id)
 
 
 def begin_idempotent(conn, request_id):

@@ -3,11 +3,14 @@
 
 import sqlite3
 
-from slimbots import Bot, Permissions
+from slimbots import Bot, KeyValueTable, Permissions
+
+
+SETTINGS = KeyValueTable("settings")
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    SETTINGS.create(conn)
     conn.commit()
 
 
@@ -25,15 +28,11 @@ def welcome_text(member):
 
 
 def _read_setting(conn, key):
-    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row[0] if row else None
+    return SETTINGS.get(conn, key)
 
 
 def _write_setting(conn, key, value):
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, value),
-    )
+    SETTINGS.set(conn, key, value)
     conn.commit()
 
 

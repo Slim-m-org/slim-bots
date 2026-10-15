@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from slimbots import Embed
+from slimbots import Embed, KeyValueTable, LedgerTable
 from slimbots.limits import Cooldown
 from slimbots.migrations import ensure_columns
 
@@ -184,17 +184,21 @@ def jf_get_bytes(path):
         return None
 
 
+STATE = KeyValueTable("state")
+POSTED_ITEMS = LedgerTable("posted_items", key="item_id", detail=None, at="posted_at")
+
+
 def init_db(conn):
     conn.executescript(
         """
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS posted_items (item_id TEXT PRIMARY KEY, posted_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS posted_media (media_key TEXT PRIMARY KEY, posted_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS user_links (
             slimm_user_id TEXT PRIMARY KEY, jellyfin_user_id TEXT NOT NULL, jellyfin_name TEXT NOT NULL, linked_at INTEGER NOT NULL
         );
         """
     )
+    STATE.create(conn)
+    POSTED_ITEMS.create(conn)
     ensure_columns(conn, "user_links", {"verified": "INTEGER NOT NULL DEFAULT 0"})
     # Before the unique index, a jellyfin user claimed twice keeps only its oldest claim.
     conn.execute(
@@ -206,17 +210,12 @@ def init_db(conn):
 
 
 def get_cursor(conn):
-    row = conn.execute("SELECT value FROM state WHERE key = 'cursor'").fetchone()
-    return row[0] if row else None
+    return STATE.get(conn, "cursor")
 
 
 def advance_cursor(conn, value):
     """Only ever moves forward; a lexicographic compare on a fixed-width ISO 8601 UTC string sorts chronologically too."""
-    conn.execute(
-        "INSERT INTO state (key, value) VALUES ('cursor', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE excluded.value > state.value",
-        (value,),
-    )
+    STATE.advance(conn, "cursor", value)
     conn.commit()
 
 
@@ -226,7 +225,7 @@ def cursor_below_unsent(target, unsent_items):
 
 
 def already_posted(conn, item_id):
-    return conn.execute("SELECT 1 FROM posted_items WHERE item_id = ?", (item_id,)).fetchone() is not None
+    return POSTED_ITEMS.has(conn, item_id)
 
 
 def media_keys(item):
@@ -259,10 +258,7 @@ def announced_recently(conn, item):
 def mark_posted(conn, item_ids, quiet=False, items=()):
     """`items` also stamps their media keys, which is what lets a replaced file be recognised later."""
     now = int(time.time())
-    conn.executemany(
-        "INSERT OR IGNORE INTO posted_items (item_id, posted_at) VALUES (?, ?)",
-        [(item_id, 0 if quiet else now) for item_id in item_ids],
-    )
+    POSTED_ITEMS.add_many(conn, item_ids, at=0 if quiet else now)
     conn.executemany(
         "INSERT INTO posted_media (media_key, posted_at) VALUES (?, ?) "
         "ON CONFLICT(media_key) DO UPDATE SET posted_at = excluded.posted_at",

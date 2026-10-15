@@ -3,42 +3,40 @@
 
 import asyncio
 import sys
-import time
 import uuid
 from dataclasses import dataclass
 
 import feed as feedmod
 import notes
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, KeyValueTable, LedgerTable
 from slimbots.http import is_token_revoked
 
 MIN_POLL_SECONDS = 60
 POST_NAMESPACE = uuid.UUID("5d0c7a8e-3f61-4c1e-9b7a-2e8d4f6a1c33")
 
 
+SEEN = LedgerTable("seen", key="release_id", detail="tag")
+STATE = KeyValueTable("state")
+
+
 def init_db(conn):
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS seen (release_id TEXT PRIMARY KEY, tag TEXT NOT NULL, at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """
-    )
+    SEEN.create(conn)
+    STATE.create(conn)
     conn.commit()
 
 
 def is_initialized(conn):
-    return conn.execute("SELECT 1 FROM state WHERE key = 'initialized'").fetchone() is not None
+    return STATE.get(conn, "initialized") is not None
 
 
 def seen_ids(conn):
-    return {row[0] for row in conn.execute("SELECT release_id FROM seen")}
+    return SEEN.keys(conn)
 
 
 def mark_seen(conn, releases, initialize=False):
-    now = int(time.time())
-    conn.executemany("INSERT OR IGNORE INTO seen (release_id, tag, at) VALUES (?, ?, ?)", [(str(r["id"]), r["tag_name"], now) for r in releases])
+    SEEN.add_many(conn, [(str(r["id"]), r["tag_name"]) for r in releases])
     if initialize:
-        conn.execute("INSERT OR IGNORE INTO state (key, value) VALUES ('initialized', '1')")
+        STATE.set(conn, "initialized", "1")
     conn.commit()
 
 
