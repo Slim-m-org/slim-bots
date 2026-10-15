@@ -143,7 +143,7 @@ Pre-stubbed routes (`/me`, `/channels`, `/members`, `/roles`, `/bots/commands`) 
 
 ## Where to go deeper
 
-`docs/framework.md` and the seven bot templates in [slim-bots](https://github.com/Slim-m-org/slim-bots) cover the rest: command registration with the server, channel scoping and durable cursors, cooldowns and permission gates, the Canvas model for the Voice Canvas, typed event dispatch, and every safeguard's own reasoning.
+`docs/framework.md` and the seven bot templates in [slim-bots](https://github.com/Slim-m-org/slim-bots) cover the rest: command registration with the server, channel scoping and durable cursors, cooldowns and permission gates, the Canvas model for the Voice Canvas, typed event dispatch, calling outside services with `JsonService` and the url policy, button choosers, and every safeguard's own reasoning.
 
 ## Installing an unreleased version
 

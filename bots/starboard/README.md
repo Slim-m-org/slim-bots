@@ -3,7 +3,7 @@
 A slim-m bot: when a message collects enough of one reaction, it is reposted to a highlights channel with a link back.
 Once a week it posts a digest of the top highlights.
 
-Needs `slim-m>=0.9.0` (`AsyncClient.get_message`, `Channel.restricted`), so do not deploy it before 0.9.0 is on PyPI.
+Needs `slim-m>=0.13.0` (`slimbots.text`, `Space.channel_label`; `AsyncClient.get_message` and `Channel.restricted` arrived in 0.9.0), so do not deploy it before 0.13.0 is on PyPI.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It uses `on_raw_message`, `on_reactions_changed`, `on_message_edited` and `on_message_deleted`, and keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `starboard.db`).
 
