@@ -5,6 +5,7 @@ from . import events
 from . import migrations
 from .bot import Bot
 from .canvas import Canvas
+from .chooser import Chooser, Pick
 from .client import socket_url
 from .commands import Command, Group
 from .components import Button, rows
@@ -30,6 +31,7 @@ from .permissions import Permissions
 from .space import Space
 from .store import Store
 from .voice import Voice, VoiceError, VoiceSession
+from .web import JsonService, ServiceAuthError, ServiceError, ServiceHTTPError, ServiceTooLarge, ServiceUnreachable
 
 __all__ = [
     "ApiError",
@@ -41,6 +43,7 @@ __all__ = [
     "Canvas",
     "Channel",
     "CheckFailure",
+    "Chooser",
     "Command",
     "CommandError",
     "CommandNotFound",
@@ -52,14 +55,21 @@ __all__ = [
     "Embed",
     "Group",
     "Interaction",
+    "JsonService",
     "Member",
     "Message",
     "MissingPermissions",
     "MissingRequiredArgument",
     "Permissions",
+    "Pick",
     "Quota",
     "RateLimiter",
     "Role",
+    "ServiceAuthError",
+    "ServiceError",
+    "ServiceHTTPError",
+    "ServiceTooLarge",
+    "ServiceUnreachable",
     "SlimBotsError",
     "Space",
     "Store",
