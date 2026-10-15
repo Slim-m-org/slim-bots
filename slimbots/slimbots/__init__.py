@@ -28,7 +28,8 @@ from .limits import Cooldown, Quota, RateLimiter, ValidationError, require_int, 
 from .models import Attachment, Channel, DmConversation, Member, Message, Role
 from .permissions import Permissions
 from .space import Space
-from .store import Store
+from .store import KeyValue, Ledger, Store
+from .tables import KeyValueTable, LedgerTable
 from .voice import Voice, VoiceError, VoiceSession
 
 __all__ = [
@@ -52,6 +53,10 @@ __all__ = [
     "Embed",
     "Group",
     "Interaction",
+    "KeyValue",
+    "KeyValueTable",
+    "Ledger",
+    "LedgerTable",
     "Member",
     "Message",
     "MissingPermissions",

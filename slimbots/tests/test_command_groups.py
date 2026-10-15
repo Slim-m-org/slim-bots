@@ -77,8 +77,8 @@ async def test_group_level_check_gates_every_subcommand(bot, client):
     remind = _wire_remind(bot)
     remind.requires = 1 << 30  # a bit no test member holds
 
-    reply = await send(bot, client, "!remind in 10m buy milk")
-    assert "permission" in reply
+    await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!remind in 10m buy milk"})
+    assert "permission" in client.ephemerals[-1]["content"]
 
 
 def test_help_lists_the_group_with_its_subcommands_joined():
@@ -116,3 +116,15 @@ def test_registration_flattens_a_group_to_one_entry():
     assert len(body["commands"]) == 1
     assert body["commands"][0]["name"] == "remind"
     assert "in" in body["commands"][0]["usage"]
+
+
+async def test_subcommand_requires_replies_with_its_message_and_still_lets_others_through(bot, client):
+    remind = _wire_remind(bot)
+
+    @remind.command(name="clear", requires=1 << 30, requires_message="only an admin can clear.")
+    async def remind_clear(ctx):
+        await ctx.reply("cleared")
+
+    await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!remind clear"})
+    assert client.ephemerals[-1]["content"] == "only an admin can clear."
+    assert await send(bot, client, "!remind in 10m buy milk") == "in 600s: buy milk"

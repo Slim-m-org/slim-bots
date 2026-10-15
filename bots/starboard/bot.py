@@ -5,10 +5,13 @@ import asyncio
 import time
 import uuid
 
-from slimbots import Bot
+from slimbots import Bot, KeyValueTable
 from slimbots.http import ApiError
 from slimbots.lifecycle import guard_dispatch
 from slimbots.migrations import ensure_columns
+
+
+META = KeyValueTable("meta")
 
 
 def init_db(conn):
@@ -32,9 +35,9 @@ def init_db(conn):
             count INTEGER NOT NULL,
             starred_at INTEGER NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """
     )
+    META.create(conn)
     conn.commit()
     for table in ("seen", "starred"):
         ensure_columns(conn, table, {"attachment_ids": "TEXT NOT NULL DEFAULT ''"})
@@ -192,14 +195,12 @@ def top_starred(conn, since, limit):
 
 
 def meta_get(conn, key):
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-    return int(row[0]) if row else None
+    value = META.get(conn, key)
+    return int(value) if value is not None else None
 
 
 def meta_set(conn, key, value):
-    conn.execute(
-        "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value))
-    )
+    META.set(conn, key, value)
     conn.commit()
 
 
@@ -363,32 +364,12 @@ async def post_digest_if_due(now):
     await bot.store.run(meta_set, "last_digest", now)
 
 
-async def _maintenance():
-    while True:
-        now = int(time.time())
-        await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
-        await guard_dispatch(post_digest_if_due, now)
-        await asyncio.sleep(MAINTENANCE_SECONDS)
-
-
-_background_started = False
-
-
-@bot.event
-async def on_ready():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    bot.background(_maintenance(), name="starboard-maintenance")
-
-
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
+@bot.every(lambda: MAINTENANCE_SECONDS, name="starboard-maintenance", on="ready")
+async def maintenance():
+    now = int(time.time())
+    await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
+    await guard_dispatch(post_digest_if_due, now)
 
 
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

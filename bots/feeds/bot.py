@@ -96,6 +96,7 @@ async def poll_feed(feed, first=False):
     return None
 
 
+@bot.every(lambda: TICK_SECONDS, name="feeds-poll")
 async def poll_due():
     for feed in await bot.store.run(db.due_feeds, int(time.time())):
         try:
@@ -114,30 +115,6 @@ async def note_unexpected(feed, err):
     await bot.store.run(db.record_failure, feed["id"], f"internal error ({type(err).__name__})", feed["interval"])
 
 
-async def run_forever():
-    while True:
-        try:
-            await poll_due()
-        except ApiError as err:
-            if is_token_revoked(err):
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next tick", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next tick", file=sys.stderr)
-        await asyncio.sleep(TICK_SECONDS)
-
-
-started = []
-
-
-@bot.event
-async def on_connect():
-    if started:
-        return
-    started.append(True)
-    bot.background(run_forever(), name="feeds-poll")
-
-
 def fmt_interval(seconds):
     if seconds % 86400 == 0:
         return f"{seconds // 86400}d"
@@ -146,11 +123,7 @@ def fmt_interval(seconds):
     return f"{max(seconds // 60, 1)}m"
 
 
-async def allowed(ctx):
-    if ctx.author.has_permission(Permissions.MANAGE_SERVER):
-        return True
-    await ctx.reply_ephemeral("only someone with Manage Server can change feeds.", public_fallback=True)
-    return False
+MANAGE_DENIED = "only someone with Manage Server can change feeds."
 
 
 @bot.group(name="feed", help="`add <url> [keywords]`, `list`, `remove <id>`, `filter <id> <keywords|off>`, `interval <id> <duration>`")
@@ -159,10 +132,8 @@ async def feed_group(ctx, rest: str = ""):
     await ctx.reply(f"try `{p}feed add <url>`, `{p}feed list`, `{p}feed remove <id>`, `{p}feed filter <id> <keywords|off>` or `{p}feed interval <id> <10m|2h|1d>`")
 
 
-@feed_group.command(name="add", help="Follow a feed in this channel", usage="<url> [keywords]")
+@feed_group.command(name="add", help="Follow a feed in this channel", usage="<url> [keywords]", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def feed_add(ctx, url: str, keywords: str = ""):
-    if not await allowed(ctx):
-        return
     try:
         feed_url = source.normalize(url)
     except source.SourceError as err:
@@ -225,18 +196,14 @@ async def feed_list(ctx):
     await ctx.reply("\n".join(lines))
 
 
-@feed_group.command(name="remove", help="Stop following a feed", usage="<id>")
+@feed_group.command(name="remove", help="Stop following a feed", usage="<id>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def feed_remove(ctx, feed_id: int):
-    if not await allowed(ctx):
-        return
     removed = await bot.store.run(db.remove_feed, feed_id)
     await ctx.reply(f"removed feed `{feed_id}`." if removed else f"no feed `{feed_id}`.")
 
 
-@feed_group.command(name="filter", help="Only post items matching a keyword; `-word` excludes, `off` clears", usage="<id> <keywords|off>")
+@feed_group.command(name="filter", help="Only post items matching a keyword; `-word` excludes, `off` clears", usage="<id> <keywords|off>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def feed_filter(ctx, feed_id: int, keywords: str):
-    if not await allowed(ctx):
-        return
     value = "" if keywords.strip().lower() == "off" else keywords.strip()
     if not await bot.store.run(db.set_field, feed_id, "keywords", value):
         await ctx.reply(f"no feed `{feed_id}`.")
@@ -244,10 +211,8 @@ async def feed_filter(ctx, feed_id: int, keywords: str):
     await ctx.reply(f"feed `{feed_id}` filter: {value}." if value else f"feed `{feed_id}` filter cleared.")
 
 
-@feed_group.command(name="interval", help="How often to check a feed", usage="<id> <duration>")
+@feed_group.command(name="interval", help="How often to check a feed", usage="<id> <duration>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def feed_interval(ctx, feed_id: int, duration: Duration):
-    if not await allowed(ctx):
-        return
     seconds = int(duration)
     if not MIN_INTERVAL <= seconds <= MAX_INTERVAL:
         await ctx.reply(f"pick between {fmt_interval(MIN_INTERVAL)} and {fmt_interval(MAX_INTERVAL)}.")
@@ -258,12 +223,5 @@ async def feed_interval(ctx, feed_id: int, duration: Duration):
     await ctx.reply(f"feed `{feed_id}` is checked every {fmt_interval(seconds)}.")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

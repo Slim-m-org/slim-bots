@@ -357,7 +357,7 @@ def run_maintenance_briefly():
     starboard.bot._main_task = None
 
     async def go():
-        task = starboard.bot.background(starboard._maintenance(), name="starboard-maintenance")
+        task = starboard.bot.background(starboard.bot.periodic("starboard-maintenance"), name="starboard-maintenance")
         await asyncio.sleep(0.3)
         died = task.done()
         task.cancel()

@@ -5,9 +5,11 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Hashable
 
+from .exceptions import BadArgument
 
-class ValidationError(ValueError):
-    """Raised by a `require_*` bounds check; `str(self)` is the reply to send."""
+
+class ValidationError(BadArgument, ValueError):
+    """Raised by a `require_*` bounds check; a command that lets it escape replies with `str(self)`."""
 
 
 def require_len(text: str, *, max_len: int, min_len: int = 0, field: str = "that") -> str:

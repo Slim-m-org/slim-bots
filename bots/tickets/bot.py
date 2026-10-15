@@ -57,11 +57,11 @@ async def ticket(ctx, rest: str = ""):
     await ctx.reply_ephemeral(f"try `{p}ticket panel`, `{p}ticket transcript <number>` or `{p}ticket reason <text>`", public_fallback=True)
 
 
-@ticket.command(name="panel", help="Post the Open a ticket button here")
+@ticket.command(
+    name="panel", help="Post the Open a ticket button here",
+    requires=Permissions.MANAGE_SERVER, requires_message="only someone with Manage Server can post the ticket panel.",
+)
 async def ticket_panel(ctx):
-    if not ctx.author.has_permission(Permissions.MANAGE_SERVER):
-        await ctx.reply_ephemeral("only someone with Manage Server can post the ticket panel.", public_fallback=True)
-        return
     await bot.client.send(
         ctx.channel_id, "Need help? Press the button to open a private ticket with the staff.",
         components=rows([Button("Open a ticket", "ticket:open", style="primary")]),
@@ -218,12 +218,5 @@ async def fetch_history(channel_id):
     return collected
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

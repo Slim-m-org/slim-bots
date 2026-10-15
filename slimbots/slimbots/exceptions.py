@@ -1,5 +1,7 @@
 """Errors a command handler can raise or receive; see docs/framework.md."""
 
+from __future__ import annotations
+
 
 class SlimBotsError(Exception):
     """Base for every error this package raises on purpose."""
@@ -37,10 +39,10 @@ class CommandOnCooldown(CommandError):
 
 
 class MissingPermissions(CommandError):
-    """The invoking member lacks a permission the command requires."""
+    """The invoking member lacks a permission the command requires; the reply goes only to them."""
 
-    def __init__(self, permission: str) -> None:
-        super().__init__("you do not have permission to use that command")
+    def __init__(self, permission: int, message: str | None = None) -> None:
+        super().__init__(message or "you do not have permission to use that command")
         self.permission = permission
 
 

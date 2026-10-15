@@ -385,11 +385,16 @@ def test_a_failed_send_keeps_the_cursor_and_retries_without_repeating_what_lande
 
 
 def test_the_poll_loop_stops_on_a_rejected_key_and_survives_an_outage():
+    def loop_for(poll_once):
+        demo = Bot()
+        poller.install(demo, poll_once, SimpleNamespace(name="demo", poll_seconds=0))
+        return demo.periodic("demo-poll")
+
     async def rejected():
         raise service.AuthError("no")
 
     try:
-        asyncio.run(poller.run_forever(rejected, SimpleNamespace(name="demo", poll_seconds=0)))
+        asyncio.run(loop_for(rejected))
     except service.AuthError:
         pass
     else:
@@ -403,7 +408,7 @@ def test_the_poll_loop_stops_on_a_rejected_key_and_survives_an_outage():
         raise service.AuthError("stop")
 
     try:
-        asyncio.run(poller.run_forever(flaky, SimpleNamespace(name="demo", poll_seconds=0)))
+        asyncio.run(loop_for(flaky))
     except service.AuthError:
         pass
     assert len(calls) == 2

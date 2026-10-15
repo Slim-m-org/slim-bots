@@ -6,7 +6,9 @@ import asyncio
 import functools
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterable, Literal
+
+from .tables import KeyValueTable, LedgerTable
 
 IsolationLevel = Literal["DEFERRED", "EXCLUSIVE", "IMMEDIATE"]
 
@@ -81,7 +83,66 @@ class Store:
             self._conn = None
             self._executor = None
 
+    async def kv(self, table: str = "kv") -> KeyValue:
+        """A key/value table on this store, created if missing; an existing `(key, value)` table keeps its rows."""
+        handle = KeyValue(self, KeyValueTable(table))
+        await self.run(_committed(handle.table.create))
+        return handle
+
+    async def ledger(self, table: str, *, key: str = "key", detail: str | None = "detail", at: str = "at") -> Ledger:
+        """An "already handled" ledger on this store, created if missing; name the columns of an existing table to reuse it."""
+        handle = Ledger(self, LedgerTable(table, key=key, detail=detail, at=at))
+        await self.run(_committed(handle.table.create))
+        return handle
+
     @property
     def connection(self) -> sqlite3.Connection | None:
         """The raw `sqlite3.Connection`, for a caller not yet moved onto `run()` (a background sweep, a test)."""
         return self._conn
+
+
+def _committed(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def run(conn: sqlite3.Connection, *args: Any, **kwargs: Any) -> Any:
+        result = fn(conn, *args, **kwargs)
+        conn.commit()
+        return result
+    return run
+
+
+class KeyValue:
+    """The async face of a `KeyValueTable`: each call is its own committed transaction."""
+
+    def __init__(self, store: Store, table: KeyValueTable) -> None:
+        self.store = store
+        self.table = table
+
+    async def get(self, key: str, default: str | None = None) -> str | None:
+        return await self.store.run(self.table.get, key, default)
+
+    async def set(self, key: str, value: object) -> None:
+        await self.store.run(_committed(self.table.set), key, value)
+
+    async def advance(self, key: str, value: int | str) -> bool:
+        """Stores `value` only if it is ahead of the current one; returns whether it moved."""
+        return await self.store.run(_committed(self.table.advance), key, value)
+
+
+class Ledger:
+    """The async face of a `LedgerTable`: each call is its own committed transaction."""
+
+    def __init__(self, store: Store, table: LedgerTable) -> None:
+        self.store = store
+        self.table = table
+
+    async def has(self, key: str) -> bool:
+        return await self.store.run(self.table.has, key)
+
+    async def unseen(self, keys: Iterable[str]) -> list[str]:
+        return await self.store.run(self.table.unseen, list(keys))
+
+    async def add(self, key: str, detail: str = "", *, replace: bool = False) -> bool:
+        """Records `key`; returns True when it was new."""
+        return await self.store.run(_committed(self.table.add), key, detail, replace=replace)
+
+    async def prune(self, older_than: int) -> int:
+        return await self.store.run(_committed(self.table.prune), older_than)

@@ -54,6 +54,15 @@ async def send_post(entry):
     )
 
 
+async def bootstrap():
+    """Jellyfin is read off the store lock, so a slow server never stalls a lookup."""
+    if await bot.store.run(jellyfin_core.get_cursor) is not None:
+        return
+    plan = await asyncio.to_thread(jellyfin_core.bootstrap_plan)
+    await bot.store.run(jellyfin_core.apply_bootstrap, plan)
+
+
+@bot.every(lambda: jellyfin_core.JELLYFIN_POLL_SECONDS, name="jellyfin-poll", fatal=(jellyfin_core.JellyfinAuthError,), before=bootstrap)
 async def poll_once():
     cursor = await bot.store.run(jellyfin_core.get_cursor) or ""
     fetched = await asyncio.to_thread(jellyfin_core.items_since, cursor)
@@ -81,54 +90,5 @@ async def poll_once():
         await bot.store.run(jellyfin_core.advance_cursor, jellyfin_core.cursor_below_unsent(entry["max_created"], still_unsent))
 
 
-async def poll_loop():
-    """A terminal JellyfinAuthError or revoked slimm token propagates out - bot.background() treats that as fatal."""
-    while True:
-        try:
-            await poll_once()
-        except jellyfin_core.JellyfinAuthError:
-            print("jellyfin api key rejected - exiting", file=sys.stderr)
-            raise
-        except ApiError as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(jellyfin_core.JELLYFIN_POLL_SECONDS)
-
-
-async def bootstrap():
-    """Jellyfin is read off the store lock, so a slow server never stalls a lookup."""
-    if await bot.store.run(jellyfin_core.get_cursor) is not None:
-        return
-    plan = await asyncio.to_thread(jellyfin_core.bootstrap_plan)
-    await bot.store.run(jellyfin_core.apply_bootstrap, plan)
-
-
-_background_started = False
-
-
-@bot.event
-async def on_connect():
-    global _background_started
-    await bootstrap()
-    if _background_started:
-        return
-    _background_started = True
-    bot.background(poll_loop(), name="jellyfin-poll")
-
-
-def main():
-    problem = jellyfin_core.check_jellyfin_config()
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=jellyfin_core.check_jellyfin_config)

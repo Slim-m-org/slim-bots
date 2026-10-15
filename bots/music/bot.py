@@ -13,15 +13,5 @@ music_core.configure(bot)
 bot.load_extension("music_cog")
 
 
-def main():
-    problem = music_core.check_config()
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=music_core.check_config)

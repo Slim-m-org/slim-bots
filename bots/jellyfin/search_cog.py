@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from slimbots.limits import ValidationError, require_int, require_len
+from slimbots.limits import require_int, require_len
 
 import accounts
 import jellyfin_core
@@ -14,11 +14,7 @@ async def run_search(ctx, query):
     if wait_message:
         await ctx.reply(wait_message)
         return
-    try:
-        query = require_len(query.strip(), max_len=jellyfin_core.MAX_QUERY_LENGTH, field="a search query")
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    query = require_len(query.strip(), max_len=jellyfin_core.MAX_QUERY_LENGTH, field="a search query")
     try:
         items = await asyncio.to_thread(jellyfin_core.search_items, query, jellyfin_core.MAX_SEARCH_RESULTS)
     except jellyfin_core.JellyfinAuthError:
@@ -39,14 +35,10 @@ async def run_recent(ctx, days_text):
     if wait_message:
         await ctx.reply(wait_message)
         return
-    try:
-        days = require_int(
-            days_text or str(jellyfin_core.RECENT_DEFAULT_DAYS),
-            min_value=1, max_value=jellyfin_core.RECENT_MAX_DAYS, field="days",
-        )
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    days = require_int(
+        days_text or str(jellyfin_core.RECENT_DEFAULT_DAYS),
+        min_value=1, max_value=jellyfin_core.RECENT_MAX_DAYS, field="days",
+    )
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
     try:
         items = await asyncio.to_thread(jellyfin_core.items_since, cutoff)

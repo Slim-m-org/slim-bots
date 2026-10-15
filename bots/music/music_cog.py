@@ -4,7 +4,7 @@ import asyncio
 import sys
 
 from slimbots.http import is_token_revoked
-from slimbots.limits import ValidationError, require_len
+from slimbots.limits import require_len
 from slimbots.voice import VoiceError
 
 import music_core
@@ -80,11 +80,7 @@ async def _start_session(ctx, voice_channel_id, track):
 async def run_play(ctx, query):
     if not ctx.channel_id:
         return
-    try:
-        query = require_len(query.strip(), max_len=music_core.MAX_QUERY_LENGTH, field="a song or url")
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    query = require_len(query.strip(), max_len=music_core.MAX_QUERY_LENGTH, field="a song or url")
     voice_channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if voice_channel_id is None:
         await ctx.reply("join a voice channel first, then run `play` again.")
