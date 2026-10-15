@@ -3,15 +3,13 @@
 
 import asyncio
 import os
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("UPTIME_RELAY_SECRET", "test-secret")
 
-import bot as relay_bot  # noqa: E402
-from relay import Alert  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as relay_bot
+from relay import Alert
+from slimbots.testing import FakeAsyncClient, run_module_tests
 
 CHANNEL = "c-alerts"
 DOWN = Alert("kuma", "Jellyfin", True, "connect refused", "http://10.0.0.5:8096")
@@ -151,8 +149,4 @@ def test_durations_read_naturally():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

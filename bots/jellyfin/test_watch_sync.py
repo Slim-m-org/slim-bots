@@ -2,17 +2,13 @@
 """The party tells the call where it is (slim-m decision 0050); run directly: python3 test_watch_sync.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-import watch_sync  # noqa: E402
-from slimbots import ApiError  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import _fake_start_pipeline, jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
+import session_registry
+import stream_session
+import watch_sync
+from slimbots import ApiError
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import _fake_start_pipeline, jellyfin, movie_for_watch, setup_with_voice
 
 TICK = 0.02
 watch_sync.MIN_GAP_SECONDS = 0.0
@@ -255,8 +251,4 @@ def test_a_title_with_nothing_visible_falls_back_to_a_placeholder():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

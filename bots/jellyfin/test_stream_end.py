@@ -4,20 +4,17 @@
 import asyncio
 import os
 import stat
-import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import jellyfin_core  # noqa: E402
-import playback_progress  # noqa: E402
-import quality  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
+import jellyfin_core
+import playback_progress
+import quality
+import session_registry
+import stream_session
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import jellyfin, movie_for_watch, setup_with_voice
 
 WIDTH = HEIGHT = 16
 FRAME_BYTES = stream_session.frame_byte_size(WIDTH, HEIGHT)
@@ -237,8 +234,4 @@ def test_picture_waits_for_sound_that_arrives_later():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

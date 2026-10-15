@@ -7,13 +7,13 @@ import sys
 import time
 import urllib.error
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import seerr_core as core  # noqa: E402
 from arrkit.service import AuthError  # noqa: E402
 from arrkit.testkit import Patched  # noqa: E402
 from test_bot import message, poll, process, request, seerr, seerr_api, seerr_cog, setup  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 DELAY = 0.4
 
@@ -96,8 +96,4 @@ def test_requests_replies_with_a_placeholder_when_seerr_drops_mid_list():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

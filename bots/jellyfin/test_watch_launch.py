@@ -3,16 +3,13 @@
 
 import asyncio
 import errno
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import jellyfin_core  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch  # noqa: E402
-from test_resume import Patched, voice_client  # noqa: E402
+import jellyfin_core
+import session_registry
+import stream_session
+from test_bot import jellyfin, message, movie_for_watch
+from test_resume import Patched, voice_client
+from slimbots.testing import human, run_module_tests
 
 FOUND = (
     (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
@@ -31,7 +28,7 @@ def watch_from(author_id, message_id):
 def test_two_members_starting_a_watch_in_one_call_get_one_party():
     client = voice_client()
     jellyfin.bot.voice.member_channels = {"u1": "v1", "u2": "v1"}
-    client.respond("GET", "/users/u2", {"id": "u2", "username": "sam", "display_name": "Sam", "is_bot": False, "is_webhook": False})
+    client.respond("GET", "/users/u2", human("u2", "sam", "Sam"))
     starts = []
 
     async def slow_start(self, start_seconds=0.0):
@@ -73,8 +70,4 @@ def test_a_failed_start_frees_the_call_for_the_next_try():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

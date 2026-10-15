@@ -2,20 +2,16 @@
 """One watch party per voice channel from the one bot; run directly: python3 test_multi.py."""
 
 import asyncio
-import os
-import sys
 from types import SimpleNamespace
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import jellyfin_core  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.testing import FakeAudioSource, FakeVideoSource  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice  # noqa: E402
-from test_resume import Patched  # noqa: E402
+import jellyfin_core
+import session_registry
+import stream_session
+from slimbots.testing import FakeAudioSource, FakeVideoSource, run_module_tests
+from slimbots.models import Channel
+from slimbots.testing import FakeVoiceSession
+from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice
+from test_resume import Patched
 
 EXTRA_MEMBERS = [
     {"id": uid, "username": name, "display_name": name, "is_bot": False, "is_webhook": False, "role_ids": []}
@@ -137,8 +133,4 @@ def test_voice_activity_wakes_only_that_calls_monitor():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

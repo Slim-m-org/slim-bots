@@ -2,21 +2,17 @@
 """Per-member Jellyfin accounts: link, unlink, and who resume and progress belong to; run directly: python3 test_accounts.py."""
 
 import asyncio
-import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import accounts  # noqa: E402
-import jellyfin_core  # noqa: E402
-import playback_progress  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch, process, setup  # noqa: E402
-from test_panel import client_in_call, episode_for_watch  # noqa: E402
-from test_resume import Patched, run_watch_pressing, voice_client, with_position  # noqa: E402
+import accounts
+import jellyfin_core
+import playback_progress
+import session_registry
+import stream_session
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import jellyfin, message, movie_for_watch, process, setup
+from test_panel import client_in_call, episode_for_watch
+from test_resume import Patched, run_watch_pressing, voice_client, with_position
 
 def link_of(user):
     return asyncio.run(jellyfin.bot.store.run(accounts.get_link, user))
@@ -154,8 +150,4 @@ def test_init_db_adds_the_links_table_to_an_older_database_without_touching_the_
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

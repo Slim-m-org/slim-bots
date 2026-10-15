@@ -5,17 +5,16 @@ Run directly: python3 test_quick_connect.py."""
 import io
 import json
 import os
-import sys
 import urllib.error
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("JELLYFIN_URL", "https://fake-jellyfin.invalid")
 os.environ.setdefault("JELLYFIN_API_KEY", "fake-key")
 
 import jellyfin_core  # noqa: E402
 import quick_connect  # noqa: E402
 from test_resume import Patched  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 PENDING = quick_connect.Pending(code="482913", secret="s3cret", device_id="dev-1", device_name="slim-m link for Nick")
 
@@ -103,8 +102,4 @@ def test_a_failed_logout_falls_back_to_deleting_the_device_with_the_admin_key():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

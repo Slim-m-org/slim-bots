@@ -3,14 +3,11 @@
 
 import asyncio
 import json
-import os
 import struct
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import queries  # noqa: E402
-from queries import ProtocolError, Status  # noqa: E402
+import queries
+from queries import ProtocolError, Status
+from slimbots.testing import run_module_tests
 
 HEADER = b"\xff\xff\xff\xff"
 
@@ -184,8 +181,4 @@ def test_an_unresolvable_host_is_down_not_an_exception():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

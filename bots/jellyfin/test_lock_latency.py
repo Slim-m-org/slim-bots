@@ -2,14 +2,11 @@
 """A slow jellyfin must not hold the store lock: the poll and the cold-start bootstrap fetch off it; run directly: python3 test_lock_latency.py."""
 
 import asyncio
-import os
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import accounts  # noqa: E402
-from test_bot import jellyfin, setup  # noqa: E402
+import accounts
+from test_bot import jellyfin, setup
+from slimbots.testing import run_module_tests
 
 core = jellyfin.jellyfin_core
 SLOW_SECONDS = 0.6
@@ -59,8 +56,4 @@ def test_a_lookup_is_not_blocked_by_a_slow_cold_start_bootstrap():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

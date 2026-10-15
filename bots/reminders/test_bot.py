@@ -2,20 +2,14 @@
 """Command-layer tests against FakeAsyncClient; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as reminders
+from slimbots import ApiError, Store
+from slimbots.http import is_token_revoked
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
-import bot as reminders  # noqa: E402
-from slimbots import ApiError, Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.http import is_token_revoked  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}]
+MEMBERS = [human("u1", "nick", "Nick", role_ids=[])]
 
 
 def message(content, msg_id="m1"):
@@ -30,10 +24,7 @@ def setup():
     reminders._listed.clear()
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
-    reminders.bot.client = client
-    reminders.bot.space = Space(client)
-    reminders.bot.authors = AuthorFilter(client, space=reminders.bot.space)
-    reminders.bot.me_id = "bot-1"
+    wire_bot(reminders.bot, client, me_id="bot-1")
     asyncio.run(reminders.bot.space.refresh_members())
     return client
 
@@ -357,8 +348,4 @@ def test_due_checker_still_stops_on_a_revoked_token():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

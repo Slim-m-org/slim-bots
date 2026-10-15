@@ -4,24 +4,20 @@
 import asyncio
 import json
 import os
-import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.update({"PELICAN_URL": "https://panel.invalid", "PELICAN_API_KEY": "ptlc_secret_key_123"})
 os.environ["PELICAN_CONTROL_ROLE"] = "r-ops"
 os.environ["PELICAN_LOG_CHANNEL"] = "log1"
 os.environ["PELICAN_STATUS_CHANNEL"] = "status1"
 
-import bot as pelican  # noqa: E402
-import pelican_core as core  # noqa: E402
-from slimbots import ApiError  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.context import Context  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as pelican
+import pelican_core as core
+from slimbots import ApiError
+from slimbots.context import Context
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 KEY = "ptlc_secret_key_123"
 
@@ -94,9 +90,9 @@ threading.Thread(target=_httpd.serve_forever, daemon=True).start()
 PANEL_URL = f"http://127.0.0.1:{_httpd.server_port}"
 
 MEMBERS = [
-    {"id": "u-ops", "username": "ops", "display_name": "Ops", "is_bot": False, "is_webhook": False, "role_ids": ["r-ops"]},
-    {"id": "u-admin", "username": "root", "display_name": "Root", "is_bot": False, "is_webhook": False, "role_ids": ["r-admin"]},
-    {"id": "u-plain", "username": "plain", "display_name": "Plain", "is_bot": False, "is_webhook": False, "role_ids": []},
+    human("u-ops", "ops", "Ops", role_ids=["r-ops"]),
+    human("u-admin", "root", "Root", role_ids=["r-admin"]),
+    human("u-plain", "plain", "Plain", role_ids=[]),
 ]
 ROLE_DEFS = [
     {"id": "r-everyone", "name": "@everyone", "permissions": 0, "is_everyone": True},
@@ -127,10 +123,7 @@ def setup(*, confirm=True):
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/roles", ROLE_DEFS)
-    pelican.bot.client = client
-    pelican.bot.space = Space(client)
-    pelican.bot.authors = AuthorFilter(client, space=pelican.bot.space)
-    pelican.bot.me_id = "bot-1"
+    wire_bot(pelican.bot, client, me_id="bot-1")
     asyncio.run(pelican.bot.space.refresh_roles())
     asyncio.run(pelican.bot.space.refresh_members())
     confirmations = []
@@ -347,8 +340,4 @@ def test_status_interval_has_a_floor():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

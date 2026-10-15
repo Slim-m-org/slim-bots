@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """Duration and time input the reminders bot refuses before any write; run directly: python3 test_input_limits.py."""
 
-import os
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as reminders  # noqa: E402
-import recurrence  # noqa: E402
-from test_bot import message, process, setup  # noqa: E402
+import bot as reminders
+import recurrence
+from test_bot import message, process, setup
+from slimbots.testing import run_module_tests
 
 YEAR = 365 * 86400
 
@@ -61,8 +58,4 @@ def test_format_local_never_raises_on_an_epoch_out_of_range():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

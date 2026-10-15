@@ -4,26 +4,22 @@
 import asyncio
 import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("JELLYFIN_URL", "https://fake-jellyfin.invalid")
 os.environ.setdefault("JELLYFIN_API_KEY", "fake-key")
 
-import bot as jellyfin  # noqa: E402
-import picker  # noqa: E402
-import playback_progress  # noqa: E402
-import stream_session  # noqa: E402
-import session_registry  # noqa: E402
-import watch_cog  # noqa: E402
-from slimbots import ApiError, Permissions, Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVideoSource, FakeVoice, FakeVoiceSession  # noqa: E402
-from slimbots.voice import VoiceError  # noqa: E402
+import bot as jellyfin
+import picker
+import playback_progress
+import stream_session
+import session_registry
+import watch_cog
+from slimbots import ApiError, Permissions, Store
+from slimbots.models import Channel
+from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVideoSource, FakeVoice, FakeVoiceSession, human, run_module_tests, wire_bot
+from slimbots.voice import VoiceError
 
-MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}]
+MEMBERS = [human("u1", "nick", "Nick", role_ids=[])]
 
 
 def episode(series_id, series_name, season, index, created="2024-01-01T00:00:00Z", eid=None):
@@ -137,10 +133,7 @@ def setup():
         client.edited.append({"channel_id": channel_id, "message_id": message_id, "content": content})
 
     client.edit_message = record_edit
-    jellyfin.bot.client = client
-    jellyfin.bot.space = Space(client)
-    jellyfin.bot.authors = AuthorFilter(client, space=jellyfin.bot.space)
-    jellyfin.bot.me_id = "bot-1"
+    wire_bot(jellyfin.bot, client, me_id="bot-1")
     asyncio.run(jellyfin.bot.space.refresh_members())
     return client
 
@@ -331,7 +324,7 @@ def setup_with_manager():
     )
     client.respond(
         "GET", "/members",
-        MEMBERS + [{"id": "u2", "username": "mgr", "display_name": "Mgr", "is_bot": False, "is_webhook": False, "role_ids": ["role-mgr"]}],
+        MEMBERS + [human("u2", "mgr", "Mgr", role_ids=["role-mgr"])],
     )
     asyncio.run(jellyfin.bot.space.refresh_roles())
     asyncio.run(jellyfin.bot.space.refresh_members())
@@ -649,8 +642,4 @@ def test_an_answer_the_server_refuses_to_keep_private_still_reaches_the_channel(
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

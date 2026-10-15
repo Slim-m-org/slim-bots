@@ -5,7 +5,6 @@ import asyncio
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import approvals  # noqa: E402
@@ -13,6 +12,7 @@ import seerr_cog  # noqa: E402
 import seerr_core as core  # noqa: E402
 from arrkit.testkit import Patched, labels, newest_buttons  # noqa: E402
 from test_bot import harness, request, seerr, seerr_api, setup  # noqa: E402
+from slimbots.testing import human, run_module_tests  # noqa: E402
 
 RESULTS = [
     {"mediaType": "movie", "id": 10, "title": "Dune", "releaseDate": "2021-09-15", "mediaInfo": {"status": 5}},
@@ -87,7 +87,7 @@ def approval_setup(admin_ids=("u1",), with_roles=True):
     """A pending request post on screen; `admin_ids` hold a role carrying the approver permission."""
     members = [
         {"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": ["r-admin"] if "u1" in admin_ids else []},
-        {"id": "u2", "username": "amy", "display_name": "Amy", "is_bot": False, "is_webhook": False, "role_ids": []},
+        human("u2", "amy", "Amy", role_ids=[]),
     ]
     roles = [{"id": "r-admin", "name": "admin", "permissions": 1 << 15}, {"id": "r-all", "name": "everyone", "permissions": 4, "is_everyone": True}]
     seerr_cog.GUARD.cooldown._last.clear()
@@ -268,8 +268,4 @@ def test_a_bot_that_cannot_read_roles_refuses_link_commands_and_says_what_it_nee
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

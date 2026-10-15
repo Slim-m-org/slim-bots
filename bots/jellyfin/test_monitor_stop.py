@@ -2,15 +2,11 @@
 """stop() called from the monitor task must not cancel that task; run directly: python3 test_monitor_stop.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import playback_progress  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
+import playback_progress
+import stream_session
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import jellyfin, movie_for_watch, setup_with_voice
 
 
 class Exited:
@@ -64,8 +60,4 @@ def test_an_empty_call_while_waiting_for_next_leaves_the_room_without_cancelling
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

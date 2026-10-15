@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """Parsing, URL normalisation, keyword matching and the fetch guards; run directly: python3 test_parse.py."""
 
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import db  # noqa: E402
-import fixtures  # noqa: E402
-import parse  # noqa: E402
-import source  # noqa: E402
+import db
+import fixtures
+import parse
+import source
+from slimbots.testing import run_module_tests
 
 
 def test_rss_items_parse_with_decoded_text_and_a_date():
@@ -119,8 +116,4 @@ def test_private_hosts_are_refused_unless_allowed():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

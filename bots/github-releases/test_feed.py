@@ -2,12 +2,9 @@
 """The GitHub list fetch with its transport faked: ETags, rate limits, bad bodies; run directly: python3 test_feed.py."""
 
 import json
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import feed  # noqa: E402
+import feed
+from slimbots.testing import run_module_tests
 
 
 class Transport:
@@ -109,8 +106,4 @@ def test_entries_that_are_not_objects_with_an_id_and_tag_are_dropped():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

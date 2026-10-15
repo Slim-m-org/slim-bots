@@ -2,21 +2,17 @@
 """Seek, skip and quality changes against a fake Jellyfin that reuses a transcode by its output key; run directly: python3 test_seek.py."""
 
 import asyncio
-import os
-import sys
 import urllib.parse
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import controls  # noqa: E402
-import jellyfin_core  # noqa: E402
-import playback_progress  # noqa: E402
-import quality  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from slimbots.voice import VoiceError  # noqa: E402
-from test_bot import jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
+import controls
+import jellyfin_core
+import playback_progress
+import quality
+import session_registry
+import stream_session
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from slimbots.voice import VoiceError
+from test_bot import jellyfin, movie_for_watch, setup_with_voice
 
 TICKS = 10_000_000
 
@@ -263,8 +259,4 @@ def test_a_new_stream_never_shares_a_transcode_with_the_previous_one():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

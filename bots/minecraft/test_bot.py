@@ -4,25 +4,21 @@
 import asyncio
 import json
 import os
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 TMP = tempfile.TemporaryDirectory(prefix="mc-bot-")
 LOG = os.path.join(TMP.name, "latest.log")
 open(LOG, "w").close()
 os.environ.update({"MC_LOG_PATH": LOG, "MC_CHANNEL": "c-mc", "MC_RCON_HOST": "127.0.0.1", "MC_RCON_PASSWORD": "pw"})
 
-import bot as mc  # noqa: E402
-import mc_core as core  # noqa: E402
-from rcon_fake import FakeRcon  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as mc
+import mc_core as core
+from rcon_fake import FakeRcon
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 PREFIX = "[12:00:01] [Server thread/INFO]: "
 MEMBERS = [
-    {"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": [], "roles": []},
+    human("u1", "nick", "Nick", role_ids=[], roles=[]),
     {"id": "b1", "username": "helper", "display_name": "Helper", "is_bot": True, "is_webhook": False, "role_ids": [], "roles": []},
 ]
 
@@ -47,10 +43,7 @@ async def harness(use_rcon=True):
     client = FakeAsyncClient(me_id="bot-1", base="https://slim.example")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/channels", [{"id": "c-mc", "name": "minecraft", "kind": "text", "restricted": False}])
-    mc.bot.client = client
-    mc.bot.space = Space(client)
-    mc.bot.authors = AuthorFilter(client, space=mc.bot.space)
-    mc.bot.me_id = "bot-1"
+    wire_bot(mc.bot, client, me_id="bot-1")
     mc.bot.channels = {"c-mc"}
     await mc.bot.space.refresh_members()
     await mc.bot.space.refresh_channels()
@@ -213,9 +206,5 @@ def test_an_unreadable_list_reply_keeps_the_log_derived_roster():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())
     TMP.cleanup()

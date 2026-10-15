@@ -4,12 +4,10 @@
 import os
 import random
 import sqlite3
-import sys
 import threading
 import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bot  # noqa: E402
+import bot
 
 
 def fresh_db(name):

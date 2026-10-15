@@ -2,21 +2,16 @@
 """Track/URL tests plus command-layer tests against a fake voice room and a scripted ffmpeg; run: python3 test_bot.py."""
 
 import asyncio
-import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as music  # noqa: E402
-import music_cog  # noqa: E402
-import music_core  # noqa: E402
-import player  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVoice, FakeVoiceSession  # noqa: E402
-from slimbots.voice import VoiceError  # noqa: E402
+import bot as music
+import music_cog
+import music_core
+import player
+from slimbots import Store
+from slimbots.models import Channel
+from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVoice, FakeVoiceSession, run_module_tests, wire_bot
+from slimbots.voice import VoiceError
 
 REAL_BUILD_ARGS = player.build_ffmpeg_args
 PUBLIC_URL = "https://93.184.216.34/stream.mp3"
@@ -109,10 +104,7 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     music.bot.channels = {"c1"}
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
-    music.bot.client = client
-    music.bot.space = Space(client)
-    music.bot.authors = AuthorFilter(client, space=music.bot.space)
-    music.bot.me_id = "bot-1"
+    wire_bot(music.bot, client, me_id="bot-1")
     asyncio.run(music.bot.space.refresh_members())
     for channel in VOICE_CHANNELS:
         music.bot.space.channels[channel.id] = channel
@@ -405,8 +397,4 @@ def test_config_needs_both_jellyfin_settings_or_neither():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

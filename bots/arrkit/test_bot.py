@@ -18,6 +18,7 @@ from arrkit.chooser import Chooser  # noqa: E402
 from arrkit.guard import Guard  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
 from slimbots import ApiError, Bot  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 SERVICE = service.Service("demo", "/api/v3")
 GUARD = Guard(SERVICE)
@@ -409,8 +410,4 @@ def test_the_poll_loop_stops_on_a_rejected_key_and_survives_an_outage():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

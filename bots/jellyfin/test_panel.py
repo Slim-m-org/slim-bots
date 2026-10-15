@@ -2,21 +2,17 @@
 """The now-playing panel and its buttons; run directly: python3 test_panel.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import controls  # noqa: E402
-import jellyfin_core  # noqa: E402
-import panel  # noqa: E402
-import quality  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice  # noqa: E402
-from test_resume import Patched  # noqa: E402
+import controls
+import jellyfin_core
+import panel
+import quality
+import session_registry
+import stream_session
+from slimbots.models import Channel
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice
+from test_resume import Patched
 
 SUBTITLE = {"Type": "Subtitle", "Index": 3, "Language": "eng", "DisplayTitle": "English"}
 
@@ -334,8 +330,4 @@ def test_next_episode_lookup_skips_the_current_item():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

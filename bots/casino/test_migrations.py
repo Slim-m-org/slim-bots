@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """A 0.2.0 `hands` table has no hand_index/status and a 2-column primary key; run directly: python3 test_migrations.py."""
 
-import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import blackjack  # noqa: E402
+import blackjack
+from slimbots.testing import run_module_tests
 
 
 def a_0_2_0_hands_table():
@@ -74,8 +71,4 @@ def test_a_fresh_0_3_0_database_gets_the_full_schema_directly():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

@@ -2,19 +2,16 @@
 """Button search, season and episode navigation, and the between-episodes offer; run directly: python3 test_picker.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import jellyfin_core  # noqa: E402
-import picker  # noqa: E402
-import playback_progress  # noqa: E402
-import session_registry  # noqa: E402
-import stream_session  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch, process  # noqa: E402
-from test_panel import client_in_call, episode_for_watch, labels, started_session  # noqa: E402
-from test_resume import Patched, press_button, settle  # noqa: E402
+import jellyfin_core
+import picker
+import playback_progress
+import session_registry
+import stream_session
+from test_bot import jellyfin, message, movie_for_watch, process
+from test_panel import client_in_call, episode_for_watch, labels, started_session
+from test_resume import Patched, press_button, settle
+from slimbots.testing import run_module_tests
 
 
 def series(name="Show", item_id="s1"):
@@ -275,8 +272,4 @@ def test_pause_while_between_episodes_is_refused_privately():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

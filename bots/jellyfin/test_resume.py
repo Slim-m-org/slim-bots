@@ -2,20 +2,16 @@
 """Resume offers and playback-progress reporting for `!watch`; run directly: python3 test_resume.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import jellyfin_core  # noqa: E402
-import picker  # noqa: E402
-import playback_progress  # noqa: E402
-import stream_session  # noqa: E402
-import session_registry  # noqa: E402
-import watch_cog  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch, setup_with_voice  # noqa: E402
+import jellyfin_core
+import picker
+import playback_progress
+import stream_session
+import session_registry
+import watch_cog
+from slimbots.models import Channel
+from slimbots.testing import FakeVoiceSession, run_module_tests
+from test_bot import jellyfin, message, movie_for_watch, setup_with_voice
 
 TEN_MINUTES_TICKS = 600 * playback_progress.TICKS_PER_SECOND
 
@@ -217,8 +213,4 @@ def test_the_first_enabled_user_is_used_when_none_is_configured():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

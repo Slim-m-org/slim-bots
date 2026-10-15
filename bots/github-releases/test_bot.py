@@ -3,17 +3,13 @@
 
 import asyncio
 import json
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as releases  # noqa: E402
-import feed as feedmod  # noqa: E402
-import fixtures  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as releases
+import feed as feedmod
+import fixtures
+from slimbots import Store
+from slimbots.http import ApiError
+from slimbots.testing import FakeAsyncClient, run_module_tests
 
 BASE = "https://github.com/Slim-m-org/slim-m/releases/tag/"
 
@@ -217,8 +213,4 @@ def test_the_poll_interval_is_never_under_a_minute():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

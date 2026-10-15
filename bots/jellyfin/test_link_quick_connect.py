@@ -3,19 +3,16 @@
 Run directly: python3 test_link_quick_connect.py."""
 
 import asyncio
-import os
 import sqlite3
-import sys
 import urllib.error
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import accounts  # noqa: E402
-import jellyfin_core  # noqa: E402
-import quick_connect  # noqa: E402
-from slimbots import ApiError  # noqa: E402
-from test_bot import jellyfin, message, setup  # noqa: E402
-from test_resume import Patched  # noqa: E402
+import accounts
+import jellyfin_core
+import quick_connect
+from slimbots import ApiError
+from test_bot import jellyfin, message, setup
+from test_resume import Patched
+from slimbots.testing import run_module_tests
 
 
 class FakeJellyfin:
@@ -270,8 +267,4 @@ def test_an_older_database_gains_the_verified_flag_and_keeps_one_claim_per_jelly
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

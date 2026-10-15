@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """A 0.2.0 `reminders` table has no recurrence columns; run directly: python3 test_migrations.py."""
 
-import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as reminders  # noqa: E402
+import bot as reminders
+from slimbots.testing import run_module_tests
 
 RECUR_COLUMNS = {"recur_kind", "recur_interval_seconds", "recur_weekday", "recur_hour", "recur_minute", "recur_tz"}
 
@@ -68,8 +65,4 @@ def test_running_init_db_twice_on_an_already_migrated_table_is_a_no_op():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())
