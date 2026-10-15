@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """The notes condenser and message renderer on real release-please bodies; run directly: python3 test_notes.py."""
 
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import fixtures  # noqa: E402
-import notes  # noqa: E402
+import fixtures
+import notes
+from slimbots.testing import run_module_tests
 
 URL = "https://github.com/Slim-m-org/slim-m/releases/tag/client-v0.93.0"
 
@@ -95,8 +92,4 @@ def test_a_closes_clause_after_the_links_is_dropped_with_them():
     assert notes.bullets(line) == ["batch 4 of the october audit"]
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

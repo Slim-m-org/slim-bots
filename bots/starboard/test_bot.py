@@ -3,19 +3,14 @@
 
 import asyncio
 import os
-import sys
 import time
 
 os.environ["STARBOARD_CHANNEL"] = "hl"
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as starboard  # noqa: E402
-from slimbots import Message, Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.events import ReactionsChanged  # noqa: E402
-from slimbots.http import ApiError, is_token_revoked  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as starboard
+from slimbots import Message, Store
+from slimbots.events import ReactionsChanged
+from slimbots.http import ApiError, is_token_revoked
+from slimbots.testing import FakeAsyncClient, run_module_tests, wire_bot
 
 
 def member(user_id, name, **flags):
@@ -39,10 +34,7 @@ def setup():
     client = FakeAsyncClient(me_id="bot-1", base="https://slim.example")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/channels", CHANNELS)
-    starboard.bot.client = client
-    starboard.bot.space = Space(client)
-    starboard.bot.authors = AuthorFilter(client, space=starboard.bot.space)
-    starboard.bot.me_id = "bot-1"
+    wire_bot(starboard.bot, client, me_id="bot-1")
     asyncio.run(starboard.bot.space.refresh_members())
     asyncio.run(starboard.bot.space.refresh_channels())
     return client
@@ -365,7 +357,7 @@ def run_maintenance_briefly():
     starboard.bot._main_task = None
 
     async def go():
-        task = starboard.bot.background(starboard._maintenance(), name="starboard-maintenance")
+        task = starboard.bot.background(starboard.bot.periodic("starboard-maintenance"), name="starboard-maintenance")
         await asyncio.sleep(0.3)
         died = task.done()
         task.cancel()
@@ -403,8 +395,4 @@ def test_maintenance_still_stops_on_a_revoked_token():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

@@ -52,22 +52,15 @@ async def on_vote(interaction):
     await interaction.reply_ephemeral(f"counted: {choice}. press again to change it.")
 
 
-@bot.command(name="tally", help="show the running count for a question's message", usage="<message id>")
+@bot.command(
+    name="tally", help="show the running count for a question's message", usage="<message id>",
+    requires=Permissions.MANAGE_MESSAGES, requires_message="only someone with Manage Messages can read a tally.",
+)
 async def tally(ctx, message_id: str):
-    if not ctx.author.has_permission(Permissions.MANAGE_MESSAGES):
-        await ctx.reply_ephemeral("only someone with Manage Messages can read a tally.", public_fallback=True)
-        return
     store = await bot.open_store()
     counts = await store.run(_counts, message_id)
     await ctx.reply(", ".join(f"{choice}: {counts.get(choice, 0)}" for choice in CHOICES))
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

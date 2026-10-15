@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """`!quality` command and `WatchSession.set_quality`, on the fakes from test_bot.py; run directly: python3 test_quality.py."""
 
-import os
-import sys
 from fractions import Fraction
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import quality  # noqa: E402
-import stream_session  # noqa: E402
-import session_registry  # noqa: E402
-import watch_cog  # noqa: E402
-from slimbots.testing import FakeAudioSource, FakeVideoSource, FakeVoiceSession  # noqa: E402
-from test_bot import _fake_start_pipeline, jellyfin, message, movie_for_watch, process, setup_with_voice  # noqa: E402
+import quality
+import stream_session
+import session_registry
+import watch_cog
+from slimbots.testing import FakeAudioSource, FakeVideoSource, FakeVoiceSession, run_module_tests
+from test_bot import _fake_start_pipeline, jellyfin, message, movie_for_watch, process, setup_with_voice
 
 
 def running_session(voice_session=None):
@@ -221,8 +217,4 @@ def test_codec_and_encoder_settings_take_only_known_names():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

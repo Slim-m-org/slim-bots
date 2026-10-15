@@ -3,13 +3,11 @@
 
 import os
 import re
-import sys
 
 os.environ["STARBOARD_CHANNEL"] = "hl"
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 import bot as starboard  # noqa: E402
 from test_bot import member, setup  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 AT_SIGN = re.compile(r"(\\*)@")
 
@@ -41,8 +39,4 @@ def test_a_mention_the_author_already_escaped_stays_escaped():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

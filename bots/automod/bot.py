@@ -11,7 +11,12 @@ from slimbots import ApiError, Bot, Member, Permissions
 
 from link_rules import link_domains, strip_punctuation, visible_text
 
-bot = Bot(prefix="!", default_data_path="automod.db")
+def init_db(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, rule TEXT NOT NULL)")
+    conn.commit()
+
+
+bot = Bot(prefix="!", default_data_path="automod.db", store_migrate=init_db)
 
 FLOOD_MESSAGES = bot.setting("AUTOMOD_FLOOD_MESSAGES", 0, type=int)
 FLOOD_SECONDS = bot.setting("AUTOMOD_FLOOD_SECONDS", 10, type=int)
@@ -30,11 +35,6 @@ EXEMPT_PERMISSIONS = Permissions.MANAGE_MESSAGES
 # user_id -> send times inside the flood window; memory only, a restart forgives everyone.
 _recent = defaultdict(deque)
 _log_channel_id = None
-
-
-def init_db(conn: sqlite3.Connection) -> None:
-    conn.execute("CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, rule TEXT NOT NULL)")
-    conn.commit()
 
 
 def domain_listed(host, listed):
@@ -207,12 +207,5 @@ async def automod_cmd(ctx, sub: str, member: Member = None):
         await ctx.reply(f"try `{p}automod rules`, `{p}automod stats`, or `{p}automod lift @member`")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

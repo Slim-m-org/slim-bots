@@ -111,13 +111,14 @@ class Command:
     def __init__(
         self, func: Callable[..., Awaitable[Any]], *, name: str, aliases: tuple[str, ...] = (),
         help: str | None = None, usage: str | None = None, cooldown: float | None = None,
-        cooldown_bucket: str = "user", requires: str | None = None, check: Callable[[Context], Any] | None = None,
+        cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
     ) -> None:
         self.func = func
         self.name = name
         self.aliases = list(aliases)
         self.help = help or ""
         self.requires = requires
+        self.requires_message = requires_message
         self.check = check
         self.cooldown = Cooldown(cooldown) if cooldown else None
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
@@ -129,8 +130,8 @@ class Command:
         return [self.name, *self.aliases]
 
     def check_permission(self, member: Member) -> None:
-        if self.requires is not None and not member.has_permission(self.requires):  # type: ignore[arg-type]
-            raise MissingPermissions(self.requires)
+        if self.requires is not None and not member.has_permission(self.requires):
+            raise MissingPermissions(self.requires, self.requires_message)
 
     def check_cooldown(self, ctx: Context) -> None:
         if self.cooldown is None:
@@ -195,13 +196,14 @@ class Group(Command):
     def __init__(
         self, func: Callable[..., Awaitable[Any]], *, name: str, aliases: tuple[str, ...] = (),
         help: str | None = None, cooldown: float | None = None, cooldown_bucket: str = "user",
-        requires: str | None = None, check: Callable[[Context], Any] | None = None,
+        requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
     ) -> None:
         self.func = func
         self.name = name
         self.aliases = list(aliases)
         self.help = help or ""
         self.requires = requires
+        self.requires_message = requires_message
         self.check = check
         self.cooldown = Cooldown(cooldown) if cooldown else None
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
@@ -212,12 +214,12 @@ class Group(Command):
     def command(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
         usage: str | None = None, cooldown: float | None = None, cooldown_bucket: str = "user",
-        requires: str | None = None, check: Callable[[Context], Any] | None = None,
+        requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             sub = Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
-                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, check=check,
+                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
             )
             for sub_name in sub.names:
                 if sub_name in self.subcommands:

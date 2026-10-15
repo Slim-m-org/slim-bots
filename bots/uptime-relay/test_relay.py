@@ -3,12 +3,9 @@
 
 import asyncio
 import json
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import relay  # noqa: E402
+import relay
+from slimbots.testing import run_module_tests
 
 KUMA_DOWN = {
     "heartbeat": {"status": 0, "msg": "connect ECONNREFUSED 10.0.0.5:8096", "time": "2026-10-13 18:00:00"},
@@ -129,8 +126,4 @@ def test_the_listener_refuses_bad_bodies_paths_and_oversize():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

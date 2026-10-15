@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib
 import logging
+import sys
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .http import ApiError, is_forbidden
+from .http import ApiError, is_forbidden, is_token_revoked
 
 if TYPE_CHECKING:
     from .bot import Bot
@@ -196,3 +198,67 @@ class Voice:
         session = VoiceSession(self._bot, channel_id, room, bool(token.get("can_publish")), rtc)
         session.start_heartbeat()
         return session
+
+
+async def join_to_speak(voice: Any, channel_id: str, *, label: str, to: str) -> Any:
+    """Joins `channel_id` and checks the bot may speak there; raises `VoiceError` whose text is the reply to send.
+    `label` names the channel for people, `to` finishes "I need SPEAK to ..."."""
+    try:
+        session = await voice.join(channel_id)
+    except VoiceError as err:
+        raise VoiceError(f"can't join {label}: {err}") from err
+    if not session.can_publish:
+        await session.leave()
+        raise VoiceError(f"I can join {label} but can't speak there - I need SPEAK to {to}.")
+    return session
+
+
+async def start_or_leave(session: Any, start: Awaitable[Any], *, doing: str, expected: tuple[type[BaseException], ...] = ()) -> None:
+    """Awaits `start`; on failure leaves the call and raises `VoiceError("could not start <doing>: ...")` for a reply.
+    A revoked token is re-raised as is, and an error outside `expected` and `VoiceError` is logged first."""
+    try:
+        await start
+    except Exception as err:
+        await session.leave()
+        if is_token_revoked(err):
+            raise
+        if not isinstance(err, (*expected, VoiceError)):
+            print(f"{type(err).__name__} starting {doing}: {err}", file=sys.stderr)
+        raise VoiceError(f"could not start {doing}: {err}") from err
+
+
+async def publish_microphone(
+    session: Any, *, max_bitrate: int, name: str = "music", sample_rate: int = 48000, num_channels: int = 2
+) -> Any:
+    """Publishes a speaking-participant audio track (not a screen-share tile) and returns its `AudioSource`."""
+    if not session.can_publish:
+        raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
+    rtc = session.rtc
+    source = rtc.AudioSource(sample_rate, num_channels)
+    track = rtc.LocalAudioTrack.create_audio_track(name, source)
+    options = rtc.TrackPublishOptions(
+        source=rtc.TrackSource.SOURCE_MICROPHONE, audio_encoding=_audio_encoding(rtc, max_bitrate)
+    )
+    await session.room.local_participant.publish_track(track, options)
+    return source
+
+
+async def watch_empty(
+    bot: "Bot", channel_id: str, wake: asyncio.Event, on_empty: Callable[[], Awaitable[Any]], *, poll: float = 20.0,
+    is_done: Callable[[], bool] = lambda: False, on_tick: Callable[[], Awaitable[Any]] | None = None,
+) -> None:
+    """Checks the voice roster every `poll` seconds, or at once when `wake` is set, and awaits `on_empty` when only the bot is left.
+    Returns when `is_done()` turns true; `on_tick` runs each cycle before the roster check."""
+    assert bot.client is not None, "watch_empty needs an open Bot connection"
+    while True:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(wake.wait(), timeout=poll)
+        wake.clear()
+        if is_done():
+            return
+        if on_tick is not None:
+            await on_tick()
+        roster = await bot.client.voice_roster(channel_id)
+        if not [p for p in roster.get("participants", []) if p.get("user_id") != bot.me_id]:
+            await on_empty()
+            return

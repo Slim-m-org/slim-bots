@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import re
 
@@ -51,7 +50,7 @@ async def on_decision_press(interaction):
     bot = interaction.bot
     verb = "approved" if action == "approve" else "declined"
     try:
-        await asyncio.to_thread(core.set_request_state, raw_id, action)
+        await core.set_request_state(raw_id, action)
     except (*UNREACHABLE, AuthError):
         with contextlib.suppress(ApiError):
             await interaction.reply_ephemeral(f"seerr did not accept that - request {raw_id} is unchanged.")

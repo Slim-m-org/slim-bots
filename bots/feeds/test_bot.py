@@ -2,23 +2,16 @@
 """Commands and the poll loop against FakeAsyncClient and a scripted transport; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as feeds  # noqa: E402
-import db  # noqa: E402
-import fixtures  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as feeds
+import db
+import fixtures
+from slimbots.http import ApiError
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 URL = "https://example.com/feed.xml"
-ADMIN = {"id": "u-admin", "username": "admin", "display_name": "Admin", "is_bot": False, "is_webhook": False}
+ADMIN = human("u-admin", "admin", "Admin")
 
 
 class Rig:
@@ -29,18 +22,14 @@ class Rig:
         self.client.respond("GET", "/channels", [{"id": "c1", "name": "news", "kind": "text", "category_id": None, "created_at": 0}])
         self.client.respond("GET", "/categories", [])
         feeds.bot.channels = None
-        feeds.bot.client = self.client
-        feeds.bot.space = Space(self.client)
-        feeds.bot.authors = AuthorFilter(self.client, space=feeds.bot.space)
-        feeds.bot.store = None
-        feeds.bot.data_path = os.path.join(tempfile.mkdtemp(), "feeds.db")
+        wire_bot(feeds.bot, self.client, db_name="feeds.db")
         asyncio.run(feeds.bot.space.refresh_members())
         asyncio.run(feeds.bot.open_store(migrate=db.init_db))
         self.web = {}
         self.calls = []
         feeds.transport = self.transport
 
-    def transport(self, url, headers):
+    async def transport(self, url, headers):
         self.calls.append((url, headers))
         answer = self.web.get(url, (404, {}, b""))
         if isinstance(answer, Exception):
@@ -269,8 +258,4 @@ def test_seen_entries_are_pruned_to_a_bound():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

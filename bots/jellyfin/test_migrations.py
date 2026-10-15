@@ -4,13 +4,12 @@ Run directly: python3 test_migrations.py."""
 
 import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("JELLYFIN_URL", "https://fake-jellyfin.invalid")
 os.environ.setdefault("JELLYFIN_API_KEY", "fake-key")
 
 import jellyfin_core  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 
 def a_0_2_0_database():
@@ -55,8 +54,4 @@ def test_init_db_twice_is_harmless():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

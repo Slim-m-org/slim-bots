@@ -2,19 +2,13 @@
 """Command-and-event tests against FakeAsyncClient; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as modlog
+from slimbots import Store
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
-import bot as modlog  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": [], "roles": []}]
+MEMBERS = [human("u1", "nick", "Nick", role_ids=[], roles=[])]
 
 
 def message(author_id, content, msg_id="m1"):
@@ -32,10 +26,7 @@ def setup():
     modlog.MODERATION_SETTLE_SECONDS = 0
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
-    modlog.bot.client = client
-    modlog.bot.space = Space(client)
-    modlog.bot.authors = AuthorFilter(client, space=modlog.bot.space)
-    modlog.bot.me_id = "bot-1"
+    wire_bot(modlog.bot, client, me_id="bot-1")
     asyncio.run(modlog.bot.space.refresh_members())
     return client
 
@@ -428,8 +419,4 @@ def test_another_bot_is_ignored_by_default():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

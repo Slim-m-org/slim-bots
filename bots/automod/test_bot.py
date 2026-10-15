@@ -2,26 +2,19 @@
 """Event-layer tests against FakeAsyncClient; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
-import tempfile
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as automod  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as automod
+from slimbots.http import ApiError
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 CHANNELS = [
     {"id": "c-chat", "name": "chat", "kind": "text", "category_id": "cat-1", "created_at": 0},
     {"id": "c-log", "name": "modlog", "kind": "text", "category_id": "cat-1", "created_at": 0},
 ]
-USER = {"id": "u1", "username": "spammer", "display_name": "Spammer", "is_bot": False, "is_webhook": False}
-MOD = {"id": "u-mod", "username": "mod", "display_name": "Mod", "is_bot": False, "is_webhook": False}
+USER = human("u1", "spammer", "Spammer")
+MOD = human("u-mod", "mod", "Mod")
 DEFAULTS = {name: getattr(automod, name) for name in (
     "FLOOD_MESSAGES", "MENTION_LIMIT", "LINK_POLICY", "LINK_DOMAINS", "NEW_MEMBER_HOURS", "WORDS", "WORD_CHANNELS", "LOG_CHANNEL",
 )}
@@ -41,13 +34,10 @@ def setup(**config):
     client.respond("GET", "/users/u-mod", {**MOD, "role_ids": []})
     automod.bot.channels = None
     automod.bot.me_id = "bot-1"
-    automod.bot.client = client
-    automod.bot.space = Space(client)
-    automod.bot.authors = AuthorFilter(client, space=automod.bot.space)
-    automod.bot.store = None
-    automod.bot.data_path = os.path.join(tempfile.mkdtemp(), "automod.db")
+    wire_bot(automod.bot, client, db_name="automod.db")
     asyncio.run(automod.bot.space.refresh_channels())
-    asyncio.run(automod.bot.open_store(migrate=automod.init_db))
+    # The bot's own migration, so a Bot built without one fails every test that logs.
+    asyncio.run(automod.bot.open_store(migrate=automod.bot._store_migrate))
     return client
 
 
@@ -296,8 +286,4 @@ def test_a_hidden_character_inside_a_listed_word_does_not_hide_it():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

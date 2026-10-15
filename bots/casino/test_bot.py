@@ -3,20 +3,16 @@
 
 import asyncio
 import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("SLIMM_CHANNELS", "c1")
 
-import bot as casino  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as casino
+from slimbots import Store
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 MEMBERS = [
-    {"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []},
-    {"id": "u2", "username": "sam", "display_name": "Sam", "is_bot": False, "is_webhook": False, "role_ids": []},
+    human("u1", "nick", "Nick", role_ids=[]),
+    human("u2", "sam", "Sam", role_ids=[]),
     {"id": "bot-2", "username": "otherbot", "display_name": "OtherBot", "is_bot": True, "is_webhook": False, "role_ids": []},
 ]
 
@@ -32,10 +28,7 @@ def setup():
     casino._command_limiter._hits.clear()
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
-    casino.bot.client = client
-    casino.bot.space = Space(client)
-    casino.bot.authors = AuthorFilter(client, space=casino.bot.space)
-    casino.bot.me_id = "bot-1"
+    wire_bot(casino.bot, client, me_id="bot-1")
     asyncio.run(casino.bot.space.refresh_members())
     return client
 
@@ -279,10 +272,10 @@ def test_another_bot_is_ignored_by_default():
 
 def test_on_ready_starts_maintenance_as_a_supervised_background_task():
     setup()
-    casino._maintenance_started = False
+    casino.bot._periodic_started.clear()
 
     async def run():
-        await casino.on_ready()
+        await casino.bot._dispatch_event("on_ready")
         assert len(casino.bot._background_tasks) == 1
         task = next(iter(casino.bot._background_tasks))
         task.cancel()
@@ -313,8 +306,4 @@ def test_an_absurdly_long_amount_is_refused_and_later_commands_still_work():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

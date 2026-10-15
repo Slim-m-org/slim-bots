@@ -2,15 +2,11 @@
 """CANVAS_CHANNEL resolution: the new mode and the backward-compatible fallback; run directly: python3 test_canvas_channel.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as board  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as board
+from slimbots.models import Channel
+from slimbots.space import Space
+from slimbots.testing import FakeAsyncClient, run_module_tests
 
 
 def voice_channel(channel_id, name):
@@ -97,8 +93,4 @@ def test_a_bad_canvas_channel_is_fatal_at_connect_not_swallowed():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

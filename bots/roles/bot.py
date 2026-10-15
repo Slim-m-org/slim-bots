@@ -209,13 +209,6 @@ async def private(ctx, text):
     await ctx.reply_ephemeral(text, public_fallback=True)
 
 
-async def require_manager(ctx):
-    if ctx.author.has_permission(Permissions.MANAGE_ROLES):
-        return True
-    await private(ctx, "only someone with Manage Roles can manage role menus.")
-    return False
-
-
 def parse_create(arg):
     """(pick_one, title, [typed role names]) from `[--one] <title> | <role>, <role>`."""
     text = arg.strip()
@@ -347,10 +340,8 @@ async def list_channel_menus(ctx):
 MENU_USAGE = "create [--one] <title> | <role>, <role> | add <menu id> <role> | remove <menu id> <role> | delete <menu id> | list"
 
 
-@bot.command(name="rolemenu", help="Manage role menus (buttons on a message); needs Manage Roles", usage=MENU_USAGE)
+@bot.command(name="rolemenu", help="Manage role menus (buttons on a message); needs Manage Roles", usage=MENU_USAGE, requires=Permissions.MANAGE_ROLES, requires_message="only someone with Manage Roles can manage role menus.")
 async def rolemenu_cmd(ctx, args: str = ""):
-    if not await require_manager(ctx):
-        return
     sub, _, rest = args.strip().partition(" ")
     handlers = {"create": create_menu, "add": add_to_menu, "remove": remove_from_menu, "delete": delete_menu}
     if sub.lower() == "list":
@@ -411,16 +402,13 @@ async def on_connect():
     await post_listing()
 
 
-def main():
+def config_problem():
     if not ROLES:
-        raise SystemExit("set SLIMM_ROLES")
+        return "set SLIMM_ROLES"
     if unusable := unusable_role_names(ROLES):
-        raise SystemExit(f"SLIMM_ROLES has names that cannot be requested (a subcommand word or a case-insensitive repeat): {', '.join(unusable)}")
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
+        return f"SLIMM_ROLES has names that cannot be requested (a subcommand word or a case-insensitive repeat): {', '.join(unusable)}"
+    return None
 
 
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=config_problem)

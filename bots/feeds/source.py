@@ -1,12 +1,10 @@
 """Turns a pasted URL into the feed URL behind it, and fetches it conditionally with a timeout, a size cap and a host guard."""
 
-import ipaddress
 import re
-import socket
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
+
+from slimbots.web import JsonService, ServiceBlocked, ServiceTooLarge
 
 import parse as parsemod
 
@@ -45,50 +43,20 @@ def normalize(url):
     return parts.geturl()
 
 
-def is_public(host):
-    """True when every address the name resolves to is globally routable."""
+async def web_transport(url, headers, allow_private=False, transport=None):
+    """One GET returning (status, lowercase headers, body); a non-2xx answer is a result, a refused host or a body over MAX_BODY a SourceError.
+    Every redirect hop is checked too, so a public url cannot bounce into the LAN."""
+    service = JsonService(
+        "feed", user_agent=None, timeout=TIMEOUT, max_bytes=MAX_BODY, public_only=True, allow_private=allow_private,
+        cross_origin_redirects=True, transport=transport,
+    )
     try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
-        return False
-    return all(ipaddress.ip_address(info[4][0]).is_global for info in infos)
-
-
-class Guard(urllib.request.HTTPRedirectHandler):
-    """Re-checks the host on every redirect hop, so a public URL cannot bounce into the LAN."""
-
-    def __init__(self, allow_private):
-        self.allow_private = allow_private
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        check_host(newurl, self.allow_private)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-def check_host(url, allow_private):
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        raise SourceError("that is not an http or https URL")
-    if not allow_private and not is_public(parts.hostname):
-        raise SourceError("that host is not publicly routable (set FEEDS_ALLOW_PRIVATE=1 to allow a LAN feed)")
-
-
-def urllib_transport(url, headers, allow_private=False):
-    """One GET returning (status, lowercase headers, body); a non-2xx answer is a result, a body over MAX_BODY is a SourceError."""
-    check_host(url, allow_private)
-    opener = urllib.request.build_opener(Guard(allow_private))
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=TIMEOUT) as response:
-            return response.status, {k.lower(): v for k, v in response.headers.items()}, read_capped(response)
-    except urllib.error.HTTPError as err:
-        return err.code, {k.lower(): v for k, v in err.headers.items()}, b""
-
-
-def read_capped(response):
-    body = response.read(MAX_BODY + 1)
-    if len(body) > MAX_BODY:
-        raise SourceError("the feed is larger than 2 MB")
-    return body
+        response = await service.send("GET", url, headers=headers)
+    except ServiceBlocked:
+        raise SourceError("that host is not publicly routable (set FEEDS_ALLOW_PRIVATE=1 to allow a LAN feed)") from None
+    except ServiceTooLarge:
+        raise SourceError("the feed is larger than 2 MB") from None
+    return response.status, response.headers, response.body
 
 
 @dataclass
@@ -100,7 +68,7 @@ class Result:
     detail: str = ""
 
 
-def fetch(url, etag=None, last_modified=None, transport=urllib_transport):
+async def fetch(url, etag=None, last_modified=None, transport=web_transport):
     """Never raises: every failure is an `error` result whose detail is safe to store and show."""
     headers = {"user-agent": USER_AGENT, "accept": ACCEPT}
     if etag:
@@ -108,7 +76,7 @@ def fetch(url, etag=None, last_modified=None, transport=urllib_transport):
     if last_modified:
         headers["if-modified-since"] = last_modified
     try:
-        status, got, body = transport(url, headers)
+        status, got, body = await transport(url, headers)
     except SourceError as err:
         return Result("error", detail=str(err))
     except Exception as err:

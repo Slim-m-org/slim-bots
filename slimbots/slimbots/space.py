@@ -99,6 +99,13 @@ class Space:
                 return member
         return None
 
+    def channel_label(self, channel_id: str | None, fallback: str | None = None) -> str:
+        """`#name` for a channel the space knows, else `fallback`, else the id itself."""
+        channel = self.channels.get(channel_id) if channel_id else None
+        if channel is not None:
+            return f"#{channel.name}"
+        return fallback if fallback is not None else (channel_id or "")
+
     def get_channel(self, id_or_name: str) -> Channel | None:
         channel = self.channels.get(id_or_name)
         if channel:

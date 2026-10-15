@@ -2,12 +2,10 @@
 """A post that failed to send is retried even when newer posts landed first; run directly: python3 test_cursor_retry.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import test_dedupe as d  # noqa: E402
+import test_dedupe as d
+from slimbots.testing import run_module_tests
+from test_bot import asynced
 
 jellyfin, core = d.jellyfin, d.core
 ApiError = jellyfin.ApiError
@@ -24,7 +22,7 @@ def poll_twice_failing_first(feed, fails):
         sent.append(entry["item_ids"])
 
     saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
-    core.items_since = lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor]
+    core.items_since = asynced(lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor])
     jellyfin.send_post = send_post
     jellyfin.bot.store = d.FakeStore(feed.conn)
     try:
@@ -76,8 +74,4 @@ def test_the_cursor_still_reaches_the_newest_item_once_every_post_landed():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

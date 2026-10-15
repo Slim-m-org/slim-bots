@@ -2,15 +2,12 @@
 """The call dock's play/pause control follows playback; run directly: python3 test_dock_state.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import dock_state  # noqa: E402
-import session_registry  # noqa: E402
-from test_bot import jellyfin, message, process  # noqa: E402
-from test_panel import client_in_call, press, started_session, use_control  # noqa: E402
+import dock_state
+import session_registry
+from test_bot import jellyfin, message, process
+from slimbots.testing import run_module_tests
+from test_panel import client_in_call, press, started_session, use_control
 
 
 def armed_client():
@@ -86,7 +83,4 @@ def test_with_several_parties_it_shows_play_only_when_all_are_paused():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for t in tests:
-        t()
-    print(f"{len(tests)} passed")
+    run_module_tests(globals())

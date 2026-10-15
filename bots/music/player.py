@@ -4,32 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
-import shutil
 from collections import deque
 
 from slimbots import Embed
-from slimbots.voice import VoiceError
+from slimbots import media
+from slimbots.media import PCM_CHANNELS as AUDIO_CHANNELS
+from slimbots.media import PCM_CHUNK_MS as AUDIO_CHUNK_MS
+from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
+from slimbots.voice import publish_microphone, watch_empty
 
 import music_core
 
-AUDIO_SAMPLE_RATE = 48000
-AUDIO_CHANNELS = 2
-AUDIO_CHUNK_MS = 20
 AUDIO_MAX_BITRATE = 128_000
-CHUNK_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_CHUNK_MS // 1000
-CHUNK_BYTES = CHUNK_SAMPLES * AUDIO_CHANNELS * 2
+CHUNK_SAMPLES = media.pcm_chunk_samples()
+CHUNK_BYTES = media.pcm_chunk_bytes()
 
 
-class PlayerError(Exception):
+class PlayerError(media.MediaError):
     """Raised when playback cannot start - a missing ffmpeg binary, most often."""
 
 
 def ffmpeg_binary():
-    path = shutil.which("ffmpeg")
-    if path is None:
-        raise PlayerError("ffmpeg is not on PATH - install it on the bot's host")
-    return path
+    return media.ffmpeg_binary(PlayerError)
 
 
 def build_ffmpeg_args(track):
@@ -40,26 +36,6 @@ def build_ffmpeg_args(track):
         args += ["-headers", track.headers]
     args += ["-i", track.url, "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
     return args
-
-
-def audio_encoding(rtc, max_bitrate):
-    """livekit re-exports `VideoEncoding` on `rtc` but not `AudioEncoding` (1.1.20); fall back to the proto it lives in."""
-    cls = getattr(rtc, "AudioEncoding", None) or importlib.import_module("livekit.rtc._proto.room_pb2").AudioEncoding
-    return cls(max_bitrate=max_bitrate)
-
-
-async def publish_microphone(voice_session):
-    """A speaking-participant track (not a screen-share tile), at a music-grade bitrate; returns its `AudioSource`."""
-    if not voice_session.can_publish:
-        raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
-    rtc = voice_session.rtc
-    source = rtc.AudioSource(AUDIO_SAMPLE_RATE, AUDIO_CHANNELS)
-    track = rtc.LocalAudioTrack.create_audio_track("music", source)
-    options = rtc.TrackPublishOptions(
-        source=rtc.TrackSource.SOURCE_MICROPHONE, audio_encoding=audio_encoding(rtc, AUDIO_MAX_BITRATE),
-    )
-    await voice_session.room.local_participant.publish_track(track, options)
-    return source
 
 
 class MusicSession:
@@ -89,7 +65,7 @@ class MusicSession:
         return self._chunks_sent * AUDIO_CHUNK_MS / 1000
 
     async def start(self, first_track):
-        self._source = await publish_microphone(self.voice_session)
+        self._source = await publish_microphone(self.voice_session, max_bitrate=AUDIO_MAX_BITRATE)
         self.queue.append(first_track)
         self._runner_task = self.bot.background(self._run(), name=f"music-runner-{self.voice_channel_id}")
         self._monitor_task = self.bot.background(self._monitor_loop(), name=f"music-monitor-{self.voice_channel_id}")
@@ -194,11 +170,8 @@ class MusicSession:
 
     async def _kill_process(self):
         process, self._process = self._process, None
-        if process is not None and process.returncode is None:
-            process.kill()
         if process is not None:
-            with contextlib.suppress(ProcessLookupError):
-                await process.communicate()  # wait() hangs on Python 3.12 while unread output is still queued
+            await media.reap(process)
 
     async def _leave(self):
         self.ended = True
@@ -213,25 +186,18 @@ class MusicSession:
             await self.bot.client.send(self.text_channel_id, text)
 
     async def _monitor_loop(self):
-        while True:
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self._wake_monitor.wait(), timeout=music_core.ROSTER_POLL_SECONDS)
-            self._wake_monitor.clear()
-            if self.ended:
-                return
-            roster = await self.bot.client.voice_roster(self.voice_channel_id)
-            others = [p for p in roster.get("participants", []) if p.get("user_id") != self.bot.me_id]
-            if not others:
-                await self.stop(reason="the call is empty")
-                return
+        await watch_empty(
+            self.bot, self.voice_channel_id, self._wake_monitor, lambda: self.stop(reason="the call is empty"),
+            is_done=lambda: self.ended,
+        )
 
     def now_playing_embed(self):
         track = self.current
         embed = Embed(title=track.title if track else "nothing playing")
         if track is not None:
-            embed.add_field("position", music_core.format_hms(self.position_seconds), inline=True)
+            embed.add_field("position", media.format_hms(self.position_seconds), inline=True)
             if track.duration_seconds:
-                embed.add_field("duration", music_core.format_hms(track.duration_seconds), inline=True)
+                embed.add_field("duration", media.format_hms(track.duration_seconds), inline=True)
             embed.add_field("state", "paused" if self.paused else "playing", inline=True)
         embed.add_field("up next", str(len(self.queue)), inline=True)
         return embed

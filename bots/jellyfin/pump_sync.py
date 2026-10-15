@@ -1,4 +1,4 @@
-"""Process and timing helpers the `!watch` pumps share: reaping an ffmpeg, and starting picture and sound together."""
+"""Timing helpers the `!watch` pumps share: reading the audio pipe, and starting picture and sound together."""
 
 from __future__ import annotations
 
@@ -7,15 +7,6 @@ import contextlib
 import os
 
 START_WAIT_SECONDS = 3  # how long one pump holds its first chunk for the other; a title with no audio never sends any
-
-
-async def reap(process):
-    """Kills an ffmpeg and drains its pipe: on Python 3.12 `wait()` never returns while unread output is still queued."""
-    if process.returncode is None:
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
-    with contextlib.suppress(ProcessLookupError):
-        await process.communicate()
 
 
 class AudioPipe:

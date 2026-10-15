@@ -7,7 +7,7 @@ import datetime
 import sys
 import uuid
 
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, Permissions
 from slimbots.http import is_not_found, is_token_revoked
 
 import gs_core as core
@@ -17,7 +17,6 @@ LIST_COOLDOWN_SECONDS = 10
 
 bot = Bot(prefix="!", default_data_path="game-status.db", store_migrate=core.init_db)
 core.configure(bot)
-_background_started = False
 
 
 def now():
@@ -63,24 +62,18 @@ async def publish_all(rows, stamp):
             print(f"game-status: channel {channel_id}: {type(err).__name__}: {err}", file=sys.stderr)
 
 
+async def seed_servers():
+    store = await bot.open_store()
+    for server in core.GAMESTATUS_SERVERS:
+        await store.run(core.txn_upsert_server, server)
+
+
+@bot.every(lambda: core.GAMESTATUS_INTERVAL, name="game-status-poll", before=seed_servers)
 async def poll_once():
     store = await bot.open_store()
     servers = await store.run(core.txn_list_servers)
     rows = await poll(servers)
     await publish_all(rows, now())
-
-
-async def poll_loop():
-    """Only a revoked slim-m token ends the loop; any other failure waits for the next cycle."""
-    while True:
-        try:
-            await poll_once()
-        except Exception as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"game-status: {type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(core.GAMESTATUS_INTERVAL)
 
 
 @bot.command(name="gamestatus", help="Show whether each game server is up, with players and map", cooldown=LIST_COOLDOWN_SECONDS, cooldown_bucket="channel")
@@ -97,17 +90,11 @@ async def gameserver(ctx, rest: str = ""):
     await ctx.reply(f"try `{p}gameserver add <kind> <host> <port> <name>`, `remove <name>`, `list`, `board` or `unboard`.")
 
 
-async def require_manage(ctx):
-    if core.may_manage(ctx.author):
-        return True
-    await ctx.reply_ephemeral("only someone with Manage Server can change the game server list.", public_fallback=True)
-    return False
+MANAGE_DENIED = "only someone with Manage Server can change the game server list."
 
 
-@gameserver.command(name="add", help="Add or replace a server", usage="<a2s|minecraft|tcp> <host> <port> <name>")
+@gameserver.command(name="add", help="Add or replace a server", usage="<a2s|minecraft|tcp> <host> <port> <name>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def gameserver_add(ctx, kind: str, host: str, port: int, name: str):
-    if not await require_manage(ctx):
-        return
     server = {"name": name.strip(), "kind": kind.lower(), "host": host, "port": port}
     problem = core.validate_server(server["name"], server["kind"], host, port)
     if problem:
@@ -120,29 +107,23 @@ async def gameserver_add(ctx, kind: str, host: str, port: int, name: str):
     await ctx.reply(f"watching `{server['name']}` ({server['kind']} {host}:{port}).")
 
 
-@gameserver.command(name="remove", help="Stop watching a server", usage="<name>")
+@gameserver.command(name="remove", help="Stop watching a server", usage="<name>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def gameserver_remove(ctx, name: str):
-    if not await require_manage(ctx):
-        return
     store = await bot.open_store()
     removed = await store.run(core.txn_remove_server, name.strip())
     await ctx.reply(f"stopped watching `{name}`." if removed else f"no server named `{name}`.")
 
 
-@gameserver.command(name="list", help="List the configured servers")
+@gameserver.command(name="list", help="List the configured servers", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def gameserver_list(ctx):
-    if not await require_manage(ctx):
-        return
     store = await bot.open_store()
     servers = await store.run(core.txn_list_servers)
     lines = [f"`{s['name']}` - {s['kind']} {s['host']}:{s['port']}" for s in servers]
     await ctx.reply("\n".join(lines) or "no servers are configured.")
 
 
-@gameserver.command(name="board", help="Keep a live status message in this channel")
+@gameserver.command(name="board", help="Keep a live status message in this channel", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def gameserver_board(ctx):
-    if not await require_manage(ctx):
-        return
     store = await bot.open_store()
     boards = await store.run(core.txn_list_boards)
     rows = await poll(await store.run(core.txn_list_servers))
@@ -150,40 +131,12 @@ async def gameserver_board(ctx):
     await ctx.reply_ephemeral("this channel now has a live status message.", public_fallback=True)
 
 
-@gameserver.command(name="unboard", help="Stop updating this channel's status message")
+@gameserver.command(name="unboard", help="Stop updating this channel's status message", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
 async def gameserver_unboard(ctx):
-    if not await require_manage(ctx):
-        return
     store = await bot.open_store()
     removed = await store.run(core.txn_remove_board, ctx.channel_id)
     await ctx.reply("no longer updating a status message here." if removed else "this channel has no status message.")
 
 
-async def seed_servers():
-    store = await bot.open_store()
-    for server in core.GAMESTATUS_SERVERS:
-        await store.run(core.txn_upsert_server, server)
-
-
-@bot.event
-async def on_connect():
-    global _background_started
-    if _background_started:
-        return
-    _background_started = True
-    await seed_servers()
-    bot.background(poll_loop(), name="game-status-poll")
-
-
-def main():
-    problem = core.check_config()
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=core.check_config)

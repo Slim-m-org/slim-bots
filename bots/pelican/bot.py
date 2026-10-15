@@ -3,7 +3,6 @@
 Split per docs/framework.md: this is the entry point and the status loop, pelican_core.py holds the rest."""
 
 import asyncio
-import sys
 import uuid
 
 from slimbots import ApiError, Bot
@@ -25,7 +24,7 @@ async def snapshot(servers):
 
     async def one(server):
         try:
-            return await asyncio.to_thread(core.fetch_resources, server["identifier"])
+            return await core.fetch_resources(server["identifier"])
         except core.PelicanAuthError:
             raise
         except core.PelicanError:
@@ -37,7 +36,7 @@ async def snapshot(servers):
 async def resolve(ctx, query):
     """The one server `query` names, or None after replying why not."""
     try:
-        servers = await asyncio.to_thread(core.list_servers)
+        servers = await core.list_servers()
     except core.PelicanError as err:
         await ctx.reply(f"can't reach the panel: {err}")
         return None
@@ -55,7 +54,7 @@ async def resolve(ctx, query):
 @bot.command(name="servers", help="List game servers with state, CPU and RAM", cooldown=LIST_COOLDOWN_SECONDS)
 async def servers_cmd(ctx):
     try:
-        servers = await asyncio.to_thread(core.list_servers)
+        servers = await core.list_servers()
         rows = await snapshot(servers)
     except core.PelicanError as err:
         await ctx.reply(f"can't reach the panel: {err}")
@@ -72,7 +71,7 @@ async def server_cmd(ctx, name: str):
     if server is None:
         return
     try:
-        stats = await asyncio.to_thread(core.fetch_resources, server["identifier"])
+        stats = await core.fetch_resources(server["identifier"])
     except core.PelicanError as err:
         await ctx.reply(f"can't read `{server['name']}`: {err}")
         return
@@ -111,7 +110,7 @@ async def power(ctx, signal, query):
         await ctx.reply("I can't write to the log channel, so I won't run this.")
         return
     try:
-        await asyncio.to_thread(core.api_power, server["identifier"], signal)
+        await core.api_power(server["identifier"], signal)
     except core.PelicanError as err:
         await send_audit(ctx, signal, server, f"failed ({err})")
         await ctx.reply(f"`{signal}` on `{server['name']}` failed: {err}")
@@ -160,50 +159,11 @@ async def publish_status(text):
     _last_status_text = text
 
 
+@bot.every(lambda: core.PELICAN_STATUS_INTERVAL, name="pelican-status", fatal=(core.PelicanAuthError,), enabled=lambda: bool(core.PELICAN_STATUS_CHANNEL))
 async def status_once():
-    servers = await asyncio.to_thread(core.list_servers)
+    servers = await core.list_servers()
     await publish_status(status_text(await snapshot(servers)))
 
 
-async def status_loop():
-    """A rejected panel key or slim-m token propagates out - bot.background() treats that as fatal."""
-    while True:
-        try:
-            await status_once()
-        except core.PelicanAuthError:
-            print("pelican api key rejected - exiting", file=sys.stderr)
-            raise
-        except ApiError as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        except core.PelicanError as err:
-            print(f"pelican: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(core.PELICAN_STATUS_INTERVAL)
-
-
-_background_started = False
-
-
-@bot.event
-async def on_connect():
-    global _background_started
-    if _background_started or not core.PELICAN_STATUS_CHANNEL:
-        return
-    _background_started = True
-    bot.background(status_loop(), name="pelican-status")
-
-
-def main():
-    problem = core.check_config()
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=core.check_config)

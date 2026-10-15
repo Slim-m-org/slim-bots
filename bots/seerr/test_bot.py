@@ -4,10 +4,7 @@
 import asyncio
 import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SEERR_URL", "http://jellyseerr:5055")
 os.environ.setdefault("SEERR_API_KEY", "fake-key")
 
@@ -16,6 +13,7 @@ import seerr_cog  # noqa: E402
 import seerr_core as core  # noqa: E402
 from arrkit.service import AuthError  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 harness = Harness(seerr.bot, core.init_db)
 
@@ -266,8 +264,4 @@ def test_the_approver_permission_must_be_a_real_slim_m_permission_name():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

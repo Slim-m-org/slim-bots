@@ -3,42 +3,40 @@
 
 import asyncio
 import sys
-import time
 import uuid
 from dataclasses import dataclass
 
 import feed as feedmod
 import notes
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, KeyValueTable, LedgerTable
 from slimbots.http import is_token_revoked
 
 MIN_POLL_SECONDS = 60
 POST_NAMESPACE = uuid.UUID("5d0c7a8e-3f61-4c1e-9b7a-2e8d4f6a1c33")
 
 
+SEEN = LedgerTable("seen", key="release_id", detail="tag")
+STATE = KeyValueTable("state")
+
+
 def init_db(conn):
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS seen (release_id TEXT PRIMARY KEY, tag TEXT NOT NULL, at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """
-    )
+    SEEN.create(conn)
+    STATE.create(conn)
     conn.commit()
 
 
 def is_initialized(conn):
-    return conn.execute("SELECT 1 FROM state WHERE key = 'initialized'").fetchone() is not None
+    return STATE.get(conn, "initialized") is not None
 
 
 def seen_ids(conn):
-    return {row[0] for row in conn.execute("SELECT release_id FROM seen")}
+    return SEEN.keys(conn)
 
 
 def mark_seen(conn, releases, initialize=False):
-    now = int(time.time())
-    conn.executemany("INSERT OR IGNORE INTO seen (release_id, tag, at) VALUES (?, ?, ?)", [(str(r["id"]), r["tag_name"], now) for r in releases])
+    SEEN.add_many(conn, [(str(r["id"]), r["tag_name"]) for r in releases])
     if initialize:
-        conn.execute("INSERT OR IGNORE INTO state (key, value) VALUES ('initialized', '1')")
+        STATE.set(conn, "initialized", "1")
     conn.commit()
 
 
@@ -123,7 +121,7 @@ async def announce_new(candidates):
 
 async def poll_once(feed):
     """One cycle; returns seconds GitHub asked us to wait, or None. A failed post leaves the etag unaccepted."""
-    result = await asyncio.to_thread(feed.fetch)
+    result = await feed.fetch()
     if result.status == "limited":
         print(f"github rate limited ({result.detail}), waiting {result.wait}s", file=sys.stderr)
         return result.wait
@@ -147,42 +145,13 @@ async def poll_once(feed):
     return None
 
 
-def next_delay(wait, poll_seconds):
-    return max(wait or 0, poll_seconds)
+releases_feed = feedmod.Feed(config.repo, token=config.token)
 
 
-async def run_forever(feed):
-    while True:
-        wait = None
-        try:
-            wait = await poll_once(feed)
-        except ApiError as err:
-            if is_token_revoked(err):
-                print("slimm bot token rejected - exiting", file=sys.stderr)
-                raise
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        except Exception as err:
-            print(f"{type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
-        await asyncio.sleep(next_delay(wait, config.poll_seconds))
-
-
-started = []
-
-
-@bot.event
-async def on_connect():
-    if started:
-        return
-    started.append(True)
-    bot.background(run_forever(feedmod.Feed(config.repo, token=config.token)), name="github-releases-poll")
-
-
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
+@bot.every(lambda: config.poll_seconds, name="github-releases-poll")
+async def poll():
+    return await poll_once(releases_feed)
 
 
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

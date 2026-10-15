@@ -2,20 +2,14 @@
 """Command-and-event tests against FakeAsyncClient; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as board
+from slimbots import Store
+from slimbots import Canvas
+from slimbots.http import ApiError
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
-import bot as board  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots import Canvas  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}]
+MEMBERS = [human("u1", "nick", "Nick", role_ids=[])]
 
 
 def message(content, msg_id="m1"):
@@ -35,10 +29,7 @@ def setup():
     board.board_lock = asyncio.Lock()
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
-    board.bot.client = client
-    board.bot.space = Space(client)
-    board.bot.authors = AuthorFilter(client, space=board.bot.space)
-    board.bot.me_id = "bot-1"
+    wire_bot(board.bot, client, me_id="bot-1")
     board.canvas = Canvas(client, "c1")
     board.canvas_channel_name = "voice-room"
     asyncio.run(board.bot.space.refresh_members())
@@ -306,8 +297,4 @@ def test_two_moves_to_one_target_in_flight_do_not_collide():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

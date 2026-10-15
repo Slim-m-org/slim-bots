@@ -4,6 +4,7 @@ import secrets
 import time
 
 from slimbots import Embed, Member
+from slimbots.text import format_duration
 
 import casino_core
 
@@ -19,7 +20,7 @@ def _txn_daily(conn, request_id, user_id):
     remaining = casino_core.DAILY_COOLDOWN_SECONDS - (now - last_daily)
     if remaining > 0:
         conn.execute("ROLLBACK")
-        return {"error": f"already claimed - try again in {casino_core.format_duration(remaining)}"}
+        return {"error": f"already claimed - try again in {format_duration(remaining, "spaced")}"}
     conn.execute(
         "UPDATE accounts SET balance = balance + ?, last_daily = ? WHERE user_id = ?",
         (casino_core.DAILY_AMOUNT, now, user_id),

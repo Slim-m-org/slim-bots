@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from slimbots.limits import ValidationError, require_int, require_len
+from slimbots.chooser import Chooser, Pick
+from slimbots.limits import require_int, require_len
 
-from .chooser import Chooser, Pick
 from .guard import UNREACHABLE, Guard
 from .service import AuthError
 
@@ -63,11 +62,7 @@ class Library:
 
     async def _lookup(self, ctx, query):
         """Validates, then spends the cooldown, then asks the service; bad input costs nothing."""
-        try:
-            query = require_len((query or "").strip(), max_len=MAX_QUERY_LENGTH, min_len=1, field=f"a {self.spec.noun} name")
-        except ValidationError as err:
-            await ctx.reply(str(err))
-            return None, None
+        query = require_len((query or "").strip(), max_len=MAX_QUERY_LENGTH, min_len=1, field=f"a {self.spec.noun} name")
         if await self.guard.throttled(ctx):
             return None, None
         found = await self.guard.call(ctx, self.core.lookup, query)
@@ -98,7 +93,7 @@ class Library:
 
     async def _add_chosen(self, item):
         try:
-            await asyncio.to_thread(self.core.add, item)
+            await self.core.add(item)
         except AuthError:
             return f"{self.core.SERVICE.name} rejected the bot's api key - an admin needs to fix it."
         except (*UNREACHABLE, RuntimeError) as err:
@@ -122,11 +117,7 @@ class Library:
         await ctx.reply(f"{total} in the queue:\n" + "\n".join(self.spec.queue_line(r) for r in records) + more)
 
     async def calendar(self, ctx, days_text):
-        try:
-            days = require_int(days_text or str(CALENDAR_DEFAULT_DAYS), min_value=1, max_value=CALENDAR_MAX_DAYS, field="days")
-        except ValidationError as err:
-            await ctx.reply(str(err))
-            return
+        days = require_int(days_text or str(CALENDAR_DEFAULT_DAYS), min_value=1, max_value=CALENDAR_MAX_DAYS, field="days")
         if await self.guard.throttled(ctx):
             return
         start, end = calendar_window(days)
