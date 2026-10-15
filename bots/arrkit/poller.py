@@ -21,9 +21,9 @@ async def history_poll_once(bot, core):
     """Announces new Sonarr/Radarr history; `core` supplies `api`, `fetch_history_since`, `plan_events`, `build_posts`."""
     cursor = await bot.store.run(store.get_cursor)
     if cursor is None:
-        await bot.store.run(core.bootstrap_cursor)
+        await core.bootstrap_cursor(bot.store)
         return
-    records = await asyncio.to_thread(core.fetch_history_since, cursor)
+    records = await core.fetch_history_since(cursor)
     if not records:
         return
     events = await bot.store.run(core.plan_events, records)

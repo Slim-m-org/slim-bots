@@ -12,7 +12,7 @@ import session_registry
 import stream_session
 from slimbots.testing import FakeVoiceSession, run_module_tests
 from slimbots.voice import VoiceError
-from test_bot import jellyfin, movie_for_watch, setup_with_voice
+from test_bot import jellyfin, movie_for_watch, setup_with_voice, asynced
 
 TICKS = 10_000_000
 
@@ -72,9 +72,9 @@ class Rig:
         stream_session.asyncio.create_subprocess_exec = self.jf.create_subprocess_exec
         stream_session.WatchSession._pump_video = _idle
         stream_session.WatchSession._pump_audio = _idle
-        playback_progress.report_position = lambda *a, **k: None
-        playback_progress.resolve_user_id = lambda: "u1"
-        jellyfin_core.next_episode = lambda *a, **k: None
+        playback_progress.report_position = asynced(lambda *a, **k: None)
+        playback_progress.resolve_user_id = asynced(lambda: "u1")
+        jellyfin_core.next_episode = asynced(lambda *a, **k: None)
         self.voice = voice_session or FakeVoiceSession("c1")
         self.session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", item or movie_for_watch(), "u1", self.voice)
         session_registry.add(self.session)

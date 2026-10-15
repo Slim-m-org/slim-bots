@@ -10,7 +10,8 @@ os.environ.setdefault("JELLYFIN_URL", "https://fake-jellyfin.invalid")
 os.environ.setdefault("JELLYFIN_API_KEY", "fake-key")
 
 import bot as jellyfin  # noqa: E402
-from slimbots.testing import run_module_tests  # noqa: E402
+from slimbots.testing import run_module_tests
+from test_bot import asynced
 
 core = jellyfin.jellyfin_core
 DAY = 86400
@@ -53,7 +54,7 @@ class Feed:
             self.sent.append(entry["item_ids"])
 
         saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
-        core.items_since = lambda cursor: [i for i in self.items if i["DateCreated"] >= cursor]
+        core.items_since = asynced(lambda cursor: [i for i in self.items if i["DateCreated"] >= cursor])
         jellyfin.send_post = send_post
         jellyfin.bot.store = FakeStore(self.conn)
         try:

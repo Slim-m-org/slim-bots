@@ -2,19 +2,17 @@
 """The shared half: service, store, history dedupe, poll loop, command guard, library command, chooser; run directly: python3 test_bot.py."""
 
 import asyncio
-import io
 import os
 import sqlite3
 import sys
-import urllib.error
 import uuid
 from types import SimpleNamespace
-from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import httpx  # noqa: E402
 from arrkit import history, library, poller, service, store  # noqa: E402
-from arrkit.chooser import Chooser  # noqa: E402
+from slimbots.chooser import Chooser  # noqa: E402
 from arrkit.guard import Guard  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
 from slimbots import ApiError, Bot  # noqa: E402
@@ -115,12 +113,12 @@ def test_the_cursor_only_moves_forward():
 def test_fetch_since_pages_back_only_while_a_page_is_all_new_and_returns_oldest_first():
     records = [{"id": i} for i in range(1, 251)]
 
-    def api(method, path, params=None, body=None):
+    async def api(method, path, params=None, body=None):
         ordered = sorted(records, key=lambda r: -r["id"])
         size, page = params["pageSize"], params["page"]
         return {"records": ordered[(page - 1) * size:page * size]}
 
-    got = history.fetch_since(api, 120, {})
+    got = asyncio.run(history.fetch_since(api, 120, {}))
     assert [r["id"] for r in got][:2] == [121, 122] and len(got) == 130
 
 
@@ -136,23 +134,19 @@ def test_the_api_key_goes_in_a_header_never_the_url_and_a_401_is_an_auth_error()
     svc.url, svc.key = "http://demo:1", "sekrit"
     seen = {}
 
-    def fake_open(request, timeout):
-        seen["url"], seen["key"] = request.full_url, request.get_header("X-api-key")
-        return io.BytesIO(b'{"ok": true}')
+    def fake_open(request):
+        seen["url"], seen["key"] = str(request.url), request.headers["x-api-key"]
+        return httpx.Response(200, json={"ok": True})
 
-    with mock.patch("urllib.request.urlopen", fake_open):
-        assert svc.call("GET", "/x", {"a": 1}) == {"ok": True}
+    svc.transport = httpx.MockTransport(fake_open)
+    assert asyncio.run(svc.call("GET", "/x", {"a": 1})) == {"ok": True}
     assert seen["key"] == "sekrit" and "sekrit" not in seen["url"] and seen["url"] == "http://demo:1/api/v3/x?a=1"
-
-    def rejected(request, timeout):
-        raise urllib.error.HTTPError(request.full_url, 401, "no", {}, None)
-
-    with mock.patch("urllib.request.urlopen", rejected):
-        try:
-            svc.call("GET", "/x")
-        except service.AuthError as err:
-            assert "sekrit" not in str(err)
-            return
+    svc.transport = httpx.MockTransport(lambda request: httpx.Response(401))
+    try:
+        asyncio.run(svc.call("GET", "/x"))
+    except service.AuthError as err:
+        assert "sekrit" not in str(err)
+        return
     raise AssertionError("expected AuthError")
 
 
@@ -329,11 +323,11 @@ def test_everything_already_in_the_library_opens_no_chooser():
 
 def history_core(records):
     """A minimal core for the poll loop: history served from a list, one post per record."""
-    def fetch(cursor):
+    async def fetch(cursor):
         return sorted((r for r in records if r["id"] > cursor), key=lambda r: r["id"])
 
-    def bootstrap(conn):
-        store.advance_cursor(conn, max((r["id"] for r in records), default=0))
+    async def bootstrap(db):
+        await db.run(store.advance_cursor, max((r["id"] for r in records), default=0))
 
     def plan_events(conn, batch):
         return [

@@ -29,7 +29,7 @@ class Rig:
         self.calls = []
         feeds.transport = self.transport
 
-    def transport(self, url, headers):
+    async def transport(self, url, headers):
         self.calls.append((url, headers))
         answer = self.web.get(url, (404, {}, b""))
         if isinstance(answer, Exception):

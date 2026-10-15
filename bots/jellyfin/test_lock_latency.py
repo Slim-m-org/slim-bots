@@ -13,8 +13,8 @@ SLOW_SECONDS = 0.6
 MAX_WAIT_SECONDS = 0.25
 
 
-def slow_jf_get(path, params=None):
-    time.sleep(SLOW_SECONDS)
+async def slow_jf_get(path, params=None):
+    await asyncio.sleep(SLOW_SECONDS)
     return {"Items": []}
 
 

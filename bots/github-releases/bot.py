@@ -121,7 +121,7 @@ async def announce_new(candidates):
 
 async def poll_once(feed):
     """One cycle; returns seconds GitHub asked us to wait, or None. A failed post leaves the etag unaccepted."""
-    result = await asyncio.to_thread(feed.fetch)
+    result = await feed.fetch()
     if result.status == "limited":
         print(f"github rate limited ({result.detail}), waiting {result.wait}s", file=sys.stderr)
         return result.wait

@@ -2,7 +2,6 @@
 """Resume offers and playback-progress reporting for `!watch`; run directly: python3 test_resume.py."""
 
 import asyncio
-
 import jellyfin_core
 import picker
 import playback_progress
@@ -11,7 +10,9 @@ import session_registry
 import watch_cog
 from slimbots.models import Channel
 from slimbots.testing import FakeVoiceSession, run_module_tests
-from test_bot import jellyfin, message, movie_for_watch, setup_with_voice
+from test_bot import jellyfin, message, movie_for_watch, setup_with_voice, asynced
+import json
+import httpx
 
 TEN_MINUTES_TICKS = 600 * playback_progress.TICKS_PER_SECOND
 
@@ -55,7 +56,7 @@ def press_button(custom_id, message_id, user_id="u1"):
 async def settle():
     """Waits out the presses in flight, but not a chooser's five-minute expiry timer."""
     while True:
-        pending = [t for t in jellyfin.bot._background_tasks if not t.get_name().startswith("jellyfin-pick-")]
+        pending = [t for t in jellyfin.bot._background_tasks if "pick-" not in t.get_name()]
         if not pending:
             return
         await asyncio.gather(*pending)
@@ -92,12 +93,12 @@ def test_watch_offers_resume_from_jellyfins_own_position_and_starts_there():
     client = voice_client()
     fetched = []
 
-    def fetch(item_id, user_id=None):
+    async def fetch(item_id, user_id=None):
         fetched.append(user_id)
         return with_position(movie_for_watch(), 600)
 
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         started = run_watch_pressing("!watch inception", "jfp:resume")
@@ -110,8 +111,8 @@ def test_watch_offers_resume_from_jellyfins_own_position_and_starts_there():
 def test_watch_start_over_ignores_the_saved_position():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: with_position(movie_for_watch(), 600)),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: with_position(movie_for_watch(), 600))),
     ):
         started = run_watch_pressing("!watch inception", "jfp:restart")
     assert started == [0.0]
@@ -121,23 +122,23 @@ def test_watch_start_over_ignores_the_saved_position():
 def test_watch_without_an_answer_starts_nothing():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: with_position(movie_for_watch(), 600)),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: with_position(movie_for_watch(), 600))),
     ):
         started = run_watch_pressing("!watch inception")
-        pending = next(iter(picker._picks.values()))
-        asyncio.run(picker._expire(jellyfin.bot, pending, 0))
+        pending = next(iter(picker.CHOOSER._picks.values()))
+        asyncio.run(picker.CHOOSER.expire(jellyfin.bot, pending, 0))
     assert started == []
     assert client.edited[-1]["content"] == "timed out - `!watch` again to retry."
-    assert not picker._picks
+    assert not picker.CHOOSER._picks
 
 
 def test_watch_with_no_title_offers_the_last_unfinished_item():
     client = voice_client()
     last = with_position(movie_for_watch(item_id="m9", name="Heat"), 900)
     with Patched(
-        (playback_progress, "fetch_last_watched", lambda user_id=None: last),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: last),
+        (playback_progress, "fetch_last_watched", asynced(lambda user_id=None: last)),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: last)),
     ):
         started = run_watch_pressing("!watch", "jfp:resume")
     assert "**Heat** is at 15:00" in client.sent[0]["content"]
@@ -146,7 +147,7 @@ def test_watch_with_no_title_offers_the_last_unfinished_item():
 
 def test_watch_with_no_title_and_nothing_to_resume_says_so():
     client = voice_client()
-    with Patched((playback_progress, "fetch_last_watched", lambda user_id=None: None)):
+    with Patched((playback_progress, "fetch_last_watched", asynced(lambda user_id=None: None))):
         started = run_watch_pressing("!watch")
     assert started == []
     assert client.ephemerals[-1]["content"].startswith("nothing to resume")
@@ -155,8 +156,8 @@ def test_watch_with_no_title_and_nothing_to_resume_says_so():
 def test_an_item_with_no_saved_position_starts_without_a_prompt():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: movie_for_watch()),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
     ):
         started = run_watch_pressing("!watch inception")
     assert started == [0.0]
@@ -166,7 +167,7 @@ def test_an_item_with_no_saved_position_starts_without_a_prompt():
 def test_stop_reports_the_position_and_finishing_marks_it_played():
     reports = []
 
-    def record(item_id, seconds, *, finished=False, user_id=None):
+    async def record(item_id, seconds, *, finished=False, user_id=None):
         reports.append((item_id, round(seconds), finished))
 
     with Patched((playback_progress, "report_position", record)):
@@ -186,12 +187,16 @@ def test_stop_reports_the_position_and_finishing_marks_it_played():
 
 def test_report_position_posts_ticks_and_the_finished_flag():
     posted = []
+
+    def answer(request):
+        posted.append((request.url.path, dict(request.url.params), json.loads(request.content)))
+        return httpx.Response(204)
+
     with Patched(
-        (playback_progress, "jf_post_json", lambda path, params, body: posted.append((path, params, body))),
-        (playback_progress, "JELLYFIN_USER_ID", "jf-user"),
+        (jellyfin_core, "TRANSPORT", httpx.MockTransport(answer)), (playback_progress, "JELLYFIN_USER_ID", "jf-user"),
     ):
-        playback_progress.report_position("abc", 12.5)
-        playback_progress.report_position("abc", 99, finished=True)
+        asyncio.run(playback_progress.report_position("abc", 12.5))
+        asyncio.run(playback_progress.report_position("abc", 99, finished=True))
     assert posted[0][0] == "/UserItems/abc/UserData" and posted[0][1] == {"userId": "jf-user"}
     assert posted[0][2]["PlaybackPositionTicks"] == 125_000_000 and "Played" not in posted[0][2]
     assert posted[1][2]["PlaybackPositionTicks"] == 0 and posted[1][2]["Played"] is True
@@ -200,15 +205,15 @@ def test_report_position_posts_ticks_and_the_finished_flag():
 def test_the_first_enabled_user_is_used_when_none_is_configured():
     calls = []
 
-    def users(path, params=None):
+    async def users(path, params=None):
         calls.append(path)
         return [{"Id": "off", "Policy": {"IsDisabled": True}}, {"Id": "on", "Policy": {}}]
 
     with Patched(
         (jellyfin_core, "jf_get", users), (playback_progress, "JELLYFIN_USER_ID", ""), (playback_progress, "_resolved_user_id", None),
     ):
-        assert playback_progress.resolve_user_id() == "on"
-        assert playback_progress.resolve_user_id() == "on"
+        assert asyncio.run(playback_progress.resolve_user_id()) == "on"
+        assert asyncio.run(playback_progress.resolve_user_id()) == "on"
     assert calls == ["/Users"]
 
 

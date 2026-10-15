@@ -7,10 +7,9 @@ from types import SimpleNamespace
 import jellyfin_core
 import session_registry
 import stream_session
-from slimbots.testing import FakeAudioSource, FakeVideoSource, run_module_tests
+from slimbots.testing import FakeAudioSource, FakeVideoSource, run_module_tests, FakeVoiceSession
 from slimbots.models import Channel
-from slimbots.testing import FakeVoiceSession
-from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice
+from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice, asynced
 from test_resume import Patched
 
 EXTRA_MEMBERS = [
@@ -38,8 +37,8 @@ def watching():
         self._video_source, self._audio_source = FakeVideoSource(), FakeAudioSource()
 
     return Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: movie_for_watch()),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
         (stream_session.WatchSession, "start", fake_start),
     )
 

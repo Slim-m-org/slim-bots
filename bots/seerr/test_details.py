@@ -5,13 +5,13 @@ import asyncio
 import os
 import sys
 import time
-import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import seerr_core as core  # noqa: E402
 from arrkit.service import AuthError  # noqa: E402
 from arrkit.testkit import Patched  # noqa: E402
+from slimbots.web import ServiceUnreachable  # noqa: E402
 from test_bot import message, poll, process, request, seerr, seerr_api, seerr_cog, setup  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
@@ -75,8 +75,8 @@ def test_a_dropped_seerr_makes_the_poller_retry_instead_of_posting_a_placeholder
     poll(fake)
     fake.requests.append(request(2, tmdb=7))
     try:
-        poll(failing_movie_lookups(fake, urllib.error.URLError("reset")))
-    except urllib.error.URLError:
+        poll(failing_movie_lookups(fake, ServiceUnreachable("reset")))
+    except ServiceUnreachable:
         pass
     assert client.sent == []
     poll(fake)
@@ -87,7 +87,7 @@ def test_requests_replies_with_a_placeholder_when_seerr_drops_mid_list():
     client = setup()
     fake = seerr_api()
     fake.pending = {"results": [request(1, tmdb=7)], "pageInfo": {"results": 1}}
-    for error in (urllib.error.URLError("reset"), TimeoutError("slow"), AuthError("rejected")):
+    for error in (ServiceUnreachable("reset"), TimeoutError("slow"), AuthError("rejected")):
         seerr_cog.GUARD.cooldown._last.clear()
         before = len(client.sent)
         with Patched(core, "api", failing_movie_lookups(fake, error)):

@@ -14,12 +14,12 @@ COLORS = {"grabbed": 0x3B82F6, "downloaded": 0x22C55E, "upgraded": 0x14B8A6, "fa
 WATCHED = ("grabbed", "downloadFolderImported", "downloadFailed")
 
 
-def fetch_since(api, cursor, include):
+async def fetch_since(api, cursor, include):
     """History records newer than `cursor`, oldest first, paging back only while a page is all new."""
     fresh = []
     for page in range(1, MAX_PAGES + 1):
         params = {"page": page, "pageSize": PAGE_SIZE, "sortKey": "date", "sortDirection": "descending", **include}
-        records = (api("GET", "/history", params) or {}).get("records", [])
+        records = (await api("GET", "/history", params) or {}).get("records", [])
         newer = [r for r in records if r["id"] > cursor]
         fresh.extend(newer)
         if len(newer) < PAGE_SIZE or len(records) < PAGE_SIZE:
@@ -27,13 +27,13 @@ def fetch_since(api, cursor, include):
     return sorted(fresh, key=lambda r: r["id"])
 
 
-def bootstrap(conn, api):
+async def bootstrap(db, api):
     """A cold start begins at the newest record, so the existing backlog is never announced."""
-    if store.get_cursor(conn) is not None:
+    if await db.run(store.get_cursor) is not None:
         return
     params = {"page": 1, "pageSize": 1, "sortKey": "date", "sortDirection": "descending"}
-    records = (api("GET", "/history", params) or {}).get("records", [])
-    store.advance_cursor(conn, records[0]["id"] if records else 0)
+    records = (await api("GET", "/history", params) or {}).get("records", [])
+    await db.run(store.advance_cursor, records[0]["id"] if records else 0)
 
 
 def quality_of(record):

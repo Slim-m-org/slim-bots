@@ -11,7 +11,7 @@ import session_registry
 import stream_session
 from slimbots.models import Channel
 from slimbots.testing import FakeVoiceSession, run_module_tests
-from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice
+from test_bot import MEMBERS, jellyfin, movie_for_watch, process, setup_with_voice, asynced
 from test_resume import Patched
 
 SUBTITLE = {"Type": "Subtitle", "Index": 3, "Language": "eng", "DisplayTitle": "English"}
@@ -185,7 +185,7 @@ def test_stop_button_ends_the_party_and_disables_every_button():
 def test_next_episode_button_moves_the_party_to_the_next_episode():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2))):
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2)))):
         press(client, session, "jf:next")
         assert session.title == "Pilot 2" and session.item_id == "e2"
     session_registry.clear()
@@ -194,7 +194,7 @@ def test_next_episode_button_moves_the_party_to_the_next_episode():
 def test_next_episode_on_a_finale_says_so_in_the_channel():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: None)):
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: None))):
         press(client, session, "jf:next")
     assert client.sent[-1]["content"] == "that was the last episode."
     assert session.item_id == "e1"
@@ -318,15 +318,15 @@ def test_dock_control_with_nothing_playing_answers_privately():
 def test_next_episode_lookup_skips_the_current_item():
     seen = {}
 
-    def fake_get(path, params=None):
+    async def fake_get(path, params=None):
         seen["path"], seen["params"] = path, params
         return {"Items": [{"Id": "e1"}, {"Id": "e2"}]}
 
     with Patched((jellyfin_core, "jf_get", fake_get)):
-        upcoming = jellyfin_core.next_episode(episode_for_watch(), "jf-user")
+        upcoming = asyncio.run(jellyfin_core.next_episode(episode_for_watch(), "jf-user"))
     assert upcoming["Id"] == "e2"
     assert seen["path"] == "/Shows/s1/Episodes" and seen["params"]["startItemId"] == "e1" and seen["params"]["userId"] == "jf-user"
-    assert jellyfin_core.next_episode(movie_for_watch()) is None
+    assert asyncio.run(jellyfin_core.next_episode(movie_for_watch())) is None
 
 
 if __name__ == "__main__":

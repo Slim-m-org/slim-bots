@@ -9,6 +9,7 @@ from slimbots import Bot, KeyValueTable
 from slimbots.http import ApiError
 from slimbots.lifecycle import guard_dispatch
 from slimbots.migrations import ensure_columns
+from slimbots.text import clip, escape_mentions, one_line
 
 
 META = KeyValueTable("meta")
@@ -84,8 +85,7 @@ def link_for(channel_id, message_id):
 
 
 def channel_label(channel_id):
-    channel = bot.space.channels.get(channel_id) if bot.space else None
-    return f"#{channel.name}" if channel else "another channel"
+    return bot.space.channel_label(channel_id, "another channel") if bot.space else "another channel"
 
 
 def author_label(author_id):
@@ -93,33 +93,17 @@ def author_label(author_id):
     return member.display_name if member else author_id
 
 
-def snippet(text, limit):
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else flat[: limit - 3] + "..."
-
-
 def split_ids(joined):
     return [i for i in joined.split(",") if i]
 
 
-def defang(text):
-    """Escapes every `@` the server would read as a mention: one preceded by an even run of backslashes."""
-    out, run = [], 0
-    for char in text:
-        if char == "@" and run % 2 == 0:
-            out.append("\\")
-        out.append(char)
-        run = run + 1 if char == "\\" else 0
-    return "".join(out)
-
-
 def render_highlight(message_id, channel_id, author_id, content, attachments, attachment_ids, count):
     """One highlight's whole body; an edit only carries `content`, so the count and the quote live together."""
-    header = f"{EMOJI} {count} - {defang(author_label(author_id))} in {channel_label(channel_id)}"
+    header = f"{EMOJI} {count} - {escape_mentions(author_label(author_id))} in {channel_label(channel_id)}"
     link = link_for(channel_id, message_id)
     if link:
         header += f" - {link}"
-    quote = "\n".join(f"> {defang(line)}" for line in content[:MAX_QUOTE_LEN].splitlines()) if content else ""
+    quote = "\n".join(f"> {escape_mentions(line)}" for line in content[:MAX_QUOTE_LEN].splitlines()) if content else ""
     left_out = attachments - len(split_ids(attachment_ids))
     plural = "s" if left_out != 1 else ""
     extra = f"(+{left_out} attachment{plural} not shown)" if left_out > 0 else ""
@@ -341,7 +325,7 @@ async def on_message_deleted(event):
 def render_digest(rows, days):
     lines = [f"Top highlights from the last {days} day{'s' if days != 1 else ''}:"]
     for i, (message_id, channel_id, author_id, content, count) in enumerate(rows, 1):
-        text = snippet(content, DIGEST_SNIPPET_LEN) or "(no text)"
+        text = clip(one_line(content), DIGEST_SNIPPET_LEN) or "(no text)"
         line = f"{i}. {EMOJI} {count} - {author_label(author_id)} in {channel_label(channel_id)}: {text}"
         link = link_for(channel_id, message_id)
         lines.append(f"{line} - {link}" if link else line)

@@ -112,6 +112,15 @@ Global versus channel-scoped follows the same test as before: an event about a c
 
 The real work happens through `livekit.rtc`, loaded dynamically (`importlib.import_module`, not a static `import`) so neither pyright nor a bot that never touches voice needs the package installed - `bot-jellyfin`'s `!watch` (`stream_session.py`) is the worked example: Jellyfin transcodes server-side, a local `ffmpeg` decodes to raw frames, and those get pushed into the sources `publish_screen_share` returns at the source's own pace.
 
+A bot that decodes media with ffmpeg and pushes it into LiveKit (`bot-music`, `bot-jellyfin`) shares a few helpers.
+`slimbots.media` holds the PCM format (`PCM_SAMPLE_RATE`, `PCM_CHANNELS`, `pcm_chunk_bytes()`), `ffmpeg_binary(error)`, `reap(process)` to kill an ffmpeg and drain its pipe, and `format_hms` and `parse_hms`.
+`slimbots.voice` adds four functions.
+`join_to_speak(bot.voice, channel_id, label=, to=)` joins, and raises a `VoiceError` whose text is the reply when the join fails or the bot cannot speak.
+`start_or_leave(session, start(), doing=)` leaves the call and raises a reply when starting fails, and re-raises a revoked token.
+`publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate.
+`watch_empty(bot, channel_id, wake, on_empty)` is the loop that stops a player when only the bot is left.
+They take the voice object or session as an argument, so `FakeVoice` and `FakeVoiceSession` work with them unchanged.
+
 `await bot.voice.find_member(user_id)` answers "which voice channel is this person actually in right now", never "which channel did their command come from" - a command typed in a text channel has no voice call of its own, so a voice-aware command needs this rather than joining `ctx.channel_id`.
 It prefers live state: `voice.participant_joined`/`voice.participant_left` (decision 0032, `{channel_id, user_id}`) update an in-memory cache as they arrive, ungated by `channels=` since presence needs tracking across every voice channel the bot can see, not just the ones it watches for commands.
 A cache miss falls back to `GET .../voice/roster` on every voice channel the bot can see, fetched concurrently; a match populates the cache so a second lookup for the same person is free. These events only flow at all on a deployment with the LiveKit webhook configured (decision 0032's own caveat); the roster fallback is what keeps `find_member` correct regardless.
@@ -194,6 +203,38 @@ A bot's steady state is awaiting the websocket, and httpx gives real connection 
 httpx was already a transitive dependency in this environment, so it costs nothing new to vet.
 `call()` retries a 429 or 5xx with exponential backoff (slim-m sends no `Retry-After`) and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
+
+## Outside services
+
+A bot that calls another service (Jellyfin, Sonarr, a panel, a feed) uses `slimbots.JsonService`, not its own urllib client under `asyncio.to_thread`.
+`JsonService("sonarr", "https://sonarr.example/api/v3", headers={"x-api-key": key}, user_agent="slimm-bot-sonarr/1.0")` builds it, and `await service.get(path, params)`, `post(path, body, params)`, `request(method, path, ...)` and `get_bytes(path)` call it.
+JSON goes in and comes out; an empty body is `None`.
+`await service.send(...)` returns any status as a `WebResponse` instead of raising, for a conditional GET that wants its 304.
+Each call opens its own httpx client, so a service built in one event loop is safe to use in another.
+A failure is one of these, and `str(err)` never carries a key or a URL.
+`ServiceAuthError` is a rejected key (`auth_statuses`, default 401 and 403), `ServiceHTTPError` any other error status (`err.status`), and `ServiceUnreachable` a refused, reset or timed-out call (also an `OSError`).
+`ServiceTooLarge` is a body past `max_bytes`, and `ServiceBlocked` is a destination the url policy refused.
+A redirect is followed only to the same origin, so a key header is never replayed at another host.
+`cross_origin_redirects=True` is for a service that holds no key, and `max_redirects=0` follows none.
+`transport=httpx.MockTransport(handler)` answers in place of the network, which is how a bot's tests fake the service.
+
+`slimbots.jellyfin` is the Jellyfin side that `bot-jellyfin` and `bot-music` used to each carry: `service(url, key, user_agent=...)`, `auth_header(key)` and `url_problem(url)`.
+
+### The url policy
+
+`slimbots.urlpolicy` is the one place a bot decides which URLs are acceptable.
+
+`service_url_problem(setting, url, ...)` is the startup check for a URL that carries a key.
+It returns a sentence, or `None`, and refuses a scheme other than http and https, credentials inside the URL, and plaintext http to anything but loopback.
+`bare_hostnames=True` also allows a dotless docker service name, which `bot-sonarr`, `bot-radarr` and `bot-seerr` use.
+`allow_http=True` is the operator's own opt-in for a trusted LAN, which is `bot-pelican`'s `PELICAN_ALLOW_HTTP`, and `loopback_http=False` turns the loopback allowance off.
+
+`await destination_problem(url, allow_private=False, allow_hosts=())` is the check for a URL a member supplied.
+It returns `urlpolicy.PRIVATE` or `urlpolicy.UNRESOLVABLE`, or `None` when every address the name resolves to is public.
+Private, loopback, link-local, carrier-grade NAT, multicast, reserved and unspecified addresses all fail, in IPv4, IPv6 and IPv4-mapped IPv6 form, and so does a name with even one such answer.
+`allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` exempts its Jellyfin host).
+`JsonService(public_only=True)` runs the same check before the request and again for every redirect hop.
+It cannot close the gap between its lookup and the connection, so it guards against pointing a bot at the LAN, not against a hostile resolver.
 
 ## Typed REST wrappers
 
@@ -294,6 +335,16 @@ A handler that returns without answering is acked for you, so a quiet handler do
 A press is best effort like typing: a bot that was offline never sees it.
 `FakeAsyncClient` records replacements in `client.component_edits` and acks in `client.acks`, and a test can feed a press through `await bot._handle_frame({"type": "interaction.created", ...})`.
 
+### Choosers
+
+`slimbots.Chooser(prefix, command, label, verb)` is a message of buttons that only the person who asked may press and that closes itself after five minutes.
+Register it with `chooser.register(bot)`, then open one with `await chooser.open(bot, Pick(invoker_id, invoker_name, channel_id, items, query, on_choose), reply_to_id=)`.
+`on_choose(item)` returns the text the message shows afterwards, and a second press on the same message does nothing.
+A press by someone else, or on a message that expired, is answered privately with a hint to run `command` again.
+A chooser that pages or changes view subclasses it and overrides `render(pick)` and `handle(interaction, pick, action)`.
+`guard`, `close`, `redraw` and `expire` are there to build on, and `bot-jellyfin`'s `!watch` picker is the worked example.
+`components.grid(buttons, per_row)` splits buttons into rows.
+
 ## Menu entries and call controls
 
 `@bot.message_menu("translate", "Translate")` adds a row to every message's context menu, and `@bot.call_control("pause", "Pause", icon="pause")` adds a button to the call dock while the bot is on the call (slim-m decision 0045).
@@ -324,6 +375,16 @@ None of the three retries on its own, because a retried write only deepens a 429
 `ctx.send(content, embed=Embed(...))` and `ctx.reply(...)` send the real `RequestEmbed` wire shape decision 0030 defines (title/description/url/color/author/fields/footer/timestamp/image/thumbnail), capped to the same limits the server enforces (10 embeds/message elsewhere is a bot's own concern; per-embed caps live in `slimbots/embeds.py`).
 `content` is never sent blank - slim-m refuses that - so a bare `embed=` with no `content` sends the embed's own `render_fallback()` text alongside the real embed.
 If the server rejects the request with `embeds` present (an older deployment), `AsyncClient.send` retries once, under the same message id, as plain fallback text - the one case `render_fallback()` is the whole reply rather than a companion to it.
+
+## Text helpers
+
+`slimbots.text` has the small helpers bots kept rewriting.
+`clip(text, limit, ellipsis="...")` cuts to a limit and never leaves a space before the ellipsis, and `one_line(text)` collapses all whitespace.
+`escape_mentions(text)` puts a backslash before every `@` the server would read as a mention, using its own rule that an odd run of backslashes already escapes one, so escaping twice changes nothing.
+`break_mentions(text)` puts a zero-width space after each `@` instead, for text inside a code span where a backslash would show.
+`format_duration(seconds, style)` prints a count of seconds in the shape a bot always printed it.
+The styles are `exact` (`1h`), `interval` (`5m`), `compact` (`1h5m`), `spaced` (`1h 5m`), `minutes` (`1 h 5 min`) and `uptime` (`2d 3h`).
+`space.channel_label(channel_id, fallback)` is `#name` for a known channel, else the fallback, else the id.
 
 ## Testing
 

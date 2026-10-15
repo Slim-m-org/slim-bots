@@ -5,6 +5,7 @@ import asyncio
 
 import test_dedupe as d
 from slimbots.testing import run_module_tests
+from test_bot import asynced
 
 jellyfin, core = d.jellyfin, d.core
 ApiError = jellyfin.ApiError
@@ -21,7 +22,7 @@ def poll_twice_failing_first(feed, fails):
         sent.append(entry["item_ids"])
 
     saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
-    core.items_since = lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor]
+    core.items_since = asynced(lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor])
     jellyfin.send_post = send_post
     jellyfin.bot.store = d.FakeStore(feed.conn)
     try:

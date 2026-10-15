@@ -39,7 +39,7 @@ STATS = {
 
 
 class FakePanel(BaseHTTPRequestHandler):
-    """Enough of the Pelican Client API to drive the bot's real urllib code path."""
+    """Enough of the Pelican Client API to drive the bot's real HTTP code path."""
 
     requests = []
     fail_power = False
@@ -283,7 +283,7 @@ def test_key_is_sent_as_bearer_and_never_echoed():
 def test_redirects_are_not_followed_with_the_key():
     setup()
     try:
-        core.api_get("/redirect")
+        asyncio.run(core.api_get("/redirect"))
         raise AssertionError("expected PelicanError")
     except core.PelicanError as err:
         assert "302" in str(err)

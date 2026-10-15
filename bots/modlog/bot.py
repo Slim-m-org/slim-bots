@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from slimbots import ApiError, Bot, Embed
 from slimbots.http import is_forbidden
+from slimbots.text import format_duration
 
 # Every gap over the record threshold is kept for `!modlog gaps`; only a longer one is worth a channel post.
 GAP_RECORD_THRESHOLD_SECONDS = 5
@@ -62,20 +63,6 @@ _last_seen_at = None
 _open_gap_notice: "list | None" = None
 
 
-def format_duration(seconds):
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes, seconds = divmod(seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m"
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h{minutes}m" if minutes else f"{hours}h"
-    days, hours = divmod(hours, 24)
-    return f"{days}d{hours}h" if hours else f"{days}d"
-
-
 def format_until(until_ms):
     """`until` is Unix milliseconds; render the wall-clock time and a human duration together."""
     until_s = until_ms / 1000
@@ -83,7 +70,7 @@ def format_until(until_ms):
     remaining = until_s - time.time()
     if remaining <= 0:
         return f"until {when} (already past)"
-    return f"until {when} ({format_duration(remaining)} from now)"
+    return f"until {when} ({format_duration(remaining, "compact")} from now)"
 
 
 def record_event(conn, kind, text):
@@ -198,9 +185,9 @@ async def check_moderation_cursor():
 
 def gap_notice_text(count, downtime):
     if count == 1:
-        lead = f"reconnected after approximately {format_duration(downtime)} offline"
+        lead = f"reconnected after approximately {format_duration(downtime, "compact")} offline"
     else:
-        lead = f"reconnected {count} times, approximately {format_duration(downtime)} offline in total"
+        lead = f"reconnected {count} times, approximately {format_duration(downtime, "compact")} offline in total"
     return f"{lead} - moderation events during that gap are not recorded here (`{bot.prefix}modlog permissions` says what would close it)"
 
 
@@ -313,7 +300,7 @@ async def show_gaps(ctx):
     lines = [f"last {len(rows)} known gap(s), most recent first:"] if rows else []
     for reconnected_at, downtime in rows:
         when = datetime.fromtimestamp(reconnected_at, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        lines.append(f"- reconnected {when} after ~{format_duration(downtime)} offline")
+        lines.append(f"- reconnected {when} after ~{format_duration(downtime, "compact")} offline")
     if plain_gaps:
         lines.append(f"the moderation cursor was ahead of this log {plain_gaps} time(s) on an unchanged server build, so events were missed then.")
     if restart_gaps:

@@ -22,7 +22,7 @@ class FakeApi:
         self.post_result = {"id": 99}
         self.fallback = None
 
-    def __call__(self, method, path, params=None, body=None):
+    async def __call__(self, method, path, params=None, body=None):
         self.calls.append((method, path, params, body))
         if self.fail_with:
             raise self.fail_with

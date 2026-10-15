@@ -126,17 +126,6 @@ def render_hand(cards):
     return f"{' '.join(cards)} ({hand_total(cards)})"
 
 
-def format_duration(seconds):
-    seconds = max(0, int(seconds))
-    hours, seconds = divmod(seconds, 3600)
-    minutes, seconds = divmod(seconds, 60)
-    if hours:
-        return f"{hours}h {minutes}m"
-    if minutes:
-        return f"{minutes}m"
-    return f"{seconds}s"
-
-
 def parse_amount_spec(spec):
     if spec.lower() == "all":
         return "all"

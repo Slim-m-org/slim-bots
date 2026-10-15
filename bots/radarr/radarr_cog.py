@@ -1,8 +1,8 @@
 """bot-radarr's `!radarr` command: the shared library command with Radarr's queue and calendar wording."""
 
-from arrkit.chooser import Chooser
 from arrkit.guard import Guard
 from arrkit.library import Library, Spec, label
+from slimbots.chooser import Chooser
 
 import radarr_core as core
 

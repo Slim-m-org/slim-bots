@@ -1,8 +1,8 @@
 """bot-sonarr's `!sonarr` command: the shared library command with Sonarr's queue and calendar wording."""
 
-from arrkit.chooser import Chooser
 from arrkit.guard import Guard
 from arrkit.library import Library, Spec, label
+from slimbots.chooser import Chooser
 
 import sonarr_core as core
 

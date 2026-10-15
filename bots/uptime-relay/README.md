@@ -3,7 +3,7 @@
 A slim-m bot that turns monitoring webhooks into alerts in a channel, with Acknowledge and Silence buttons.
 It speaks Uptime Kuma, Grafana alerting and Healthchecks.io out of the box, plus a small generic shape anything can post.
 
-Needs `slim-m>=0.9.3`.
+Needs `slim-m>=0.13.0`.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `uptime-relay.db`).
 The webhook listener is a few dozen lines of `asyncio`, so there is no web framework to pin.

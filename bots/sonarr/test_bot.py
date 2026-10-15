@@ -158,7 +158,7 @@ def test_a_configured_profile_name_and_root_folder_win_over_the_first_listed():
     try:
         api = FakeApi(**{"/qualityprofile": [{"id": 1, "name": "SD"}, {"id": 9, "name": "Ultra"}], "/rootfolder": [{"path": "/media/tv"}]})
         with Patched(core, "api", api):
-            core.add({"title": "X", "tvdbId": 5})
+            asyncio.run(core.add({"title": "X", "tvdbId": 5}))
     finally:
         core.QUALITY_PROFILE, core.ROOT_FOLDER = saved
     assert api.posts()[0][3]["qualityProfileId"] == 9 and api.posts()[0][3]["rootFolderPath"] == "/media/other"

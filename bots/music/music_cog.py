@@ -1,11 +1,9 @@
 """bot-music's `play`/`queue`/`skip`/`pause`/`resume`/`stop`/`np` commands; one session per voice channel."""
 
 import asyncio
-import sys
 
-from slimbots.http import is_token_revoked
 from slimbots.limits import require_len
-from slimbots.voice import VoiceError
+from slimbots.voice import VoiceError, join_to_speak, start_or_leave
 
 import music_core
 from player import MusicSession, PlayerError
@@ -23,15 +21,10 @@ def _forget(session):
         del _sessions[session.voice_channel_id]
 
 
-def _channel_name(bot, channel_id):
-    channel = bot.space.channels.get(channel_id)
-    return f"#{channel.name}" if channel is not None else channel_id
-
-
 async def _resolve_track(ctx, query):
     """The track to play, or None after replying why not."""
     if music_core.is_stream_url(query):
-        problem = await asyncio.to_thread(music_core.check_stream_url, query.strip())
+        problem = await music_core.check_stream_url(query.strip())
         if problem:
             await ctx.reply(problem)
             return None
@@ -40,7 +33,7 @@ async def _resolve_track(ctx, query):
         await ctx.reply("no music library is configured here - give me a direct `http(s)` stream url.")
         return None
     try:
-        items = await asyncio.to_thread(music_core.search_tracks, query)
+        items = await music_core.search_tracks(query)
     except music_core.JellyfinAuthError:
         await ctx.reply("jellyfin is unavailable right now.")
         return None
@@ -52,26 +45,13 @@ async def _resolve_track(ctx, query):
 
 async def _start_session(ctx, voice_channel_id, track):
     """Joins the call and starts playing `track`, or replies why it could not."""
-    voice_channel_name = _channel_name(ctx.bot, voice_channel_id)
+    voice_channel_name = ctx.bot.space.channel_label(voice_channel_id)
     try:
-        voice_session = await ctx.bot.voice.join(voice_channel_id)
+        voice_session = await join_to_speak(ctx.bot.voice, voice_channel_id, label=voice_channel_name, to="play audio")
+        session = MusicSession(ctx.bot, voice_channel_id, ctx.channel_id, voice_session, _forget)
+        await start_or_leave(voice_session, session.start(track), doing="playing", expected=(PlayerError,))
     except VoiceError as err:
-        await ctx.reply(f"can't join {voice_channel_name}: {err}")
-        return
-    if not voice_session.can_publish:
-        await voice_session.leave()
-        await ctx.reply(f"I can join {voice_channel_name} but can't speak there - I need SPEAK to play audio.")
-        return
-    session = MusicSession(ctx.bot, voice_channel_id, ctx.channel_id, voice_session, _forget)
-    try:
-        await session.start(track)
-    except Exception as err:
-        await voice_session.leave()
-        if is_token_revoked(err):
-            raise
-        if not isinstance(err, (PlayerError, VoiceError)):
-            print(f"{type(err).__name__} starting playback: {err}", file=sys.stderr)
-        await ctx.reply(f"could not start playing: {err}")
+        await ctx.reply(str(err))
         return
     _sessions[voice_channel_id] = session
     await ctx.reply(f"playing **{track.title}** in {voice_channel_name}.")

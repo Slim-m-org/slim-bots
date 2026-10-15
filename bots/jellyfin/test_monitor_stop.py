@@ -6,7 +6,7 @@ import asyncio
 import playback_progress
 import stream_session
 from slimbots.testing import FakeVoiceSession, run_module_tests
-from test_bot import jellyfin, movie_for_watch, setup_with_voice
+from test_bot import jellyfin, movie_for_watch, setup_with_voice, asynced
 
 
 class Exited:
@@ -19,8 +19,8 @@ class Exited:
 def test_an_empty_call_while_waiting_for_next_leaves_the_room_without_cancelling_the_monitor():
     setup_with_voice()
     saved = playback_progress.report_position, playback_progress.resolve_user_id
-    playback_progress.report_position = lambda *args, **kwargs: None
-    playback_progress.resolve_user_id = lambda: "u1"
+    playback_progress.report_position = asynced(lambda *args, **kwargs: None)
+    playback_progress.resolve_user_id = asynced(lambda: "u1")
     voice = FakeVoiceSession("c1")
     session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(), "u1", voice)
     seen = {}

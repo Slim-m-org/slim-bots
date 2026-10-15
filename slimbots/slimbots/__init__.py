@@ -5,6 +5,7 @@ from . import events
 from . import migrations
 from .bot import Bot
 from .canvas import Canvas
+from .chooser import Chooser, Pick
 from .client import socket_url
 from .commands import Command, Group
 from .components import Button, rows
@@ -31,6 +32,7 @@ from .space import Space
 from .store import KeyValue, Ledger, Store
 from .tables import KeyValueTable, LedgerTable
 from .voice import Voice, VoiceError, VoiceSession
+from .web import JsonService, ServiceAuthError, ServiceError, ServiceHTTPError, ServiceTooLarge, ServiceUnreachable
 
 __all__ = [
     "ApiError",
@@ -42,6 +44,7 @@ __all__ = [
     "Canvas",
     "Channel",
     "CheckFailure",
+    "Chooser",
     "Command",
     "CommandError",
     "CommandNotFound",
@@ -57,14 +60,21 @@ __all__ = [
     "KeyValueTable",
     "Ledger",
     "LedgerTable",
+    "JsonService",
     "Member",
     "Message",
     "MissingPermissions",
     "MissingRequiredArgument",
     "Permissions",
+    "Pick",
     "Quota",
     "RateLimiter",
     "Role",
+    "ServiceAuthError",
+    "ServiceError",
+    "ServiceHTTPError",
+    "ServiceTooLarge",
+    "ServiceUnreachable",
     "SlimBotsError",
     "Space",
     "Store",

@@ -10,6 +10,7 @@ os.environ.setdefault("UPTIME_RELAY_SECRET", "test-secret")
 import bot as relay_bot
 from relay import Alert
 from slimbots.testing import FakeAsyncClient, run_module_tests
+from slimbots.text import format_duration
 
 CHANNEL = "c-alerts"
 DOWN = Alert("kuma", "Jellyfin", True, "connect refused", "http://10.0.0.5:8096")
@@ -142,10 +143,10 @@ def test_two_webhooks_at_once_open_one_alert_and_count_both():
     assert "2 alerts" in edits(client)[-1]
 
 def test_durations_read_naturally():
-    assert relay_bot.duration(30) == "1 min"
-    assert relay_bot.duration(25 * 60) == "25 min"
-    assert relay_bot.duration(2 * 3600) == "2 h"
-    assert relay_bot.duration(2 * 3600 + 5 * 60) == "2 h 5 min"
+    assert format_duration(30, "minutes") == "1 min"
+    assert format_duration(25 * 60, "minutes") == "25 min"
+    assert format_duration(2 * 3600, "minutes") == "2 h"
+    assert format_duration(2 * 3600 + 5 * 60, "minutes") == "2 h 5 min"
 
 
 if __name__ == "__main__":

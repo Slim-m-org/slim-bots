@@ -22,16 +22,16 @@ def configure(bot):
     ROOT_FOLDER = bot.setting("SONARR_ROOT_FOLDER", "") or ""
 
 
-def api(method, path, params=None, body=None):
-    return SERVICE.call(method, path, params, body)
+async def api(method, path, params=None, body=None):
+    return await SERVICE.call(method, path, params, body)
 
 
-def fetch_history_since(cursor):
-    return history.fetch_since(api, cursor, HISTORY_INCLUDE)
+async def fetch_history_since(cursor):
+    return await history.fetch_since(api, cursor, HISTORY_INCLUDE)
 
 
-def bootstrap_cursor(conn):
-    history.bootstrap(conn, api)
+async def bootstrap_cursor(db):
+    await history.bootstrap(db, api)
 
 
 def episode_label(season, number):
@@ -87,17 +87,17 @@ def build_posts(events):
     return sorted(posts, key=lambda p: p["max_id"])
 
 
-def lookup(term):
-    return api("GET", "/series/lookup", {"term": term}) or []
+async def lookup(term):
+    return await api("GET", "/series/lookup", {"term": term}) or []
 
 
-def add(lookup_result):
+async def add(lookup_result):
     """Adds a `lookup` result monitored, searching for its missing episodes right away."""
-    profile_id, folder = arr.resolve_defaults(api, "sonarr", QUALITY_PROFILE, ROOT_FOLDER)
+    profile_id, folder = await arr.resolve_defaults(api, "sonarr", QUALITY_PROFILE, ROOT_FOLDER)
     body = {
         "title": lookup_result["title"], "tvdbId": lookup_result["tvdbId"], "titleSlug": lookup_result.get("titleSlug"),
         "images": lookup_result.get("images") or [], "seasons": lookup_result.get("seasons") or [], "year": lookup_result.get("year"),
         "qualityProfileId": profile_id, "rootFolderPath": folder, "monitored": True, "seasonFolder": True,
         "addOptions": {"monitor": "all", "searchForMissingEpisodes": True},
     }
-    return api("POST", "/series", body=body)
+    return await api("POST", "/series", body=body)
