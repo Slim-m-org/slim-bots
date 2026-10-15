@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from types import ModuleType
-from typing import Any, Awaitable, Callable, Coroutine, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, Iterable, NoReturn, Sequence
 
 from . import catchup, cursor
 from . import events as ev
@@ -740,6 +740,19 @@ class Bot:
                 self._cursor_conn.close()
             if self.store is not None:
                 await self.store.close()
+
+    def run_cli(self, *, check: Callable[[], str | None] | Iterable[Callable[[], str | None]] = ()) -> NoReturn:
+        """The `__main__` entry point: a failed pre-flight check or a config RuntimeError exits with its message."""
+        checks = [check] if callable(check) else list(check)
+        for preflight in checks:
+            problem = preflight()
+            if problem:
+                raise SystemExit(problem)
+        try:
+            code = self.run() or 0
+        except RuntimeError as err:
+            raise SystemExit(str(err))
+        raise SystemExit(code)
 
     def run(self, *, url=None, token=None):
         """A cancelled `start()` (SIGTERM, or a fatal background task) becomes 0 for a clean shutdown, 1 otherwise."""

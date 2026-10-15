@@ -24,8 +24,10 @@ async def ping(ctx):
 
 
 if __name__ == "__main__":
-    raise SystemExit(bot.run() or 0)
+    bot.run_cli()
 ```
+
+`bot.run_cli(check=...)` is the `__main__` entry point: it runs each pre-flight `check` (a function returning a problem string or `None`), exits with the first problem or with a missing-config `RuntimeError`'s message, and otherwise exits with `run()`'s code.
 
 `Bot()` reads `SLIMM_URL`, `SLIMM_BOT_TOKEN`, and `SLIMM_CHANNELS` (comma-separated channel ids) itself - nothing above needs `import os` just to wire those up. Run it with:
 

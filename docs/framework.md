@@ -35,6 +35,8 @@ async def on_member_removed(frame):
 bot.run()  # reads SLIMM_URL and SLIMM_BOT_TOKEN from the environment
 ```
 
+`bot.run_cli(check=...)` is the `__main__` entry point: it runs each pre-flight check (a function returning a problem string or `None`), then `run()`, and turns a failed check or a config `RuntimeError` into the process's exit message.
+
 `Bot(...)` owns config, auth, the websocket, reconnect with backoff, the `seq`-less full-roster refresh, command registration, graceful SIGTERM, and `run()`/`start()`.
 A bot script imports `Bot` and little else.
 
