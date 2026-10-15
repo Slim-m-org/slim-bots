@@ -315,11 +315,7 @@ async def remind_every(ctx, spec: str, rest: str):
     if weekday is not None:
         recur = {"kind": "weekly", "weekday": weekday, "hour": hour, "minute": minute}
     else:
-        try:
-            require_range(interval_seconds, min_value=MIN_RECUR_SECONDS, field="a recurring interval")
-        except ValidationError as err:
-            await ctx.reply(str(err))
-            return
+        require_range(interval_seconds, min_value=MIN_RECUR_SECONDS, field="a recurring interval")
         recur = {"kind": "interval", "interval_seconds": interval_seconds}
 
     recur["tz"] = await bot.store.run(get_timezone, ctx.author.id)
@@ -362,11 +358,7 @@ async def reminders_cancel(ctx, n: int):
 
 @reminders_group.command(name="edit", help="Change one's text by its listed number", usage="<n> <text>")
 async def reminders_edit(ctx, n: int, text: str):
-    try:
-        text = require_len(text, max_len=MAX_TEXT_LEN, field="a reminder")
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    text = require_len(text, max_len=MAX_TEXT_LEN, field="a reminder")
     ok = await bot.store.run(edit_nth_text, ctx.channel_id, ctx.author.id, n, text)
     await ctx.reply(f"updated reminder {n}" if ok else f"no reminder {n}")
 

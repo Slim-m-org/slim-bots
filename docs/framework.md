@@ -229,7 +229,7 @@ All from PR #6's primitives, now built in rather than something a bot must remem
 | Never answer yourself | always on | not optional - see building-bots.md |
 | Per-command cooldown | off | only set if `cooldown=` is passed |
 | Permission gate | off | only set if `requires=` is passed |
-| Input bounds/quotas | opt-in helpers | `slimbots.limits` - `require_len`, `require_range`, `require_int`, `Quota` |
+| Input bounds/quotas | opt-in helpers | `slimbots.limits` - `require_len`, `require_range`, `require_int`, `Quota`; a `ValidationError` is a `BadArgument`, so a command that lets one escape replies with its text |
 | 403 from the bot's own missing permission | caught, replied clearly | a command can catch `ApiError` itself for a bespoke message |
 | 401 (revoked token) | terminal, stops the process | not optional |
 | 429 | exponential backoff, no crash | not optional |

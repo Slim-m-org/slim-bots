@@ -5,7 +5,7 @@ import asyncio
 from arrkit.chooser import Chooser, Pick
 from arrkit.guard import UNREACHABLE, Guard
 from slimbots import ApiError
-from slimbots.limits import ValidationError, require_len
+from slimbots.limits import require_len
 
 import approvals
 import seerr_core as core
@@ -32,11 +32,7 @@ async def seerr_user_for(bot, slimm_user_id):
 
 
 async def run_request(ctx, title):
-    try:
-        title = require_len(title.strip(), max_len=core.MAX_QUERY_LENGTH, min_len=1, field="a title")
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    title = require_len(title.strip(), max_len=core.MAX_QUERY_LENGTH, min_len=1, field="a title")
     if await seerr_user_for(ctx.bot, ctx.author.id) is None:
         await ctx.reply("you are not linked to a seerr user yet - ask a member who can approve requests to link you.")
         return
@@ -122,11 +118,7 @@ async def run_link(ctx, rest):
     if target is None:
         return
     member, name = target
-    try:
-        name = require_len(name, max_len=NAME_MAX, min_len=1, field="a seerr username")
-    except ValidationError as err:
-        await ctx.reply(str(err))
-        return
+    name = require_len(name, max_len=NAME_MAX, min_len=1, field="a seerr username")
     if await GUARD.throttled(ctx):
         return
     user = await GUARD.call(ctx, core.find_user, name)

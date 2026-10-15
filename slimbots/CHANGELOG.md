@@ -3,6 +3,10 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## Unreleased
+
+- `ValidationError` is a `BadArgument`, so a command that lets a `require_*` check raise replies with its text instead of each command catching it.
+
 ## 0.12.0
 
 - `bot.update_call_control(entry_id, icon=..., label=...)` changes a registered call control's icon or label and re-sends the set, so a play button can turn into a pause button. Returns False when nothing changed, and raises `KeyError` for an id that was never registered.
