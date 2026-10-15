@@ -40,7 +40,7 @@ class Rig:
         self.seen_headers = []
         self.feed = feedmod.Feed("Slim-m-org/slim-m", transport=self.transport)
 
-    def transport(self, url, headers):
+    async def transport(self, url, headers):
         self.seen_headers.append(headers)
         if "if-none-match" in headers and headers["if-none-match"] == self.answer[1].get("etag"):
             return 304, {}, b""

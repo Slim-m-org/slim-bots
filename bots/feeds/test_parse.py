@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
 """Parsing, URL normalisation, keyword matching and the fetch guards; run directly: python3 test_parse.py."""
 
+import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import db  # noqa: E402
+import httpx  # noqa: E402
 import fixtures  # noqa: E402
 import parse  # noqa: E402
 import source  # noqa: E402
+
+
+def fetch(*args, **kwargs):
+    return asyncio.run(source.fetch(*args, **kwargs))
 
 
 def test_rss_items_parse_with_decoded_text_and_a_date():
@@ -82,40 +88,67 @@ def test_keyword_filter_includes_any_and_excludes_with_a_dash():
 
 def test_fetch_turns_every_failure_into_a_result():
     def serve(status, body=b"", headers=None):
-        return lambda url, h: (status, headers or {}, body)
+        async def answer(url, h):
+            return status, headers or {}, body
 
-    assert source.fetch("u", transport=serve(200, fixtures.RSS, {"etag": "E"})).etag == "E"
-    assert source.fetch("u", transport=serve(304)).status == "unchanged"
-    assert source.fetch("u", transport=serve(500)).detail == "http 500"
-    assert source.fetch("u", transport=serve(200, b"<html/>")).status == "error"
-    assert "larger" in source.fetch("u", transport=serve(200, b"x" * (source.MAX_BODY + 1))).detail
+        return answer
 
-    def boom(url, h):
+    assert fetch("u", transport=serve(200, fixtures.RSS, {"etag": "E"})).etag == "E"
+    assert fetch("u", transport=serve(304)).status == "unchanged"
+    assert fetch("u", transport=serve(500)).detail == "http 500"
+    assert fetch("u", transport=serve(200, b"<html/>")).status == "error"
+    assert "larger" in fetch("u", transport=serve(200, b"x" * (source.MAX_BODY + 1))).detail
+
+    async def boom(url, h):
         raise TimeoutError("secret")
 
-    result = source.fetch("u", transport=boom)
+    result = fetch("u", transport=boom)
     assert result.status == "error" and "secret" not in result.detail
 
 
 def test_conditional_headers_are_sent_when_known():
     seen = []
 
-    def spy(url, headers):
+    async def spy(url, headers):
         seen.append(headers)
         return 304, {}, b""
 
-    source.fetch("u", etag="E", last_modified="L", transport=spy)
+    fetch("u", etag="E", last_modified="L", transport=spy)
     assert seen[0]["if-none-match"] == "E" and seen[0]["if-modified-since"] == "L"
 
 
 def test_private_hosts_are_refused_unless_allowed():
+    answering = httpx.MockTransport(lambda request: httpx.Response(200, content=b"ok"))
     try:
-        source.check_host("http://127.0.0.1/x", False)
+        asyncio.run(source.web_transport("http://127.0.0.1/x", {}, False, answering))
     except source.SourceError:
         pass
     else:
         raise AssertionError("loopback must be refused")
-    source.check_host("http://127.0.0.1/x", True)
+    status, _, body = asyncio.run(source.web_transport("http://127.0.0.1/x", {}, True, answering))
+    assert (status, body) == (200, b"ok")
+
+
+def test_a_public_feed_cannot_redirect_into_the_lan():
+    def bounce(request):
+        return httpx.Response(302, headers={"location": "http://10.0.0.5/admin"})
+
+    try:
+        asyncio.run(source.web_transport("http://93.184.216.34/feed", {}, False, httpx.MockTransport(bounce)))
+    except source.SourceError as err:
+        assert "publicly routable" in str(err)
+    else:
+        raise AssertionError("a redirect into the LAN must be refused")
+
+
+def test_a_body_over_the_cap_is_a_source_error():
+    big = httpx.MockTransport(lambda request: httpx.Response(200, content=b"x" * (source.MAX_BODY + 1)))
+    try:
+        asyncio.run(source.web_transport("http://93.184.216.34/feed", {}, False, big))
+    except source.SourceError as err:
+        assert "larger" in str(err)
+    else:
+        raise AssertionError("an oversize body must be refused")
 
 
 if __name__ == "__main__":

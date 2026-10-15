@@ -28,7 +28,7 @@ MAX_POSTS_PER_POLL = bot.setting("FEEDS_MAX_POSTS_PER_POLL", 5, type=int)
 TICK_SECONDS = bot.setting("FEEDS_TICK_SECONDS", 60, type=int)
 ALLOW_PRIVATE = bot.setting("FEEDS_ALLOW_PRIVATE", False, type=bool)
 
-transport = functools.partial(source.urllib_transport, allow_private=ALLOW_PRIVATE)
+transport = functools.partial(source.web_transport, allow_private=ALLOW_PRIVATE)
 
 
 class PostFailed(Exception):
@@ -82,7 +82,7 @@ async def deliver(feed, parsed, first):
 
 async def poll_feed(feed, first=False):
     """One fetch and delivery for one feed; returns an error string or None, and never raises except a revoked token."""
-    result = await asyncio.to_thread(source.fetch, feed["url"], feed["etag"], feed["last_modified"], transport)
+    result = await source.fetch(feed["url"], feed["etag"], feed["last_modified"], transport)
     if result.status == "error":
         await bot.store.run(db.record_failure, feed["id"], result.detail, feed["interval"])
         return result.detail
@@ -171,7 +171,7 @@ async def feed_add(ctx, url: str, keywords: str = ""):
     if len(await bot.store.run(db.list_feeds)) >= MAX_FEEDS:
         await ctx.reply(f"this bot follows at most {MAX_FEEDS} feeds; remove one first.")
         return
-    result = await asyncio.to_thread(source.fetch, feed_url, None, None, transport)
+    result = await source.fetch(feed_url, None, None, transport)
     if result.status != "ok":
         await ctx.reply(f"could not read that feed: {result.detail}")
         return
