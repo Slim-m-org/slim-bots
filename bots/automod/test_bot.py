@@ -47,7 +47,8 @@ def setup(**config):
     automod.bot.store = None
     automod.bot.data_path = os.path.join(tempfile.mkdtemp(), "automod.db")
     asyncio.run(automod.bot.space.refresh_channels())
-    asyncio.run(automod.bot.open_store(migrate=automod.init_db))
+    # The bot's own migration, so a Bot built without one fails every test that logs.
+    asyncio.run(automod.bot.open_store(migrate=automod.bot._store_migrate))
     return client
 
 
