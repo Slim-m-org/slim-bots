@@ -40,7 +40,8 @@ A bot script imports `Bot` and little else.
 
 ## Commands
 
-`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, check=None)` registers a function `async def name(ctx, *typed_args)`.
+`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None)` registers a function `async def name(ctx, *typed_args)`.
+`requires` is a `Permissions` bit; a member without it gets a private `MissingPermissions` reply (`requires_message` if given), before the arguments are parsed.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
 - `int` / `float` - parsed from one whitespace-separated token, or a clear `BadArgument` reply, never a traceback.

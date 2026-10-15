@@ -6,6 +6,7 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 ## Unreleased
 
 - `ValidationError` is a `BadArgument`, so a command that lets a `require_*` check raise replies with its text instead of each command catching it.
+- `requires=` is typed as the permission bit it holds, and `requires_message=` sets the reply a member without it gets. That reply (`MissingPermissions`) now goes only to them, falling back to a public reply on a server without ephemeral messages.
 
 ## 0.12.0
 

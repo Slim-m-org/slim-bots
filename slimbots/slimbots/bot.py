@@ -20,7 +20,7 @@ from .authors import AuthorFilter
 from .canvas import Canvas
 from .commands import Command, Group, build_help_text
 from .context import Context
-from .exceptions import CommandError, CommandNotFound
+from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
 from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_ui
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
@@ -237,26 +237,26 @@ class Bot:
 
     def command(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None, usage: str | None = None,
-        cooldown: float | None = None, cooldown_bucket: str = "user", requires: str | None = None,
+        cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
         check: Callable[[Context], Any] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             self.add_command(Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
-                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, check=check,
+                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
             ))
             return func
         return decorator
 
     def group(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
-        cooldown: float | None = None, cooldown_bucket: str = "user", requires: str | None = None,
+        cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
         check: Callable[[Context], Any] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Group]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Group:
             grp = Group(
                 func, name=name or func.__name__, aliases=aliases, help=help,
-                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, check=check,
+                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
             )
             self.add_command(grp)
             return grp
@@ -485,6 +485,9 @@ class Bot:
                     await ctx.reply(refusal)
                     return
             await command.invoke(ctx)
+        except MissingPermissions as err:
+            await ctx.reply_ephemeral(str(err), public_fallback=True)
+            await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
             await ctx.reply(str(err))
             await self._dispatch_event("on_command_error", ctx, err)
