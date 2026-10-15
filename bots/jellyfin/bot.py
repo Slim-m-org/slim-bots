@@ -120,15 +120,5 @@ async def on_connect():
     bot.background(poll_loop(), name="jellyfin-poll")
 
 
-def main():
-    problem = jellyfin_core.check_jellyfin_config()
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=jellyfin_core.check_jellyfin_config)

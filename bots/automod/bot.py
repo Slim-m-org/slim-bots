@@ -207,12 +207,5 @@ async def automod_cmd(ctx, sub: str, member: Member = None):
         await ctx.reply(f"try `{p}automod rules`, `{p}automod stats`, or `{p}automod lift @member`")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

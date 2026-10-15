@@ -246,12 +246,5 @@ async def feed_interval(ctx, feed_id: int, duration: Duration):
     await ctx.reply(f"feed `{feed_id}` is checked every {fmt_interval(seconds)}.")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

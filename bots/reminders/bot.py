@@ -449,12 +449,5 @@ async def on_ready():
     bot.background(_maintenance(), name="reminders-maintenance")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

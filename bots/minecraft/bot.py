@@ -144,16 +144,13 @@ async def online_cmd(ctx):
     await ctx.reply(f"online ({len(names)}): {body}" + (f" ({note})" if note else ""))
 
 
-def main():
+def prepare():
+    """Builds the run state once the settings pass; returns the settings problem, if any."""
     problem = core.check_config()
-    if problem:
-        raise SystemExit(problem)
-    setup_state()
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
+    if problem is None:
+        setup_state()
+    return problem
 
 
 if __name__ == "__main__":
-    main()
+    bot.run_cli(check=prepare)

@@ -72,10 +72,4 @@ def install(bot, poll_once, service):
 
 def main(bot, service, extra_problem=None):
     """The entry point every bot here shares: refuse an unsafe url or setting, then run until told to stop."""
-    problem = service.problem() or (extra_problem() if extra_problem else None)
-    if problem:
-        raise SystemExit(problem)
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
+    bot.run_cli(check=[service.problem, extra_problem] if extra_problem else service.problem)

@@ -177,12 +177,5 @@ async def on_connect():
     bot.background(run_forever(feedmod.Feed(config.repo, token=config.token)), name="github-releases-poll")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

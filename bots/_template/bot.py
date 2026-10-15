@@ -62,12 +62,5 @@ async def tally(ctx, message_id: str):
     await ctx.reply(", ".join(f"{choice}: {counts.get(choice, 0)}" for choice in CHOICES))
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

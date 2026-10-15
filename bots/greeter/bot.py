@@ -73,12 +73,5 @@ async def welcome(ctx, arg: str = ""):
     await ctx.reply("new members will be welcomed here.")
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()

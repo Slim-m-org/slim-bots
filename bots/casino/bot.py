@@ -50,12 +50,5 @@ async def _maintenance():
         await bot.store.run(casino_core.prune_processed_requests, int(time.time()) - casino_core.PROCESSED_REQUEST_RETENTION_SECONDS)
 
 
-def main():
-    try:
-        raise SystemExit(bot.run() or 0)
-    except RuntimeError as err:
-        raise SystemExit(str(err))
-
-
 if __name__ == "__main__":
-    main()
+    bot.run_cli()
