@@ -17,7 +17,7 @@ import quality  # noqa: E402
 import session_registry  # noqa: E402
 import stream_session  # noqa: E402
 from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
+from test_bot import asynced, jellyfin, movie_for_watch, setup_with_voice  # noqa: E402
 
 WIDTH = HEIGHT = 16
 FRAME_BYTES = stream_session.frame_byte_size(WIDTH, HEIGHT)
@@ -68,9 +68,9 @@ class Rig:
         os.environ.update(STAND_IN_MODE=mode, FRAME_BYTES=str(FRAME_BYTES), FRAMES=str(FRAMES))
         self.saved = (stream_session.ffmpeg_binary, playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode)
         stream_session.ffmpeg_binary = lambda: script
-        playback_progress.report_position = lambda item_id, seconds, *, finished=False, user_id=None: self.reports.append((round(seconds, 1), finished))
-        playback_progress.resolve_user_id = lambda: "u1"
-        jellyfin_core.next_episode = lambda *a, **k: None
+        playback_progress.report_position = asynced(lambda item_id, seconds, *, finished=False, user_id=None: self.reports.append((round(seconds, 1), finished)))
+        playback_progress.resolve_user_id = asynced(lambda: "u1")
+        jellyfin_core.next_episode = asynced(lambda *a, **k: None)
         self.voice = FakeVoiceSession("c1")
         self.voice.rtc = FakeRtc
         self.session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(runtime_seconds=runtime_seconds), "u1", self.voice)

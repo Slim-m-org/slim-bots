@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 
 from slimbots import ApiError
@@ -34,8 +33,8 @@ def _default_subtitle(item):
 
 
 async def _next_episode(session):
-    user_id = session.jellyfin_user_id or await asyncio.to_thread(playback_progress.resolve_user_id)
-    return await asyncio.to_thread(jellyfin_core.next_episode, session.item, user_id)
+    user_id = session.jellyfin_user_id or await playback_progress.resolve_user_id()
+    return await jellyfin_core.next_episode(session.item, user_id)
 
 
 async def _play_next(session):
@@ -81,7 +80,7 @@ async def run_control(interaction, session, action):
     bot = interaction.bot
     voice_channel_id = await bot.voice.find_member(interaction.user_id)
     if voice_channel_id != session.voice_channel_id:
-        name = session_registry.channel_name(bot, session.voice_channel_id)
+        name = bot.space.channel_label(session.voice_channel_id)
         await _refuse(interaction, f"join {name} to use these controls.")
         return
     problem = preflight(session, action)

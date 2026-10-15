@@ -12,7 +12,7 @@ import picker  # noqa: E402
 import playback_progress  # noqa: E402
 import session_registry  # noqa: E402
 import stream_session  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch, process  # noqa: E402
+from test_bot import asynced, jellyfin, message, movie_for_watch, process  # noqa: E402
 from test_panel import client_in_call, episode_for_watch, labels, started_session  # noqa: E402
 from test_resume import Patched, press_button, settle  # noqa: E402
 
@@ -39,10 +39,10 @@ async def _no_pipeline(self, start_seconds=0.0):
 def searching(results, **more):
     pairs = [
         (stream_session.WatchSession, "start", _no_pipeline),
-        (jellyfin_core, "watch_search", lambda query, limit: results),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: movie_for_watch(item_id, "Chosen")),
-        (jellyfin_core, "series_seasons", lambda series_id, user_id=None: more.get("seasons", [])),
-        (jellyfin_core, "season_episodes", lambda series_id, season_id, user_id=None: more.get("episodes", [])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: results)),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch(item_id, "Chosen"))),
+        (jellyfin_core, "series_seasons", asynced(lambda series_id, user_id=None: more.get("seasons", []))),
+        (jellyfin_core, "season_episodes", asynced(lambda series_id, season_id, user_id=None: more.get("episodes", []))),
     ]
     return Patched(*pairs)
 
@@ -168,14 +168,14 @@ def test_cancel_clears_the_buttons():
         click("jfp:cancel")
     assert client.edited[-1]["content"] == "cancelled."
     assert client.component_edits[-1]["components"] == []
-    assert not picker._picks
+    assert not picker.CHOOSER._picks
 
 
 def test_a_press_on_an_expired_choice_answers_privately():
     client = client_in_call()
     with searching(matches(3)):
         start_watch(client)
-        next(iter(picker._picks.values())).created_at -= picker.EXPIRES_SECONDS + 1
+        next(iter(picker.CHOOSER._picks.values())).created_at -= picker.EXPIRES_SECONDS + 1
         click("jfp:sel:0")
     assert client.edited[-1]["content"] == "timed out - `!watch` again to retry."
     assert "expired" in client.ephemerals[-1]["content"]
@@ -200,7 +200,7 @@ def finish(session):
 def test_a_finished_episode_waits_for_next_episode_and_keeps_the_call():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2)),
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2))),
                  (jellyfin_core, "JELLYFIN_NEXT_WAIT_SECONDS", 999)):
         async def go():
             await session._handle_finished()
@@ -218,7 +218,7 @@ def test_a_finished_episode_waits_for_next_episode_and_keeps_the_call():
 def test_pressing_next_episode_after_the_finish_plays_the_waiting_episode():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2)),
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2))),
                  (jellyfin_core, "JELLYFIN_NEXT_WAIT_SECONDS", 999)):
         asyncio.run(session._handle_finished())
         from test_panel import press
@@ -231,7 +231,7 @@ def test_pressing_next_episode_after_the_finish_plays_the_waiting_episode():
 def test_a_finished_episode_with_no_press_leaves_after_the_wait():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2)),
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2))),
                  (jellyfin_core, "JELLYFIN_NEXT_WAIT_SECONDS", 0.01)):
         async def go():
             await session._handle_finished()
@@ -246,7 +246,7 @@ def test_a_finished_episode_with_no_press_leaves_after_the_wait():
 def test_autoplay_moves_on_to_the_next_episode_without_a_press():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2)),
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2))),
                  (jellyfin_core, "JELLYFIN_AUTOPLAY_NEXT", True)):
         finish(session)
     assert session.item_id == "e2" and not session.finished and not session.voice_session.left
@@ -265,7 +265,7 @@ def test_a_finished_movie_or_finale_leaves_the_call_as_before():
 def test_pause_while_between_episodes_is_refused_privately():
     client = client_in_call()
     session = started_session(client, episode_for_watch())
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: episode_for_watch("e2", 2)),
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: episode_for_watch("e2", 2))),
                  (jellyfin_core, "JELLYFIN_NEXT_WAIT_SECONDS", 999)):
         asyncio.run(session._handle_finished())
         from test_panel import press

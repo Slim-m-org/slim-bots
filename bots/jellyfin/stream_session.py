@@ -5,39 +5,37 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import shutil
 import sys
 import time
 import uuid
 
 from slimbots import Embed
+from slimbots import media
+from slimbots.media import PCM_CHANNELS as AUDIO_CHANNELS
+from slimbots.media import PCM_CHUNK_MS as AUDIO_CHUNK_MS
+from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
+from slimbots.media import format_hms, reap
+from slimbots.voice import watch_empty
 
 import dock_state
 import jellyfin_core
 import playback_progress
-from pump_sync import AudioPipe, StartLine, reap
+from pump_sync import AudioPipe, StartLine
 from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
 
-AUDIO_SAMPLE_RATE = 48000
-AUDIO_CHANNELS = 2
-AUDIO_CHUNK_MS = 20
 AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 ms default left audio a second off the picture
-ROSTER_POLL_SECONDS = 20
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
 DECODE_THREADS = 2  # ffmpeg's one-thread-per-core default held 291 MB at 1080p for the same CPU as two threads at 173 MB
 
 
-class StreamError(Exception):
+class StreamError(media.MediaError):
     """Raised when the ffmpeg pipeline cannot be started - a missing binary, most often."""
 
 
 def ffmpeg_binary():
-    path = shutil.which("ffmpeg")
-    if path is None:
-        raise StreamError("ffmpeg is not on PATH - install it on the bot's host")
-    return path
+    return media.ffmpeg_binary(StreamError)
 
 
 def build_args(url, headers, *, width, height, fps, audio_fd=None):
@@ -64,33 +62,6 @@ def has_audio(item):
 def frame_byte_size(width, height):
     """I420: a full-resolution Y plane plus two quarter-resolution chroma planes."""
     return width * height + 2 * ((width + 1) // 2) * ((height + 1) // 2)
-
-
-def audio_chunk_samples():
-    return AUDIO_SAMPLE_RATE * AUDIO_CHUNK_MS // 1000
-
-
-def audio_chunk_bytes():
-    return audio_chunk_samples() * AUDIO_CHANNELS * 2
-
-
-def format_hms(total_seconds):
-    total_seconds = max(0, int(total_seconds))
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
-
-
-def parse_hms(text):
-    """Parses `h:mm:ss`, `mm:ss`, or a bare second count; raises ValueError on anything else."""
-    parts = text.strip().split(":")
-    if not 1 <= len(parts) <= 3 or not all(p.isdigit() for p in parts):
-        raise ValueError(f"not a valid time: {text!r}")
-    numbers = [int(p) for p in parts]
-    while len(numbers) < 3:
-        numbers.insert(0, 0)
-    hours, minutes, seconds = numbers
-    return hours * 3600 + minutes * 60 + seconds
 
 
 class WatchSession:
@@ -238,8 +209,8 @@ class WatchSession:
 
     async def _pump_audio(self, pipe):
         """Ends quietly when the audio pipe does: a title with no audio stream plays on in silence."""
-        chunk_bytes = audio_chunk_bytes()
-        chunk_samples = audio_chunk_samples()
+        chunk_bytes = media.pcm_chunk_bytes()
+        chunk_samples = media.pcm_chunk_samples()
         rtc = self.voice_session.rtc
         start_line = self._start_line
         started = False
@@ -380,8 +351,8 @@ class WatchSession:
     async def _upcoming_episode(self):
         """The next episode for the person who started this, or None (a movie, a finale, a Jellyfin hiccup)."""
         with contextlib.suppress(Exception):
-            user_id = self.jellyfin_user_id or await asyncio.to_thread(playback_progress.resolve_user_id)
-            return await asyncio.to_thread(jellyfin_core.next_episode, self.item, user_id)
+            user_id = self.jellyfin_user_id or await playback_progress.resolve_user_id()
+            return await jellyfin_core.next_episode(self.item, user_id)
         return None
 
     async def _hold_for_next(self, upcoming):
@@ -426,9 +397,7 @@ class WatchSession:
         """Best-effort: a Jellyfin hiccup must never interrupt playback."""
         self._last_reported_at = time.monotonic()
         with contextlib.suppress(Exception):
-            await asyncio.to_thread(
-                playback_progress.report_position, self.item_id, seconds, finished=finished, user_id=self.jellyfin_user_id,
-            )
+            await playback_progress.report_position(self.item_id, seconds, finished=finished, user_id=self.jellyfin_user_id)
 
     async def stop(self, *, reason="stopped", announce=True):
         final_position = self.position_seconds
@@ -450,19 +419,14 @@ class WatchSession:
         await dock_state.sync(self.bot)
 
     async def _monitor_loop(self):
-        while True:
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(self._wake_monitor.wait(), timeout=ROSTER_POLL_SECONDS)
-            self._wake_monitor.clear()
-            if self.finished:
-                return
+        async def report_if_due():
             if self.waiting_next is None and playback_progress.report_due(self._last_reported_at):
                 await self._report_progress(self.position_seconds)
-            roster = await self.bot.client.voice_roster(self.voice_channel_id)
-            others = [p for p in roster.get("participants", []) if p.get("user_id") != self.bot.me_id]
-            if not others:
-                await self.stop(reason="the call is empty")
-                return
+
+        await watch_empty(
+            self.bot, self.voice_channel_id, self._wake_monitor, lambda: self.stop(reason="the call is empty"),
+            is_done=lambda: self.finished, on_tick=report_if_due,
+        )
 
     def now_playing_embed(self):
         embed = Embed(title=self.title)

@@ -11,12 +11,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jellyfin_core  # noqa: E402
 import session_registry  # noqa: E402
 import stream_session  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch  # noqa: E402
+from test_bot import asynced, jellyfin, message, movie_for_watch  # noqa: E402
 from test_resume import Patched, voice_client  # noqa: E402
 
 FOUND = (
-    (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-    (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: movie_for_watch()),
+    (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+    (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
 )
 
 

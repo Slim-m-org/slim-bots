@@ -9,12 +9,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import accounts  # noqa: E402
+import httpx  # noqa: E402
 import jellyfin_core  # noqa: E402
 import playback_progress  # noqa: E402
 import session_registry  # noqa: E402
 import stream_session  # noqa: E402
 from slimbots.testing import FakeVoiceSession  # noqa: E402
-from test_bot import jellyfin, message, movie_for_watch, process, setup  # noqa: E402
+from test_bot import asynced, jellyfin, message, movie_for_watch, process, setup  # noqa: E402
 from test_panel import client_in_call, episode_for_watch  # noqa: E402
 from test_resume import Patched, run_watch_pressing, voice_client, with_position  # noqa: E402
 
@@ -36,7 +37,7 @@ def test_account_reports_the_link_privately():
     process(client, message("!jellyfin account"))
     assert "not linked" in client.ephemerals[-1]["content"]
     asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice", True))
-    with Patched((jellyfin_core, "jf_get", lambda path, params=None: {"Id": "jf-a", "Name": "Alice"})):
+    with Patched((jellyfin_core, "jf_get", asynced(lambda path, params=None: {"Id": "jf-a", "Name": "Alice"}))):
         process(client, message("!jellyfin account"))
     assert 'linked to the jellyfin user "Alice"' in client.ephemerals[-1]["content"]
 
@@ -64,12 +65,12 @@ def test_watch_reads_the_resume_position_of_the_linked_user():
     asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice"))
     fetched = []
 
-    def fetch(item_id, user_id=None):
+    async def fetch(item_id, user_id=None):
         fetched.append(user_id)
         return with_position(movie_for_watch(), 600)
 
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         started = run_watch_pressing("!watch inception", "jfp:resume")
@@ -81,7 +82,7 @@ def test_watch_without_a_title_continues_the_linked_users_last_item():
     asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice"))
     asked = []
 
-    def last(user_id=None):
+    async def last(user_id=None):
         asked.append(user_id)
         return None
 
@@ -94,12 +95,12 @@ def test_a_member_without_a_link_still_uses_the_shared_account():
     voice_client()
     fetched = []
 
-    def fetch(item_id, user_id=None):
+    async def fetch(item_id, user_id=None):
         fetched.append(user_id)
         return movie_for_watch()
 
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         run_watch_pressing("!watch inception")
@@ -115,10 +116,10 @@ def test_progress_goes_to_the_account_of_whoever_started_the_stream():
         return None
 
     with Patched(
-        (jellyfin_core, "watch_search", lambda query, limit: [movie_for_watch()]),
-        (jellyfin_core, "fetch_item_for_playback", lambda item_id, user_id=None: movie_for_watch()),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
         (stream_session.WatchSession, "start", fake_start),
-        (playback_progress, "jf_post_json", lambda path, params, body: posted.append((path, params))),
+        (jellyfin_core, "TRANSPORT", httpx.MockTransport(lambda request: posted.append((request.url.path, dict(request.url.params))) or httpx.Response(204))),
     ):
         process(jellyfin.bot.client, message("!watch inception"))
         session = session_registry.session_for_channel("v1")
@@ -134,7 +135,7 @@ def test_the_next_episode_lookup_uses_the_starters_account():
     seen = []
     session = stream_session.WatchSession(jellyfin.bot, "c1", "v1", episode_for_watch(), "u1", FakeVoiceSession("v1"))
     session.jellyfin_user_id = "jf-a"
-    with Patched((jellyfin_core, "next_episode", lambda item, user_id=None: seen.append(user_id))):
+    with Patched((jellyfin_core, "next_episode", asynced(lambda item, user_id=None: seen.append(user_id)))):
         asyncio.run(session._upcoming_episode())
     assert seen == ["jf-a"] and client
 

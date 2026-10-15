@@ -16,12 +16,19 @@ import playback_progress  # noqa: E402
 import stream_session  # noqa: E402
 import session_registry  # noqa: E402
 import watch_cog  # noqa: E402
-from slimbots import ApiError, Permissions, Store  # noqa: E402
+from slimbots import ApiError, Permissions, Store, media  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
 from slimbots.models import Channel  # noqa: E402
 from slimbots.space import Space  # noqa: E402
 from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVideoSource, FakeVoice, FakeVoiceSession  # noqa: E402
 from slimbots.voice import VoiceError  # noqa: E402
+
+def asynced(fn):
+    """Wraps a sync fake as the coroutine function the real call became."""
+    async def call(*args, **kwargs):
+        return fn(*args, **kwargs)
+    return call
+
 
 MEMBERS = [{"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}]
 
@@ -87,9 +94,9 @@ def test_a_cold_start_marks_the_newest_instant_posted_and_watches_from_there():
     core.init_db(conn)
     newest = {**movie("m9", "Newest"), "DateCreated": "2024-06-01T00:00:00.0000000Z"}
     saved = core.newest_item, core.items_since
-    core.newest_item, core.items_since = lambda: newest, lambda cursor: [newest]
+    core.newest_item, core.items_since = asynced(lambda: newest), asynced(lambda cursor: [newest])
     try:
-        plan = core.bootstrap_plan()
+        plan = asyncio.run(core.bootstrap_plan())
     finally:
         core.newest_item, core.items_since = saved
     core.apply_bootstrap(conn, plan)
@@ -155,7 +162,7 @@ def process(client, *messages):
 
 def _patch_search_items(items):
     original = jellyfin.jellyfin_core.search_items
-    jellyfin.jellyfin_core.search_items = lambda query, limit: items
+    jellyfin.jellyfin_core.search_items = asynced(lambda query, limit: items)
     return original
 
 
@@ -189,7 +196,7 @@ def test_search_is_cooldown_limited():
 def test_recent_reports_a_summary():
     client = setup()
     original = jellyfin.jellyfin_core.items_since
-    jellyfin.jellyfin_core.items_since = lambda cutoff: [movie("m1", "A"), movie("m2", "B")]
+    jellyfin.jellyfin_core.items_since = asynced(lambda cutoff: [movie("m1", "A"), movie("m2", "B")])
     try:
         process(client, message("!jellyfin recent 3"))
     finally:
@@ -241,7 +248,7 @@ def test_on_connect_registers_poll_loop_as_a_supervised_background_task():
     setup()
     jellyfin._background_started = False
     original = jellyfin.jellyfin_core.bootstrap_plan
-    jellyfin.jellyfin_core.bootstrap_plan = lambda: None
+    jellyfin.jellyfin_core.bootstrap_plan = asynced(lambda: None)
 
     async def run():
         await jellyfin.on_connect()
@@ -262,7 +269,7 @@ def test_on_connect_registers_poll_loop_as_a_supervised_background_task():
 def test_upload_poster_returns_the_uploaded_attachments_id():
     client = setup()
     original = jellyfin.jellyfin_core.jf_get_bytes
-    jellyfin.jellyfin_core.jf_get_bytes = lambda path: b"\x89PNGdata"
+    jellyfin.jellyfin_core.jf_get_bytes = asynced(lambda path: b"\x89PNGdata")
     client.respond("POST", "/attachments?filename=poster.jpg", {"id": "att-1", "content_type": "image/png"})
     try:
         attachment_id = asyncio.run(jellyfin.upload_poster("item-1"))
@@ -274,7 +281,7 @@ def test_upload_poster_returns_the_uploaded_attachments_id():
 def sent_post(image_bytes):
     client = setup()
     original = jellyfin.jellyfin_core.jf_get_bytes
-    jellyfin.jellyfin_core.jf_get_bytes = lambda path: image_bytes
+    jellyfin.jellyfin_core.jf_get_bytes = asynced(lambda path: image_bytes)
     client.respond("POST", "/attachments?filename=poster.jpg", {"id": "att-1", "content_type": "image/png"})
     entry = jellyfin.jellyfin_core.render_episode_post(
         {"Id": "e1", "SeasonName": "Season 1", "IndexNumber": 2, "Name": "Pilot", "DateCreated": "2026-01-01", "SeriesId": "s1"}, "Show"
@@ -303,7 +310,7 @@ def test_a_post_without_a_poster_is_plain_text_only():
 def test_upload_poster_returns_none_when_jellyfin_has_no_image():
     client = setup()
     original = jellyfin.jellyfin_core.jf_get_bytes
-    jellyfin.jellyfin_core.jf_get_bytes = lambda path: None
+    jellyfin.jellyfin_core.jf_get_bytes = asynced(lambda path: None)
     try:
         attachment_id = asyncio.run(jellyfin.upload_poster("item-1"))
     finally:
@@ -320,7 +327,7 @@ def setup_with_voice(*, can_publish=True, member_channels=None, voice_channels=N
     for channel in voice_channels or []:
         jellyfin.bot.space.channels[channel.id] = channel
     session_registry.clear()
-    picker._picks.clear()
+    picker.CHOOSER._picks.clear()
     return client
 
 
@@ -377,16 +384,16 @@ def test_start_publishes_the_configured_bitrate_and_framerate_ceilings():
 
 
 def test_parse_hms_and_format_hms_round_trip():
-    assert stream_session.parse_hms("1:02:03") == 3723
-    assert stream_session.parse_hms("2:03") == 123
-    assert stream_session.parse_hms("45") == 45
-    assert stream_session.format_hms(3723) == "1:02:03"
-    assert stream_session.format_hms(123) == "2:03"
+    assert media.parse_hms("1:02:03") == 3723
+    assert media.parse_hms("2:03") == 123
+    assert media.parse_hms("45") == 45
+    assert media.format_hms(3723) == "1:02:03"
+    assert media.format_hms(123) == "2:03"
 
 
 def test_parse_hms_rejects_garbage():
     try:
-        stream_session.parse_hms("not-a-time")
+        media.parse_hms("not-a-time")
         raised = False
     except ValueError:
         raised = True
@@ -441,7 +448,7 @@ def test_watch_passes_a_multi_word_title_whole_to_the_search():
     )
     queries = []
     original_search = jellyfin.jellyfin_core.watch_search
-    jellyfin.jellyfin_core.watch_search = lambda query, limit: queries.append(query) or []
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: queries.append(query) or [])
     try:
         process(client, message("!watch two words"))
     finally:
@@ -456,8 +463,8 @@ def test_watch_streams_into_the_invokers_own_voice_channel_not_the_text_channel(
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = lambda query, limit: [movie_for_watch()]
-    jellyfin.jellyfin_core.fetch_item_for_playback = lambda item_id, user_id=None: movie_for_watch()
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     original_start = stream_session.WatchSession.start
     stream_session.WatchSession.start = _fake_start
     try:
@@ -482,8 +489,8 @@ def test_watch_refuses_when_the_bot_lacks_speak_in_the_invokers_channel():
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = lambda query, limit: [movie_for_watch()]
-    jellyfin.jellyfin_core.fetch_item_for_playback = lambda item_id, user_id=None: movie_for_watch()
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     try:
         process(client, message("!watch inception"))
     finally:
@@ -501,8 +508,8 @@ def test_watch_names_the_missing_permission_when_the_bot_cannot_connect():
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = lambda query, limit: [movie_for_watch()]
-    jellyfin.jellyfin_core.fetch_item_for_playback = lambda item_id, user_id=None: movie_for_watch()
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     try:
         process(client, message("!watch inception"))
     finally:

@@ -1,6 +1,5 @@
 """bot-jellyfin's `!jellyfin search|recent|help` command; an extension, see docs/framework.md."""
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 from slimbots.limits import ValidationError, require_int, require_len
@@ -20,7 +19,7 @@ async def run_search(ctx, query):
         await ctx.reply(str(err))
         return
     try:
-        items = await asyncio.to_thread(jellyfin_core.search_items, query, jellyfin_core.MAX_SEARCH_RESULTS)
+        items = await jellyfin_core.search_items(query, jellyfin_core.MAX_SEARCH_RESULTS)
     except jellyfin_core.JellyfinAuthError:
         await ctx.reply("jellyfin search is unavailable right now.")
         return
@@ -49,7 +48,7 @@ async def run_recent(ctx, days_text):
         return
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
     try:
-        items = await asyncio.to_thread(jellyfin_core.items_since, cutoff)
+        items = await jellyfin_core.items_since(cutoff)
     except jellyfin_core.JellyfinAuthError:
         await ctx.reply("jellyfin is unavailable right now.")
         return

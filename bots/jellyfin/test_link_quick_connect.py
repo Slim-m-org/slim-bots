@@ -6,7 +6,6 @@ import asyncio
 import os
 import sqlite3
 import sys
-import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -14,7 +13,8 @@ import accounts  # noqa: E402
 import jellyfin_core  # noqa: E402
 import quick_connect  # noqa: E402
 from slimbots import ApiError  # noqa: E402
-from test_bot import jellyfin, message, setup  # noqa: E402
+from slimbots.web import ServiceHTTPError, ServiceUnreachable  # noqa: E402
+from test_bot import asynced, jellyfin, message, setup  # noqa: E402
 from test_resume import Patched  # noqa: E402
 
 
@@ -26,19 +26,19 @@ class FakeJellyfin:
         self.initiate_error, self.poll_error, self.redeem_error = initiate_error, poll_error, redeem_error
         self.initiated, self.polls, self.redeemed = [], 0, 0
 
-    def initiate(self, member_name):
+    async def initiate(self, member_name):
         if self.initiate_error:
             raise self.initiate_error
         self.initiated.append(member_name)
         return quick_connect.Pending(code="482913", secret="s3cret", device_id="dev-1", device_name=quick_connect.device_name(member_name))
 
-    def is_approved(self, pending):
+    async def is_approved(self, pending):
         self.polls += 1
         if self.poll_error:
             raise self.poll_error
         return self.approve_after is not None and self.polls >= self.approve_after
 
-    def redeem(self, pending):
+    async def redeem(self, pending):
         self.redeemed += 1
         if self.redeem_error:
             raise self.redeem_error
@@ -130,7 +130,7 @@ def test_an_unapproved_code_expires_and_a_new_one_can_be_asked_for():
 
 def test_jellyfin_forgetting_the_code_ends_the_wait_as_expired():
     client = fresh()
-    jf = FakeJellyfin(poll_error=urllib.error.HTTPError("u", 404, "gone", {}, None))
+    jf = FakeJellyfin(poll_error=ServiceHTTPError("gone", 404))
     with jf.patched(lifetime=5.0):
         say("!jellyfin link")
     assert jf.polls == 1 and "expired" in private(client)[-1]
@@ -201,7 +201,7 @@ def test_quick_connect_turned_off_says_so_and_issues_no_code():
 
 def test_jellyfin_down_when_starting_says_so():
     client = fresh()
-    with FakeJellyfin(initiate_error=urllib.error.URLError("refused")).patched():
+    with FakeJellyfin(initiate_error=ServiceUnreachable("refused")).patched():
         say("!jellyfin link")
     assert [m["content"] for m in client.sent] == ["jellyfin is unavailable right now."]
 
@@ -234,7 +234,7 @@ def test_a_name_only_link_is_not_verified_and_account_says_how_to_confirm_it():
 def test_account_refreshes_a_renamed_jellyfin_user():
     client = fresh()
     asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice", True))
-    with Patched((jellyfin_core, "jf_get", lambda path, params=None: {"Id": "jf-a", "Name": "Alicia"})):
+    with Patched((jellyfin_core, "jf_get", asynced(lambda path, params=None: {"Id": "jf-a", "Name": "Alicia"}))):
         say("!jellyfin account")
     assert private(client)[-1] == 'you are linked to the jellyfin user "Alicia".' and link_of("u1") == ("jf-a", "Alicia")
 
@@ -243,8 +243,8 @@ def test_account_unlinks_a_jellyfin_user_that_was_deleted():
     client = fresh()
     asyncio.run(jellyfin.bot.store.run(accounts.set_link, "u1", "jf-a", "Alice", True))
 
-    def gone(path, params=None):
-        raise urllib.error.HTTPError(path, 404, "not found", {}, None)
+    async def gone(path, params=None):
+        raise ServiceHTTPError("not found", 404)
 
     with Patched((jellyfin_core, "jf_get", gone)):
         say("!jellyfin account")

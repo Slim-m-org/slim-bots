@@ -4,13 +4,12 @@ With no link a member uses the shared account (`JELLYFIN_USER_ID`, else the firs
 from __future__ import annotations
 
 import asyncio
-import http.client
 import sys
 import time
-import urllib.error
 from dataclasses import dataclass
 
 from slimbots import ApiError
+from slimbots.web import ServiceError, ServiceHTTPError
 
 import jellyfin_core
 import playback_progress
@@ -19,7 +18,7 @@ import quick_connect
 POLL_SECONDS = 5.0
 CODE_LIFETIME_SECONDS = 300.0
 CONFIRM_SECONDS = 600.0
-JELLYFIN_DOWN = (OSError, http.client.HTTPException)
+JELLYFIN_DOWN = (ServiceError,)
 
 
 @dataclass
@@ -88,7 +87,7 @@ async def user_for(bot, slimm_user_id):
     link = await bot.store.run(get_link, slimm_user_id) if slimm_user_id else None
     if link is not None:
         return link[0]
-    return await asyncio.to_thread(playback_progress.resolve_user_id)
+    return await playback_progress.resolve_user_id()
 
 
 async def _tell(ctx, text, fallback):
@@ -122,7 +121,7 @@ async def run_start(ctx):
         await ctx.reply(wait_message)
         return
     try:
-        pending = await asyncio.to_thread(quick_connect.initiate, ctx.author.display_name)
+        pending = await quick_connect.initiate(ctx.author.display_name)
     except quick_connect.QuickConnectDisabled:
         await ctx.reply("linking needs Quick Connect, which is turned off on this jellyfin server. A jellyfin admin can turn it on in the dashboard.")
         return
@@ -172,13 +171,11 @@ async def _poll(pending):
     while time.monotonic() < deadline:
         await asyncio.sleep(POLL_SECONDS)
         try:
-            if await asyncio.to_thread(quick_connect.is_approved, pending):
-                return await asyncio.to_thread(quick_connect.redeem, pending)
-        except urllib.error.HTTPError as err:
-            if err.code in (400, 401, 404):
+            if await quick_connect.is_approved(pending):
+                return await quick_connect.redeem(pending)
+        except ServiceError as err:
+            if err.status in (400, 401, 404):
                 return None
-        except JELLYFIN_DOWN:
-            continue
     return None
 
 
@@ -215,9 +212,9 @@ async def run_unlink(ctx):
 async def _current_name(jellyfin_user_id):
     """The jellyfin user's name now, or None once that user is gone; a stored name can go stale."""
     try:
-        user = await asyncio.to_thread(jellyfin_core.jf_get, f"/Users/{jellyfin_user_id}")
-    except urllib.error.HTTPError as err:
-        if err.code in (400, 404):
+        user = await jellyfin_core.jf_get(f"/Users/{jellyfin_user_id}")
+    except ServiceHTTPError as err:
+        if err.status in (400, 404):
             return None
         raise
     return user.get("Name")
