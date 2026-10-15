@@ -1,10 +1,8 @@
 """bot-seerr's `!request` and `!requests` commands; an extension, see docs/framework.md."""
 
-import asyncio
-
-from arrkit.chooser import Chooser, Pick
 from arrkit.guard import UNREACHABLE, Guard
 from slimbots import ApiError
+from slimbots.chooser import Chooser, Pick
 from slimbots.limits import ValidationError, require_len
 
 import approvals
@@ -67,7 +65,7 @@ def _skipped_note(count):
 async def _file_request(bot, slimm_user_id, item):
     user_id = await seerr_user_for(bot, slimm_user_id)
     try:
-        await asyncio.to_thread(core.create_request, item, user_id)
+        await core.create_request(item, user_id)
     except core.AuthError:
         return "seerr rejected the bot's api key - an admin needs to fix it."
     except UNREACHABLE:
@@ -78,7 +76,7 @@ async def _file_request(bot, slimm_user_id, item):
 async def _details_or_placeholder(media_type, tmdb_id):
     """A title lookup that never fails the listing: a dropped or unauthorised seerr leaves the `tmdb <id>` stand-in."""
     try:
-        return await asyncio.to_thread(core.media_details, media_type, tmdb_id)
+        return await core.media_details(media_type, tmdb_id)
     except (*UNREACHABLE, core.AuthError):
         return core.placeholder_details(tmdb_id)
 

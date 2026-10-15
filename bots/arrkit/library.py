@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from slimbots.chooser import Chooser, Pick
 from slimbots.limits import ValidationError, require_int, require_len
 
-from .chooser import Chooser, Pick
 from .guard import UNREACHABLE, Guard
 from .service import AuthError
 
@@ -98,7 +97,7 @@ class Library:
 
     async def _add_chosen(self, item):
         try:
-            await asyncio.to_thread(self.core.add, item)
+            await self.core.add(item)
         except AuthError:
             return f"{self.core.SERVICE.name} rejected the bot's api key - an admin needs to fix it."
         except (*UNREACHABLE, RuntimeError) as err:

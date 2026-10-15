@@ -24,16 +24,16 @@ def configure(bot):
     ROOT_FOLDER = bot.setting("RADARR_ROOT_FOLDER", "") or ""
 
 
-def api(method, path, params=None, body=None):
-    return SERVICE.call(method, path, params, body)
+async def api(method, path, params=None, body=None):
+    return await SERVICE.call(method, path, params, body)
 
 
-def fetch_history_since(cursor):
-    return history.fetch_since(api, cursor, HISTORY_INCLUDE)
+async def fetch_history_since(cursor):
+    return await history.fetch_since(api, cursor, HISTORY_INCLUDE)
 
 
-def bootstrap_cursor(conn):
-    history.bootstrap(conn, api)
+async def bootstrap_cursor(db):
+    await history.bootstrap(db, api)
 
 
 def _ident(record):
@@ -87,17 +87,17 @@ def build_posts(events):
     return sorted(posts, key=lambda p: p["max_id"])
 
 
-def lookup(term):
-    return api("GET", "/movie/lookup", {"term": term}) or []
+async def lookup(term):
+    return await api("GET", "/movie/lookup", {"term": term}) or []
 
 
-def add(lookup_result):
+async def add(lookup_result):
     """Adds a `lookup` result monitored, searching for it right away."""
-    profile_id, folder = arr.resolve_defaults(api, "radarr", QUALITY_PROFILE, ROOT_FOLDER)
+    profile_id, folder = await arr.resolve_defaults(api, "radarr", QUALITY_PROFILE, ROOT_FOLDER)
     body = {
         "title": lookup_result["title"], "tmdbId": lookup_result["tmdbId"], "year": lookup_result.get("year"),
         "titleSlug": lookup_result.get("titleSlug"), "images": lookup_result.get("images") or [],
         "qualityProfileId": profile_id, "rootFolderPath": folder, "monitored": True,
         "minimumAvailability": "released", "addOptions": {"searchForMovie": True},
     }
-    return api("POST", "/movie", body=body)
+    return await api("POST", "/movie", body=body)
