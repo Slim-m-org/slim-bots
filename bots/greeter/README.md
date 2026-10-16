@@ -30,8 +30,8 @@ First match wins:
    choice is stored in the bot's sqlite file (`SLIMM_DB_PATH`, default
    `greeter.db`), so it survives a restart. `!welcome` alone says where
    welcomes currently go.
-3. `GREETER_CHANNEL` (default `general/chat`): a `category/channel` path, or
-   a bare channel name, matched case-insensitively.
+3. `GREETER_CHANNEL` (no default): a `category/channel` path, or a bare
+   channel name, matched case-insensitively.
 
 If none of those resolves, a join posts nothing and logs why, rather than
 guessing a channel.
@@ -42,7 +42,7 @@ guessing a channel.
   the message text. `{member}` becomes an `@mention` of whoever joined; any
   other `{...}` is left alone and would raise on a genuine typo, logged by
   the framework's own `guard_dispatch` rather than crashing the bot.
-- `GREETER_CHANNEL` (default `general/chat`) - see above.
+- `GREETER_CHANNEL` (no default) - see above.
 
 ## Why there is no embed
 
