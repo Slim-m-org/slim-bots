@@ -222,3 +222,13 @@ if __name__ == "__main__":
         test()
         print(f"PASS: {test.__name__}")
     print(f"all {len(tests)} tests passed")
+
+
+def test_startup_refuses_without_a_repo_to_watch(monkeypatch):
+    monkeypatch.setattr(releases.config, "repo", None)
+    try:
+        releases.main()
+    except SystemExit as stop:
+        assert "GH_REPO" in str(stop)
+    else:
+        raise AssertionError("main() ran with no GH_REPO")
