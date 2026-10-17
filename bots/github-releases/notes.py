@@ -6,19 +6,27 @@ MAX_BULLETS = 8
 MAX_MESSAGE = 1499
 MAX_LINE = 200
 
-_TRAILING_LINK = re.compile(r"\s*\(\[[^\]]*\]\([^)]*\)\)\s*$")
-_BARE_PR = re.compile(r"\s*\(#\d+\)\s*$")
-_CLOSES = re.compile(r",?\s*closes(\s+\[#\d+\]\([^)]*\))+\s*$", re.IGNORECASE)
+_TRAILING_LINK = re.compile(r"\(\[[^\]]*\]\([^)]*\)\)$")
+_BARE_PR = re.compile(r"\(#\d+\)$")
+_CLOSES = re.compile(r"\bcloses(?: \[#\d+\]\([^)]*\))+$", re.IGNORECASE)
 _SCOPE = re.compile(r"^\*\*[^*]+:\*\*\s*")
 _INLINE_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
-def _clean(line):
-    text = line[2:].strip()
+def _drop_suffixes(text):
+    """Peels trailing PR links, bare PR numbers and closes lists until none is left."""
     previous = None
     while previous != text:
         previous = text
-        text = _BARE_PR.sub("", _TRAILING_LINK.sub("", _CLOSES.sub("", text)))
+        if _CLOSES.search(text):
+            text = _CLOSES.sub("", text).rstrip(" ,")
+        text = _BARE_PR.sub("", _TRAILING_LINK.sub("", text).rstrip()).rstrip()
+    return text
+
+
+def _clean(line):
+    # Whitespace collapsed first, so the suffix patterns never meet a long run of spaces to retry over.
+    text = _drop_suffixes(" ".join(line[2:].split()))
     text = _INLINE_LINK.sub(r"\1", _SCOPE.sub("", text)).replace("**", "")
     text = " ".join(text.split())
     return text if len(text) <= MAX_LINE else text[: MAX_LINE - 3].rstrip() + "..."
