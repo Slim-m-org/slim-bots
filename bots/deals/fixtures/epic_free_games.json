@@ -1,0 +1,830 @@
+{
+ "data": {
+  "Catalog": {
+   "searchStore": {
+    "elements": [
+     {
+      "title": "Them's Fightin' Herds",
+      "id": "1f723b00df58467998c4984ca39915ad",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": "thems-fightin-herds/home",
+      "urlSlug": "thems-fightin-herds",
+      "offerMappings": [
+       {
+        "pageSlug": "thems-fightin-herds",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "thems-fightin-herds",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 1999,
+        "originalPrice": 1999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$19.99",
+         "discountPrice": "$19.99",
+         "intermediatePrice": "$19.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": null
+     },
+     {
+      "title": "Model Builder: Complete Edition",
+      "id": "d3e5b556640144bfa5de2d5d3b283d68",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "3f18c54a6e00424ba6e8f4422167cac7",
+      "offerMappings": [
+       {
+        "pageSlug": "model-builder-complete-edition-f9b456",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "model-builder-complete-edition-f9b456",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 1999,
+        "originalPrice": 1999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$19.99",
+         "discountPrice": "$19.99",
+         "intermediatePrice": "$19.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": null
+     },
+     {
+      "title": "Eternal Threads",
+      "id": "921e40c4c69f4d728914ca2a4f0aa407",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "a9152a8924cc4e438f0e61106ec02f7d",
+      "offerMappings": [
+       {
+        "pageSlug": "eternal-threads-197169",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "eternal-threads-197169",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 1999,
+        "originalPrice": 1999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$19.99",
+         "discountPrice": "$19.99",
+         "intermediatePrice": "$19.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-19T15:00:00.000Z",
+           "endDate": "2026-11-02T16:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 20
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Ghostrunner 2",
+      "id": "be5600439b434624802764f704755cde",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": "ghostrunner-2",
+      "urlSlug": "ghostrunner-2",
+      "offerMappings": [
+       {
+        "pageSlug": "ghostrunner-2",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "ghostrunner-2",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 3999,
+        "originalPrice": 3999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$39.99",
+         "discountPrice": "$39.99",
+         "intermediatePrice": "$39.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-12-10T17:00:00.000Z",
+           "endDate": "2027-01-07T23:59:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 20
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Lost Castle: The Old Ones Awaken",
+      "id": "4a88d0dc64114b20b67339c74543f859",
+      "status": "ACTIVE",
+      "offerType": "ADD_ON",
+      "productSlug": null,
+      "urlSlug": "lost-castle-the-old-ones-awaken",
+      "offerMappings": [
+       {
+        "pageSlug": "lost-castle-lost-castle-the-old-ones-awaken-db1545",
+        "pageType": "offer"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "lost-castle-abb2e2",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 399,
+        "originalPrice": 399,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$3.99",
+         "discountPrice": "$3.99",
+         "intermediatePrice": "$3.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": null
+     },
+     {
+      "title": "LISA: The Definitive Edition",
+      "id": "944b5b5d646d46bc92bc33edfe983d26",
+      "status": "ACTIVE",
+      "offerType": "BUNDLE",
+      "productSlug": "lisa-the-definitive-edition",
+      "urlSlug": "lisa-the-definitive-edition",
+      "offerMappings": [
+       {
+        "pageSlug": "lisa-the-definitive-edition",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "lisa-the-definitive-edition",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 2499,
+        "originalPrice": 2499,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$24.99",
+         "discountPrice": "$24.99",
+         "intermediatePrice": "$24.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-11-01T06:00:00.000Z",
+           "endDate": "2026-11-10T06:59:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 60
+           }
+          },
+          {
+           "startDate": "2026-12-10T16:00:00.000Z",
+           "endDate": "2027-01-07T16:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 55
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Sker Ritual",
+      "id": "6aab3ddef4f84fbc9dd81c60f9d8549c",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "8dbc8d70481d4c0b8412d3aec76a35a1",
+      "offerMappings": [
+       {
+        "pageSlug": "sker-ritual-aac702",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "sker-ritual-aac702",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 2499,
+        "originalPrice": 2499,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$24.99",
+         "discountPrice": "$24.99",
+         "intermediatePrice": "$24.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-22T15:00:00.000Z",
+           "endDate": "2026-10-29T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 0
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Castlevania Anniversary Collection",
+      "id": "8f80897c0b6e4e678fed08da169d44be",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "32b3e0adbe0c4399be1874958194f97f",
+      "offerMappings": [
+       {
+        "pageSlug": "castlevania-anniversary-collection-a61f94",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "castlevania-anniversary-collection-a61f94",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 1999,
+        "originalPrice": 1999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$19.99",
+         "discountPrice": "$19.99",
+         "intermediatePrice": "$19.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-19T15:00:00.000Z",
+           "endDate": "2026-11-02T16:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 40
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Monument Valley",
+      "id": "f967cff9761c4198b4e972cfd71e40d7",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "monument-valley-02",
+      "offerMappings": [
+       {
+        "pageSlug": "monument-valley-1d99d3",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "monument-valley-1d99d3",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 799,
+        "originalPrice": 799,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$7.99",
+         "discountPrice": "$7.99",
+         "intermediatePrice": "$7.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-12-10T16:00:00.000Z",
+           "endDate": "2027-01-07T16:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 35
+           }
+          },
+          {
+           "startDate": "2026-10-19T15:00:00.000Z",
+           "endDate": "2026-11-02T16:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 35
+           }
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "title": "Bad Cheese",
+      "id": "6a846880836044a2adad614ac771f487",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "ae5d8fc5541f42eea105f64121dba382",
+      "offerMappings": [
+       {
+        "pageSlug": "bad-cheese-4256d9",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "bad-cheese-4256d9",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 0,
+        "originalPrice": 1299,
+        "voucherDiscount": 0,
+        "discount": 1299,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$12.99",
+         "discountPrice": "0",
+         "intermediatePrice": "0"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": [
+          {
+           "id": "041a72f3ffdd4b7383e797c5a876eace",
+           "endDate": "2026-10-22T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-15T15:00:00.000Z",
+           "endDate": "2026-10-22T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 0
+           }
+          }
+         ]
+        }
+       ],
+       "upcomingPromotionalOffers": []
+      }
+     },
+     {
+      "title": "Agent A: A puzzle in disguise",
+      "id": "db1202a30c5541dd99cdf54c918a9348",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "agent-a-a-puzzle-in-disguise",
+      "offerMappings": [
+       {
+        "pageSlug": "agent-a-a-puzzle-in-disguise-42fe5f",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "agent-a-a-puzzle-in-disguise-42fe5f",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 0,
+        "originalPrice": 1999,
+        "voucherDiscount": 0,
+        "discount": 1999,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$19.99",
+         "discountPrice": "0",
+         "intermediatePrice": "0"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": [
+          {
+           "id": "28cd2d9591744f10a9cbf75ce638a255",
+           "endDate": "2026-10-22T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE"
+           }
+          }
+         ]
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-15T15:00:00.000Z",
+           "endDate": "2026-10-22T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 0
+           }
+          }
+         ]
+        }
+       ],
+       "upcomingPromotionalOffers": []
+      }
+     },
+     {
+      "title": "Luftrausers",
+      "id": "c76046dddcdb43619c33ce0395941033",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "luftrausers",
+      "offerMappings": [
+       {
+        "pageSlug": "luftrausers-51e5e9",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "luftrausers-51e5e9",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 999,
+        "originalPrice": 999,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$9.99",
+         "discountPrice": "$9.99",
+         "intermediatePrice": "$9.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": null
+     },
+     {
+      "title": "TerraScape",
+      "id": "af6b823b8698465f9aedc3bddf2e8686",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "f229ed53ddba40788e0ab62978e9eaf9",
+      "offerMappings": [
+       {
+        "pageSlug": "terrascape-2b12b1",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "terrascape-2b12b1",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 1699,
+        "originalPrice": 1699,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$16.99",
+         "discountPrice": "$16.99",
+         "intermediatePrice": "$16.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": null
+     },
+     {
+      "title": "Home - A Unique Horror Adventure",
+      "id": "06190191cede42afb633fe89ef08c27e",
+      "status": "ACTIVE",
+      "offerType": "BASE_GAME",
+      "productSlug": null,
+      "urlSlug": "ff70f2b02fd842f8961f7729af25cda9",
+      "offerMappings": [
+       {
+        "pageSlug": "home-19212a",
+        "pageType": "productHome"
+       }
+      ],
+      "catalogNs": {
+       "mappings": [
+        {
+         "pageSlug": "home-19212a",
+         "pageType": "productHome"
+        }
+       ]
+      },
+      "price": {
+       "totalPrice": {
+        "discountPrice": 499,
+        "originalPrice": 499,
+        "voucherDiscount": 0,
+        "discount": 0,
+        "currencyCode": "USD",
+        "currencyInfo": {
+         "decimals": 2
+        },
+        "fmtPrice": {
+         "originalPrice": "$4.99",
+         "discountPrice": "$4.99",
+         "intermediatePrice": "$4.99"
+        },
+        "dualPrice": null
+       },
+       "lineOffers": [
+        {
+         "appliedRules": []
+        }
+       ]
+      },
+      "promotions": {
+       "promotionalOffers": [],
+       "upcomingPromotionalOffers": [
+        {
+         "promotionalOffers": [
+          {
+           "startDate": "2026-10-22T15:00:00.000Z",
+           "endDate": "2026-10-29T15:00:00.000Z",
+           "discountSetting": {
+            "discountType": "PERCENTAGE",
+            "discountPercentage": 0
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ }
+}

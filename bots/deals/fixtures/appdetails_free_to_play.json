@@ -1,0 +1,11 @@
+{
+ "730": {
+  "success": true,
+  "data": {
+   "type": "game",
+   "name": "Counter-Strike 2",
+   "steam_appid": 730,
+   "is_free": true
+  }
+ }
+}
