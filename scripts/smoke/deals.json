@@ -1,0 +1,11 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {"say": "!deals", "expect_contains": ["deals setup"], "timeout": 15},
+    {"say": "!deals sources origin", "expect_contains": ["pick from"], "timeout": 15},
+    {"say": "!watch", "expect_contains": ["usage"], "timeout": 15},
+    {"say": "!watch not-a-game 5", "expect_contains": ["Steam store link"], "timeout": 15},
+    {"say": "!watch list", "expect_contains": ["no watches yet"], "timeout": 15},
+    {"say": "!watch remove 999", "expect_contains": ["no watch"], "timeout": 15}
+  ]
+}

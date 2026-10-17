@@ -1,0 +1,19 @@
+{
+ "620": {
+  "success": true,
+  "data": {
+   "type": "game",
+   "name": "Portal 2",
+   "steam_appid": 620,
+   "is_free": false,
+   "price_overview": {
+    "currency": "JPY",
+    "initial": 140000,
+    "final": 140000,
+    "discount_percent": 0,
+    "initial_formatted": "",
+    "final_formatted": "\u00a5 1,400"
+   }
+  }
+ }
+}
