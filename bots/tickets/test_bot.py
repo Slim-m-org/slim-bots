@@ -104,7 +104,24 @@ def test_opening_makes_a_restricted_channel_only_the_opener_and_staff_can_see():
     assert all(g["allow"] & Permissions.VIEW_CHANNEL for g in grants)
     assert welcome["channel_id"] == "t-1"
     assert [b["custom_id"] for b in welcome["components"][0]["buttons"]] == ["ticket:claim", "ticket:close"]
-    assert "ticket-0001" in client.ephemerals[-1]["content"]
+    assert client.ephemerals[-1]["content"] == "Your ticket is open: <#t-1>"
+
+
+def test_the_opening_message_pings_the_opener_and_the_staff_role_by_name():
+    client = setup()
+    welcome = open_one(client)
+    assert welcome["content"].startswith("Ticket 0001 for @sam @[Support]. ")
+    assert "<@" not in welcome["content"]
+
+
+def test_a_staff_role_that_has_gone_still_opens_the_ticket_with_the_opener_pinged():
+    client = setup()
+    tickets.bot.space.roles.clear()
+    tickets.bot.space.get_role = lambda _id: None
+    tickets.STAFF_ROLE = "r-staff"
+    assert tickets.staff_role_id() is None
+    text = asyncio.run(tickets.opening_message(1, "u-1", "r-staff"))
+    assert text.startswith("Ticket 0001 for @sam. ")
 
 
 def test_a_second_press_by_the_same_member_points_at_the_existing_ticket():
@@ -114,7 +131,7 @@ def test_a_second_press_by_the_same_member_points_at_the_existing_ticket():
     press("ticket:open")
     creates = [c for c in client.calls if c[:2] == ("POST", "/channels")]
     assert len(creates) == 1
-    assert "already have an open ticket: #ticket-0001" in client.ephemerals[-1]["content"]
+    assert "already have an open ticket: <#t-1>" in client.ephemerals[-1]["content"]
 
 
 def test_another_member_gets_their_own_ticket():
