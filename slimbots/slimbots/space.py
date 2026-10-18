@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .http import ApiError
+from .http import ApiError, is_forbidden, is_not_found
 from .models import Channel, Member, Role
 
 if TYPE_CHECKING:
@@ -19,6 +19,7 @@ class Space:
         self.members: dict[str, Member] = {}
         self.channels: dict[str, Channel] = {}
         self.roles: dict[str, Role] = {}
+        self.roles_readable: bool | None = None
 
     def _base_permissions(self, role_ids: list[str]) -> int:
         bits = 0
@@ -31,10 +32,27 @@ class Space:
         return Member(data, base_permissions=self._base_permissions(data.get("role_ids") or []))
 
     async def refresh_roles(self) -> dict[str, Role]:
-        """Reloads every role; needs the bot's own token to hold MANAGE_ROLES."""
-        roles = await self._client.list_roles()
+        """Reloads every role; needs the bot's own token to hold MANAGE_ROLES, else `roles_readable` goes False and the 403 is raised."""
+        try:
+            roles = await self._client.list_roles()
+        except ApiError as err:
+            if is_forbidden(err):
+                self.roles_readable = False
+            raise
+        self.roles_readable = True
         self.roles = {r["id"]: Role(r) for r in roles}
         return self.roles
+
+    async def refresh_permissions(self, member: Member) -> bool:
+        """Reads `member`'s effective bits from the read-only route; False when the server has no such route."""
+        try:
+            data = await self._client.member_permissions(member.id)
+        except ApiError as err:
+            if is_not_found(err) and err.reason != "no such member":
+                return False
+            raise
+        member._apply_roles(member.role_ids, int(data["permissions"]))
+        return True
 
     async def refresh_channels(self) -> dict[str, Channel]:
         channels = await self._client.list_channels()

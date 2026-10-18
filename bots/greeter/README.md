@@ -1,5 +1,10 @@
 # greeter
 
+> Superseded: slim-m now has an optional welcome message in Space settings
+> (Invites, off by default, with a channel and a message template), so a
+> deployment no longer needs a bot for this. This template stays as the worked
+> example for `on_member_join`.
+
 A slim-m bot: posts a configurable welcome message when somebody joins the
 Space - the worked example for `on_member_join`.
 

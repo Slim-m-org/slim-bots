@@ -24,9 +24,9 @@ It does not use `SLIMM_CHANNELS`: it posts where `!deals setup` was run.
 | `!deals setup` | Manage Server | make this channel the deals channel; the first check runs within a minute |
 | `!deals sources <list>` | Manage Server | choose among `epic`, `steam`, `gog`, comma separated |
 | `!deals now` | Manage Server | check free games and watches right away (once a minute at most) |
-| `!watch <steam link or app id> <price>` | anyone | watch a game, for example `!watch store.steampowered.com/app/620/ 4.99` |
-| `!watch list` | anyone | your own watches with the last price seen |
-| `!watch remove <id>` | anyone | stop one of your watches |
+| `!pricewatch <steam link or app id> <price>` | anyone | watch a game, for example `!pricewatch store.steampowered.com/app/620/ 4.99` |
+| `!pricewatch list` | anyone | your own watches with the last price seen |
+| `!pricewatch remove <id>` | anyone | stop one of your watches |
 
 Replies to watch commands, refusals and `!deals now` are private ("only you can see this"); the free-game posts and price pings are public, in the deals channel.
 Watching the same game again updates the target and re-arms the ping.

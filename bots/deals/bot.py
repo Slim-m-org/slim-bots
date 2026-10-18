@@ -240,7 +240,7 @@ def quote_problem(quote, app_id):
     return None
 
 
-@bot.group(name="watch", help="`<steam link or app id> <target price>`, `list`, `remove <id>`", cooldown=3)
+@bot.group(name="pricewatch", help="`<steam link or app id> <target price>`, `list`, `remove <id>`", cooldown=3)
 async def watch_group(ctx, rest: str = ""):
     target, _, price = rest.strip().partition(" ")
     if not target or not price.strip():

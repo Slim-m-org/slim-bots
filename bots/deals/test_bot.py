@@ -175,7 +175,7 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
     rig.setup()
     rig.web[EPIC] = (500, b"")
     rig.price(620)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.say("!deals now")
     assert "posted 1 new" in rig.last_private() and "Epic Games Store failed: http 500" in rig.last_private()
     rig.say("!deals now", permissions=0)
@@ -187,36 +187,36 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
 def test_watch_add_by_link_and_by_id_then_list_and_remove_are_private_and_per_user():
     rig = Rig()
     rig.price(620)
-    rig.say("!watch https://store.steampowered.com/app/620/Portal_2/ $4.99", user="u-ann", permissions=0)
+    rig.say("!pricewatch https://store.steampowered.com/app/620/Portal_2/ $4.99", user="u-ann", permissions=0)
     assert "watching **Portal 2** as `1`" in rig.last_private() and "9.99 USD" in rig.last_private()
     assert rig.client.sent == [], "replies stay private"
-    rig.say("!watch 620 3", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 3", user="u-ann", permissions=0)
     assert "updated the watch" in rig.last_private() and len(rig.sql(db.list_watches)) == 1
-    rig.say("!watch list", user="u-ann", permissions=0)
+    rig.say("!pricewatch list", user="u-ann", permissions=0)
     assert "Portal 2" in rig.last_private() and "target 3.00 USD" in rig.last_private()
-    rig.say("!watch list", user="u-bob", permissions=0)
+    rig.say("!pricewatch list", user="u-bob", permissions=0)
     assert "no watches yet" in rig.last_private()
-    rig.say("!watch remove 1", user="u-bob", permissions=0)
+    rig.say("!pricewatch remove 1", user="u-bob", permissions=0)
     assert "no watch `1`" in rig.last_private() and len(rig.sql(db.list_watches)) == 1
-    rig.say("!watch remove 1", user="u-ann", permissions=0)
+    rig.say("!pricewatch remove 1", user="u-ann", permissions=0)
     assert rig.sql(db.list_watches) == []
 
 def test_watch_add_refuses_bad_input_unavailable_free_and_outages():
     rig = Rig()
-    rig.say("!watch")
+    rig.say("!pricewatch")
     assert "usage" in rig.last_private()
-    rig.say("!watch portal 5")
+    rig.say("!pricewatch portal 5")
     assert "Steam store link" in rig.last_private()
-    rig.say("!watch 620 cheap")
+    rig.say("!pricewatch 620 cheap")
     assert "target price" in rig.last_private()
     rig.web["appids=1&"] = (200, fixtures.raw("appdetails_unavailable"))
-    rig.say("!watch 1 5")
+    rig.say("!pricewatch 1 5")
     assert "region locked or removed" in rig.last_private()
     rig.web["appids=730&"] = (200, fixtures.raw("appdetails_free_to_play"))
-    rig.say("!watch 730 5")
+    rig.say("!pricewatch 730 5")
     assert "free to play" in rig.last_private()
     rig.web["appids=620&"] = (429, b"")
-    rig.say("!watch 620 5")
+    rig.say("!pricewatch 620 5")
     assert "could not reach Steam (http 429)" in rig.last_private()
     assert rig.sql(db.list_watches) == []
 
@@ -224,18 +224,18 @@ def test_the_watch_limit_is_per_user():
     rig = Rig()
     for app_id in range(1, deals.MAX_WATCHES_PER_USER + 1):
         rig.price(app_id)
-        rig.say(f"!watch {app_id} 5", user="u-ann", permissions=0)
+        rig.say(f"!pricewatch {app_id} 5", user="u-ann", permissions=0)
     rig.price(99)
-    rig.say("!watch 99 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 99 5", user="u-ann", permissions=0)
     assert "at most" in rig.last_private()
-    rig.say("!watch 99 5", user="u-bob", permissions=0)
+    rig.say("!pricewatch 99 5", user="u-bob", permissions=0)
     assert "watching" in rig.last_private()
 
 def test_a_drop_to_target_mentions_the_watcher_in_the_channel_once():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.watches()
     assert rig.pings() == [], "above target"
     rig.price(620, cents=499, discount=50)
@@ -251,7 +251,7 @@ def test_a_further_drop_pings_again_and_so_does_a_drop_after_a_rise():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     for cents, expected in ((499, 1), (399, 2), (450, 2), (999, 2), (450, 3)):
         rig.price(620, cents=cents)
         rig.watches()
@@ -261,7 +261,7 @@ def test_a_refused_ping_is_retried_at_the_next_check():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.price(620, cents=400)
     rig.client.respond("POST", "/channels/c1/messages", ApiError(403, {"error": "forbidden"}))
     rig.watches()
@@ -276,7 +276,7 @@ def test_one_lookup_serves_every_watcher_of_a_game():
     rig.setup()
     rig.price(620, cents=999)
     for user in ("u-ann", "u-bob"):
-        rig.say("!watch 620 5", user=user, permissions=0)
+        rig.say("!pricewatch 620 5", user=user, permissions=0)
     rig.price(620, cents=400)
     rig.calls.clear()
     assert rig.watches() == 2 and len(rig.calls) == 1
@@ -286,7 +286,7 @@ def test_a_removed_app_is_noticed_after_three_missed_days_once():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.web["appids=620&"] = (200, b'{"620": {"success": false}}')
     for _ in range(5):
         rig.watches()
@@ -301,7 +301,7 @@ def test_a_price_in_another_currency_than_the_watch_is_skipped_not_compared():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.price(620, cents=300, currency="EUR")
     rig.watches()
     assert rig.pings() == []
@@ -310,7 +310,7 @@ def test_a_steam_outage_leaves_watches_untouched():
     rig = Rig()
     rig.setup()
     rig.price(620, cents=999)
-    rig.say("!watch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.web["appids=620&"] = (503, b"")
     rig.watches()
     watch = rig.sql(db.list_watches)[0]
