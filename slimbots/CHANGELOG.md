@@ -3,6 +3,10 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.14.0
+
+- A command that raises an unexpected exception now answers with one generic line ("something went wrong running that command; try again in a moment."), privately and publicly only on a server without private replies, and logs the traceback. Before, it logged to stderr and said nothing in chat. The exception text is never sent to chat, and `on_command_error` still fires. A command that failed with an `ApiError` other than a permission refusal gets the same line.
+
 ## 0.13.0
 
 - A bot takes the prefix the server assigned it when it was added (the `bot_prefix` on `/me`) and logs a warning when that differs from the configured one. A command the server refuses because another bot already answers to it under the same prefix is logged and skipped instead of retried.
