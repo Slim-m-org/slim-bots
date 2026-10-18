@@ -13,6 +13,7 @@ import bot as deals  # noqa: E402
 import db  # noqa: E402
 import fixtures  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
+from slimbots.bot import UNEXPECTED_ERROR_REPLY  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.space import Space  # noqa: E402
@@ -23,7 +24,8 @@ PEOPLE = {
     "u-ann": {"id": "u-ann", "username": "ann", "display_name": "Ann", "is_bot": False, "is_webhook": False},
     "u-bob": {"id": "u-bob", "username": "bob", "display_name": "Bob", "is_bot": False, "is_webhook": False},
 }
-EPIC, STEAM, GOG = "freeGamesPromotions", "platform=steam", "platform=gog"
+STEAM = "platform=steam"
+SEARCH = "storesearch"
 
 def price_body(app_id, name="Portal 2", cents=999, currency="USD", discount=0):
     data = {"type": "game", "name": name, "steam_appid": app_id, "is_free": False, "price_overview": {"currency": currency, "initial": cents, "final": cents, "discount_percent": discount}}
@@ -40,12 +42,14 @@ class Rig:
         deals.bot.client = self.client
         deals.bot.space = Space(self.client)
         deals.bot.authors = AuthorFilter(self.client, space=deals.bot.space)
+        deals.CHOOSER._picks.clear()
+        deals.last_refusal.clear()
         deals.bot.store = None
         deals.bot.data_path = os.path.join(tempfile.mkdtemp(), "deals.db")
         asyncio.run(deals.bot.space.refresh_members())
         asyncio.run(deals.bot.open_store(migrate=db.init_db))
         deals.STEAM_DELAY = 0
-        self.web = {EPIC: (200, fixtures.raw("epic_free_games")), STEAM: (200, fixtures.raw("gamerpower_steam")), GOG: (201, fixtures.raw("gamerpower_gog_empty"))}
+        self.web = {STEAM: (200, fixtures.raw("gamerpower_steam"))}
         self.calls = []
         deals.transport = self.transport
 
@@ -72,6 +76,25 @@ class Rig:
         member._base_permissions = permissions
         deals.bot.space.members[user] = member
         asyncio.run(deals.bot.process_message({"id": "m1", "channel_id": channel, "author_id": user, "content": text, "seq": 1}))
+
+    def search(self, term, fixture):
+        self.web[f"term={term}&"] = (200, fixtures.raw(fixture))
+
+    def press(self, custom_id, user="u-ann"):
+        message = next(m for m in reversed(self.client.sent) if m.get("components"))
+        self.client.respond("PATCH", f"/channels/c1/messages/{message['id']}", {})
+        frame = {"type": "interaction.created", "interaction_id": f"i-{custom_id}", "channel_id": "c1", "message_id": message["id"], "custom_id": custom_id, "user_id": user, "user_display_name": user, "created_at": 1}
+
+        async def flow():
+            await deals.bot._handle_frame(frame)
+            while pending := [t for t in deals.bot._background_tasks if "pick-" not in t.get_name()]:
+                await asyncio.gather(*pending)
+
+        asyncio.run(flow())
+
+    def buttons(self):
+        message = next(m for m in reversed(self.client.sent) if m.get("components"))
+        return [b["label"] for row in message["components"] for b in row["buttons"]]
 
     def sql(self, fn, *args):
         return asyncio.run(deals.bot.store.run(fn, *args))
@@ -106,18 +129,18 @@ def test_setup_needs_manage_server_and_sets_the_channel():
 
 def test_nothing_is_fetched_or_posted_before_setup():
     rig = Rig()
-    assert rig.freebies() == (0, {}) and rig.calls == [] and rig.client.sent == []
+    assert rig.freebies() == (0, "") and rig.calls == [] and rig.client.sent == []
 
-def test_live_free_games_post_once_with_embed_link_and_end_date():
+def test_live_free_steam_games_post_once_with_embed_link_and_end_date():
     rig = Rig()
     rig.setup()
-    posted, errors = rig.freebies()
-    assert posted == 3 and errors == {}
-    assert sorted(rig.titles()) == ["Agent A: A puzzle in disguise", "Bad Cheese", "Dwarven Realms (Steam) Key Giveaway"]
-    bad = next(m for m in rig.client.sent if m.get("embeds") and m["embeds"][0]["title"] == "Bad Cheese")
-    assert bad["content"] == "https://store.epicgames.com/en-US/p/bad-cheese-4256d9"
-    assert "Epic Games Store" in bad["embeds"][0]["description"] and "ends 2026-10-22 15:00 UTC" in bad["embeds"][0]["description"]
+    posted, error = rig.freebies()
+    assert posted == 1 and error == ""
+    assert rig.titles() == ["Dwarven Realms (Steam) Key Giveaway"]
+    sent = next(m for m in rig.client.sent if m.get("embeds"))
+    assert "Free to keep on Steam" in sent["embeds"][0]["description"] and "no end date given" in sent["embeds"][0]["description"]
     assert rig.freebies()[0] == 0, "already posted"
+    assert not any("epic" in u or "gog" in u for u in rig.calls) and len(rig.calls) == 2
 
 def test_a_restart_does_not_repost():
     rig = Rig()
@@ -130,34 +153,29 @@ def test_a_restart_does_not_repost():
     before = len(rig.client.sent)
     assert rig.freebies()[0] == 0 and len(rig.client.sent) == before
 
-def test_a_new_offer_posts_alone_and_a_refused_post_retries():
+def test_a_refused_post_is_not_marked_seen_and_retries():
     rig = Rig()
     rig.setup()
-    rig.freebies()
-    rig.web[GOG] = (200, fixtures.raw("gamerpower_gog"))
     rig.client.respond("POST", "/channels/c1/messages", ApiError(403, {"error": "forbidden"}))
     assert rig.freebies()[0] == 0, "refused, so not marked seen"
     rig.client._responses.pop(("POST", "/channels/c1/messages"))
-    assert rig.freebies()[0] == 1 and rig.titles()[-1] == "Example Quest (GOG) Giveaway"
+    assert rig.freebies()[0] == 1 and rig.titles()[-1] == "Dwarven Realms (Steam) Key Giveaway"
 
-def test_a_failing_source_is_reported_and_the_others_still_post():
+
+def test_a_failing_source_is_reported():
     rig = Rig()
     rig.setup()
-    rig.web[EPIC] = (500, b"")
-    posted, errors = rig.freebies()
-    assert posted == 1 and errors == {"epic": "http 500"}
+    rig.web[STEAM] = (500, b"")
+    assert rig.freebies() == (0, "http 500")
 
-def test_sources_command_limits_checks_and_rejects_unknown_names():
+
+def test_the_sources_command_is_gone_and_epic_gog_are_not_offered():
     rig = Rig()
     rig.setup()
-    rig.say("!deals sources steam")
-    assert asyncio.run(deals.active_sources()) == ["steam"]
-    rig.freebies()
-    assert rig.titles() == ["Dwarven Realms (Steam) Key Giveaway"] and not any(EPIC in u for u in rig.calls)
-    rig.say("!deals sources epic,origin")
-    assert "pick from" in rig.last_reply() and asyncio.run(deals.active_sources()) == ["steam"]
-    rig.say("!deals sources epic", permissions=0)
-    assert "Manage Server" in rig.last_private()
+    rig.say("!deals sources epic,gog")
+    reply = rig.last_reply().lower()
+    assert "deals setup" in reply and "epic" not in reply and "gog" not in reply and "sources" not in reply
+    assert asyncio.run(deals.bot.store.run(db.get_config, "sources")) is None
 
 def test_an_at_sign_in_a_title_cannot_ping_anyone():
     rig = Rig()
@@ -173,22 +191,56 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
     rig.say("!deals now")
     assert "setup" in rig.last_reply()
     rig.setup()
-    rig.web[EPIC] = (500, b"")
+    rig.web[STEAM] = (500, b"")
     rig.price(620)
     rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
     rig.say("!deals now")
-    assert "posted 1 new" in rig.last_private() and "Epic Games Store failed: http 500" in rig.last_private()
+    assert "posted 0 new" in rig.last_private() and "Steam giveaways failed: http 500" in rig.last_private()
     rig.say("!deals now", permissions=0)
     assert "Manage Server" in rig.last_private()
     rig.say("!deals now", keep_cooldowns=True)
     rig.say("!deals now", keep_cooldowns=True)
     assert "slow down" in rig.last_reply()
 
+
+def test_deals_now_says_when_a_post_is_refused():
+    rig = Rig()
+    rig.setup()
+    rig.client.respond("POST", "/channels/c1/messages", ApiError(403, {"error": "missing SEND_MESSAGES"}))
+    rig.say("!deals now")
+    assert "posted 0 new" in rig.last_private() and "was refused (missing SEND_MESSAGES)" in rig.last_private()
+
+
+def test_deals_now_replies_when_the_check_itself_blows_up():
+    rig = Rig()
+    rig.setup()
+    original = deals.check_freebies
+
+    async def boom():
+        raise KeyError("secret-detail")
+
+    deals.check_freebies = boom
+    try:
+        rig.say("!deals now")
+    finally:
+        deals.check_freebies = original
+    assert "the check failed" in rig.last_private() and "secret-detail" not in rig.last_private()
+    async def down():
+        raise ApiError(500, {"error": "down"})
+
+    deals.check_freebies = down
+    try:
+        rig.say("!deals now")
+    finally:
+        deals.check_freebies = original
+    assert "the check failed (http 500)" in rig.last_private()
+
+
 def test_watch_add_by_link_and_by_id_then_list_and_remove_are_private_and_per_user():
     rig = Rig()
     rig.price(620)
     rig.say("!pricewatch https://store.steampowered.com/app/620/Portal_2/ $4.99", user="u-ann", permissions=0)
-    assert "watching **Portal 2** as `1`" in rig.last_private() and "9.99 USD" in rig.last_private()
+    assert "watching **Portal 2** (app 620) as `1`" in rig.last_private() and "9.99 USD" in rig.last_private()
     assert rig.client.sent == [], "replies stay private"
     rig.say("!pricewatch 620 3", user="u-ann", permissions=0)
     assert "updated the watch" in rig.last_private() and len(rig.sql(db.list_watches)) == 1
@@ -206,7 +258,7 @@ def test_watch_add_refuses_bad_input_unavailable_free_and_outages():
     rig.say("!pricewatch")
     assert "usage" in rig.last_private()
     rig.say("!pricewatch portal 5")
-    assert "Steam store link" in rig.last_private()
+    assert "could not search Steam (http 404)" in rig.last_private()
     rig.say("!pricewatch 620 cheap")
     assert "target price" in rig.last_private()
     rig.web["appids=1&"] = (200, fixtures.raw("appdetails_unavailable"))
@@ -291,7 +343,7 @@ def test_a_removed_app_is_noticed_after_three_missed_days_once():
     for _ in range(5):
         rig.watches()
     notices = [m["content"] for m in rig.client.sent if "not been available" in m["content"]]
-    assert len(notices) == 1 and notices[0].startswith("@ann ") and "watch remove 1" in notices[0]
+    assert len(notices) == 1 and notices[0].startswith("@ann ") and "pricewatch remove 1" in notices[0]
     assert len(rig.sql(db.list_watches)) == 1, "the watch is kept"
     rig.price(620, cents=400)
     rig.watches()
@@ -324,6 +376,81 @@ def test_the_loops_run_when_due_and_not_again_before_their_interval():
     assert not asyncio.run(deals.due("last_freebies_at", deals.FREEBIES_INTERVAL))
     assert asyncio.run(deals.due("last_watches_at", deals.WATCH_INTERVAL))
     assert deals.FREEBIES_INTERVAL == 10800 and deals.WATCH_INTERVAL == 86400
+
+def test_a_game_name_with_one_strong_hit_is_watched_and_echoed():
+    rig = Rig()
+    rig.price(620)
+    rig.search("Portal%202", "storesearch_portal_2")
+    rig.say("!pricewatch Portal 2 4.99", user="u-ann", permissions=0)
+    assert "watching **Portal 2** (app 620)" in rig.last_private() and rig.client.sent == []
+    assert rig.sql(db.list_watches)[0]["app_id"] == 620
+    assert any("storesearch" in u and "term=Portal%202" in u and "cc=us" in u for u in rig.calls)
+
+
+def test_a_name_that_matches_nothing_asks_for_the_app_id():
+    rig = Rig()
+    rig.search("zzzqqqxx", "storesearch_none")
+    rig.say("!pricewatch zzzqqqxx 5", user="u-ann", permissions=0)
+    assert 'no game matching "zzzqqqxx"' in rig.last_private() and "app id" in rig.last_private()
+    assert rig.sql(db.list_watches) == []
+
+
+def test_an_ambiguous_name_offers_a_pick_list_and_only_the_invoker_may_choose():
+    rig = Rig()
+    rig.price(400, name="Portal", cents=999)
+    rig.search("portal%20tower", "storesearch_portal")
+    rig.say("!pricewatch portal tower 5", user="u-ann", permissions=0)
+    assert rig.buttons()[:3] == ["Portal 2 (620)", "Portal (400)", "Portal Knights (374040)"] and len(rig.buttons()) == 6, "five candidates and Cancel"
+    assert rig.sql(db.list_watches) == []
+    rig.press("dealspick:sel:1", user="u-bob")
+    assert rig.sql(db.list_watches) == [], "someone else pressed"
+    rig.press("dealspick:sel:1", user="u-ann")
+    watches = rig.sql(db.list_watches)
+    assert [(w["app_id"], w["user_id"], w["target_price_cents"]) for w in watches] == [(400, "u-ann", 500)]
+    assert any("watching **Portal** (app 400)" in str(call[2]) for call in rig.client.calls if call[0] == "PATCH")
+    assert rig.client.component_edits[-1]["components"] == [], "the buttons are gone once a pick is made"
+
+
+def test_a_steam_search_outage_says_so_and_adds_nothing():
+    rig = Rig()
+    rig.web["storesearch"] = (503, b"")
+    rig.say("!pricewatch portal 5", user="u-ann", permissions=0)
+    assert "could not search Steam (http 503)" in rig.last_private() and "app id" in rig.last_private()
+    assert rig.sql(db.list_watches) == []
+
+
+def test_a_link_or_id_never_touches_the_search():
+    rig = Rig()
+    rig.price(620)
+    rig.say("!pricewatch https://store.steampowered.com/app/620/Portal_2/ 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
+    assert not any("storesearch" in u for u in rig.calls)
+
+
+def test_an_unexpected_error_in_a_deals_command_gets_a_generic_private_reply():
+    rig = Rig()
+
+    def boom(*args):
+        raise KeyError("db secret")
+
+    original = db.count_watches
+    db.count_watches = boom
+    try:
+        rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
+    finally:
+        db.count_watches = original
+    assert rig.last_private() == UNEXPECTED_ERROR_REPLY and "secret" not in rig.last_private()
+
+
+def test_the_help_and_usage_strings_name_pricewatch_not_watch():
+    rig = Rig()
+    rig.say("!pricewatch")
+    assert "!pricewatch <game name" in rig.last_private() and "!watch" not in rig.last_private()
+    rig.say("!pricewatch list", user="u-bob", permissions=0)
+    assert "!pricewatch <game name" in rig.last_private() and "!watch" not in rig.last_private()
+    rig.say("!deals")
+    assert "!pricewatch" in rig.last_reply() and "!watch" not in rig.last_reply()
+
 
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]

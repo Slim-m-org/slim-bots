@@ -59,7 +59,7 @@ All of them live under [`bots/`](bots/).
 | [`bots/game-status`](bots/game-status/) | Asking game servers directly (Steam A2S, Minecraft ping, plain TCP) on a background loop, with timeouts per server, and one plain-text status message per channel edited in place and recreated if deleted. |
 | [`bots/uptime-relay`](bots/uptime-relay/) | Taking Uptime Kuma, Grafana and Healthchecks webhooks on a small listener behind a shared secret, posting one alert per outage with Acknowledge and Silence buttons, and editing it with repeats and recovery. |
 | [`bots/tickets`](bots/tickets/) | A support-ticket flow: an Open a ticket button makes a private restricted channel for the member and a staff role, staff Claim and Close it, and a transcript is kept in sqlite. |
-| [`bots/deals`](bots/deals/) | Posting free-to-keep games from Epic, Steam and GOG to one channel, deduped across restarts, and a daily Steam price watch (`!watch`) that mentions the watcher in the channel when a game reaches their target. |
+| [`bots/deals`](bots/deals/) | Steam Deals: posting free-to-keep Steam games to one channel, deduped across restarts, and a daily Steam price watch (`!pricewatch <game name, link or app id> <price>`) that mentions the watcher in the channel when a game reaches their target. |
 
 Every template's README says what it deliberately does not do. That section is
 usually the more useful half.

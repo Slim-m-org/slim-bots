@@ -65,6 +65,7 @@ This is what replaced every bot's own `TRIGGER_X = re.compile(...)` wall of shap
 
 A prefixed message naming no registered command is silent by default - it fires `on_command_not_found(ctx, error)` if, and only if, something is actually listening for it, so a stray `!` in ordinary conversation costs nothing (no author lookup, no `ctx` built) when nobody cares.
 `error` is a real `CommandNotFound` (`error.invoked_with`, `str(error)`), not just a name string, for the same reason every other command failure is a real exception rather than a tuple.
+A command that raises anything else is logged with its traceback and answered with one generic line, sent privately (publicly on a server without private replies); the exception text never reaches chat, and `on_command_error` still fires.
 
 ## Identity
 

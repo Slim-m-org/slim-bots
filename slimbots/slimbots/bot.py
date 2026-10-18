@@ -36,6 +36,7 @@ DEFAULT_USER_AGENT = "slimbots/0.3"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 
 log = logging.getLogger(__name__)
+UNEXPECTED_ERROR_REPLY = "something went wrong running that command; try again in a moment."
 
 # Seconds before an unrecognised channel id may trigger another channel-list refresh.
 CHANNEL_MISS_REFRESH_SECONDS = 30.0
@@ -585,12 +586,20 @@ class Bot:
             if is_token_revoked(err):
                 raise
             reply = f"I can't do that: {err.reason or 'missing permission'}" if is_forbidden(err) \
-                else "something went wrong running that command"
+                else UNEXPECTED_ERROR_REPLY
             await ctx.reply(reply)
             await self._dispatch_event("on_command_error", ctx, err)
         except Exception as err:
-            print(f"unhandled error in command `{command.name}`: {err}", file=sys.stderr)
+            log.error("unhandled error in command `%s`", command.name, exc_info=err)
+            await self._reply_unexpected(ctx)
             await self._dispatch_event("on_command_error", ctx, err)
+
+    async def _reply_unexpected(self, ctx: Context) -> None:
+        """Tells the invoker something broke, with no detail: the traceback stays in the log, never the chat."""
+        try:
+            await ctx.reply_ephemeral(UNEXPECTED_ERROR_REPLY, public_fallback=True)
+        except Exception:
+            log.exception("could not tell the invoker a command failed")
 
     async def _handle_frame(self, frame: dict[str, Any]) -> None:
         kind: str = frame.get("type") or ""

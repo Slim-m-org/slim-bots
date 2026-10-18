@@ -1,0 +1,56 @@
+{
+ "total": 10,
+ "items": [
+  {
+   "type": "app",
+   "name": "Portal 2",
+   "id": 620,
+   "price": {
+    "currency": "USD",
+    "initial": 999,
+    "final": 999
+   },
+   "metascore": "95"
+  },
+  {
+   "type": "app",
+   "name": "Portal 2 Soundtrack",
+   "id": 323180,
+   "metascore": ""
+  },
+  {
+   "type": "app",
+   "name": "Portal 2: Community Edition",
+   "id": 440000,
+   "metascore": ""
+  },
+  {
+   "type": "app",
+   "name": "Portal 2 - The Final Hours",
+   "id": 104600,
+   "price": {
+    "currency": "USD",
+    "initial": 199,
+    "final": 199
+   },
+   "metascore": ""
+  },
+  {
+   "type": "app",
+   "name": "Portal 2: Confinement",
+   "id": 2716490,
+   "metascore": ""
+  },
+  {
+   "type": "app",
+   "name": "Grand Emprise 2: Portals Apart",
+   "id": 2722610,
+   "price": {
+    "currency": "USD",
+    "initial": 1199,
+    "final": 179
+   },
+   "metascore": ""
+  }
+ ]
+}

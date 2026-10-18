@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bot-deals: posts free-to-keep games from Epic, Steam and GOG and pings members when a watched Steam game hits their price; see README.md."""
+"""Steam Deals: posts free-to-keep Steam games and pings members when a watched Steam game hits their price; see README.md."""
 
 import asyncio
 import sys
@@ -8,9 +8,10 @@ import uuid
 
 import db
 import prices
+import search
 import sources
-from slimbots import ApiError, Bot, Embed, Permissions
-from slimbots.http import is_token_revoked
+from slimbots import ApiError, Bot, Chooser, Embed, Permissions, Pick
+from slimbots.http import is_forbidden, is_token_revoked
 
 POST_NAMESPACE = uuid.UUID("5d0c8f1e-3a47-4b62-9e15-c7a2f4d6b983")
 MAX_POSTS_PER_RUN = 10
@@ -22,10 +23,12 @@ FREEBIES_INTERVAL = max(bot.setting("DEALS_FREEBIES_INTERVAL", 10800, type=int),
 WATCH_INTERVAL = max(bot.setting("DEALS_WATCH_INTERVAL", 86400, type=int), 3600)
 STEAM_CC = bot.setting("DEALS_CC", "us").lower()
 STEAM_DELAY = bot.setting("DEALS_STEAM_DELAY", 1.5, type=float)
-DEFAULT_SOURCES = [s for s in bot.setting("DEALS_SOURCES", "epic,steam,gog").replace(" ", "").split(",") if s in sources.ALL_SOURCES] or list(sources.ALL_SOURCES)
 TICK_SECONDS = bot.setting("DEALS_TICK_SECONDS", 60, type=int)
 
 transport = sources.urllib_transport
+CHOOSER = Chooser("dealspick:", "pricewatch", lambda game: f"{game.name} ({game.app_id})", "watch")
+CHOOSER.register(bot)
+last_refusal = []
 
 
 def clean(text):
@@ -38,12 +41,17 @@ def ends_text(offer):
 
 
 def offer_embed(offer):
-    detail = f"Free to keep on {sources.STORE_NAMES[offer.store]}, {ends_text(offer)}."
-    return Embed(title=clean(offer.title), description=detail + (f" Normally {offer.worth}." if offer.worth else ""), url=offer.url, footer=sources.STORE_NAMES[offer.store])
+    detail = f"Free to keep on {sources.STORE_NAME}, {ends_text(offer)}."
+    return Embed(title=clean(offer.title), description=detail + (f" Normally {offer.worth}." if offer.worth else ""), url=offer.url, footer=sources.STORE_NAME)
 
 
 def offer_fallback(offer):
-    return f"{clean(offer.title)} - free to keep on {sources.STORE_NAMES[offer.store]}, {ends_text(offer)}\n{offer.url}"
+    return f"{clean(offer.title)} - free to keep on {sources.STORE_NAME}, {ends_text(offer)}\n{offer.url}"
+
+
+def refusal_text(err):
+    cause = (err.reason or "missing permission") if is_forbidden(err) else f"http {err.status}"
+    return f"a post to the deals channel was refused ({cause}); check that I can send messages there."
 
 
 async def post(channel_id, content, *, message_id, embed=None, fallback=None):
@@ -57,6 +65,7 @@ async def post(channel_id, content, *, message_id, embed=None, fallback=None):
         if is_token_revoked(err):
             raise
         print(f"deals: could not post (http {err.status})", file=sys.stderr)
+        last_refusal[:] = [refusal_text(err)]
         return False
     return True
 
@@ -65,17 +74,12 @@ async def configured_channel():
     return await bot.store.run(db.get_config, "channel_id")
 
 
-async def active_sources():
-    stored = await bot.store.run(db.get_config, "sources")
-    return [s for s in stored.split(",") if s] if stored else list(DEFAULT_SOURCES)
-
-
 async def check_freebies():
-    """Posts each unseen live offer once; a refused post stays unseen and retries next run. Returns (posted, errors)."""
+    """Posts each unseen live offer once; a refused post stays unseen and retries next run. Returns (posted, error)."""
     channel_id = await configured_channel()
     if not channel_id:
-        return 0, {}
-    offers, errors = await asyncio.to_thread(sources.fetch_offers, await active_sources(), transport, STEAM_CC.upper())
+        return 0, ""
+    offers, error = await asyncio.to_thread(sources.fetch_offers, transport)
     posted = 0
     for offer in offers:
         if posted >= MAX_POSTS_PER_RUN or await bot.store.run(db.is_seen, offer.store, offer.offer_id):
@@ -85,7 +89,7 @@ async def check_freebies():
             await bot.store.run(db.mark_seen, offer.store, offer.offer_id, offer.title)
             posted += 1
     await bot.store.run(db.set_config, "last_freebies_at", int(time.time()))
-    return posted, errors
+    return posted, error
 
 
 def store_link(app_id):
@@ -111,7 +115,7 @@ async def notify_missing(channel_id, watch):
     who = await mention_for(watch["user_id"])
     if who is None:
         return
-    text = f"{who} **{clean(watch['name'])}** has not been available in the {STEAM_CC.upper()} store for {db.MISSING_AFTER} checks in a row. The watch stays until you run `{bot.prefix}watch remove {watch['id']}`."
+    text = f"{who} **{clean(watch['name'])}** has not been available in the {STEAM_CC.upper()} store for {db.MISSING_AFTER} checks in a row. The watch stays until you run `{bot.prefix}pricewatch remove {watch['id']}`."
     await post(channel_id, text, message_id=str(uuid.uuid4()))
 
 
@@ -188,10 +192,10 @@ async def allowed(ctx):
     return False
 
 
-@bot.group(name="deals", help="`setup`, `sources <list>`, `now`")
+@bot.group(name="deals", help="`setup`, `now`")
 async def deals_group(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(f"try `{p}deals setup` in the channel for free games, `{p}deals sources epic,steam,gog` or `{p}deals now`. Price watches: `{p}watch <steam link or app id> <target price>`.")
+    await ctx.reply(f"try `{p}deals setup` in the channel for free Steam games or `{p}deals now`. Price watches: `{p}pricewatch <game name, Steam link or app id> <target price>`.")
 
 
 @deals_group.command(name="setup", help="Post free games and watch alerts in this channel")
@@ -203,20 +207,6 @@ async def deals_setup(ctx):
     await ctx.reply(f"free games and price alerts go to this channel now; the first check runs within {max(TICK_SECONDS, 1)} seconds, then every {FREEBIES_INTERVAL // 3600 or 1}h.")
 
 
-@deals_group.command(name="sources", help="Choose where free games come from", usage="<epic,steam,gog>")
-async def deals_sources(ctx, names: str = ""):
-    if not await allowed(ctx):
-        return
-    chosen = [n for n in names.lower().replace(" ", ",").split(",") if n]
-    bad = [n for n in chosen if n not in sources.ALL_SOURCES]
-    if bad or not chosen:
-        await ctx.reply(f"pick from {', '.join(sources.ALL_SOURCES)}, comma separated. Now: {', '.join(await active_sources())}.")
-        return
-    chosen = list(dict.fromkeys(chosen))
-    await bot.store.run(db.set_config, "sources", ",".join(chosen))
-    await ctx.reply(f"checking {', '.join(chosen)}.")
-
-
 @deals_group.command(name="now", help="Check for free games and price drops right away", cooldown=60, cooldown_bucket="deployment")
 async def deals_now(ctx):
     if not await allowed(ctx):
@@ -224,9 +214,21 @@ async def deals_now(ctx):
     if not await configured_channel():
         await ctx.reply(f"run `{bot.prefix}deals setup` in the deals channel first.")
         return
-    posted, errors = await check_freebies()
-    checked = await check_watches()
-    problems = "".join(f" {sources.STORE_NAMES[n]} failed: {why}." for n, why in errors.items())
+    last_refusal.clear()
+    try:
+        posted, error = await check_freebies()
+        checked = await check_watches()
+    except ApiError as err:
+        if is_token_revoked(err):
+            raise
+        print(f"deals: check failed (http {err.status})", file=sys.stderr)
+        await ctx.reply_ephemeral(f"the check failed (http {err.status}); try again in a minute.", public_fallback=True)
+        return
+    except Exception as err:
+        print(f"deals: check failed ({type(err).__name__})", file=sys.stderr)
+        await ctx.reply_ephemeral("the check failed; try again in a minute, and ask whoever runs the bot to read its log if it keeps failing.", public_fallback=True)
+        return
+    problems = (f" Steam giveaways failed: {error}." if error else "") + "".join(f" {why}" for why in last_refusal)
     await ctx.reply_ephemeral(f"posted {posted} new free game(s), checked {checked} watch(es).{problems}", public_fallback=True)
 
 
@@ -240,37 +242,69 @@ def quote_problem(quote, app_id):
     return None
 
 
-@bot.group(name="pricewatch", help="`<steam link or app id> <target price>`, `list`, `remove <id>`", cooldown=3)
-async def watch_group(ctx, rest: str = ""):
-    target, _, price = rest.strip().partition(" ")
-    if not target or not price.strip():
-        await ctx.reply_ephemeral(f"usage: `{bot.prefix}watch <steam link or app id> <target price>`, `{bot.prefix}watch list` or `{bot.prefix}watch remove <id>`.", public_fallback=True)
-        return
-    try:
-        app_id, target_cents = prices.parse_app_id(target), prices.parse_price_cents(price)
-    except prices.PriceError as err:
-        await ctx.reply_ephemeral(str(err), public_fallback=True)
-        return
-    if await bot.store.run(db.count_watches, ctx.author.id) >= MAX_WATCHES_PER_USER:
-        await ctx.reply_ephemeral(f"you can watch at most {MAX_WATCHES_PER_USER} games; remove one first.", public_fallback=True)
-        return
+async def start_watch(user_id, app_id, target_cents):
+    """Looks the game up and stores the watch; returns the text to tell the member, a refusal or the confirmation."""
+    if await bot.store.run(db.count_watches, user_id) >= MAX_WATCHES_PER_USER:
+        return f"you can watch at most {MAX_WATCHES_PER_USER} games; remove one first."
     quote = await asyncio.to_thread(prices.fetch_quote, transport, app_id, STEAM_CC)
     problem = quote_problem(quote, app_id)
     if problem:
-        await ctx.reply_ephemeral(problem, public_fallback=True)
-        return
-    watch_id, created = await bot.store.run(db.add_watch, ctx.author.id, app_id, quote.name, target_cents, quote.currency, quote.cents)
+        return problem
+    watch_id, created = await bot.store.run(db.add_watch, user_id, app_id, quote.name, target_cents, quote.currency, quote.cents)
     now, target_text = prices.format_cents(quote.cents, quote.currency), prices.format_cents(target_cents, quote.currency)
     verb = "watching" if created else "updated the watch on"
     where = "" if await configured_channel() else f" No deals channel is set yet, so ask a moderator to run `{bot.prefix}deals setup`."
-    await ctx.reply_ephemeral(f"{verb} **{clean(quote.name)}** as `{watch_id}`: now {now}, I will mention you in the deals channel at {target_text} or less.{where}", public_fallback=True)
+    return f"{verb} **{clean(quote.name)}** (app {app_id}) as `{watch_id}`: now {now}, I will mention you in the deals channel at {target_text} or less.{where}"
+
+
+async def resolve_game(ctx, target, target_cents):
+    """An app id from a link, an id or an unambiguous game name; None once the member has been told why not, or has a pick list."""
+    try:
+        return prices.parse_app_id(target)
+    except prices.PriceError:
+        pass
+    result = await asyncio.to_thread(search.search_game, transport, target, STEAM_CC)
+    if result.best:
+        return result.best.app_id
+    if result.choices:
+        await offer_choices(ctx, target, target_cents, result.choices)
+        return None
+    shown = clean(target)[:60]
+    problem = f"could not search Steam ({result.error}); try again in a minute, or give me the app id." if result.error \
+        else f'Steam has no game matching "{shown}"; try the store link, or the app id from the store page\'s address.'
+    await ctx.reply_ephemeral(problem, public_fallback=True)
+    return None
+
+
+async def offer_choices(ctx, target, target_cents, games):
+    async def on_choose(game):
+        return await start_watch(ctx.author.id, game.app_id, target_cents)
+
+    pick = Pick(ctx.author.id, ctx.author.display_name, ctx.channel_id, list(games), clean(target)[:60], on_choose)
+    await CHOOSER.open(bot, pick, reply_to_id=ctx.message.get("id"))
+
+
+@bot.group(name="pricewatch", help="`<game name, Steam link or app id> <target price>`, `list`, `remove <id>`", cooldown=3)
+async def watch_group(ctx, rest: str = ""):
+    target, _, price = rest.strip().rpartition(" ")
+    if not target.strip() or not price.strip():
+        await ctx.reply_ephemeral(f"usage: `{bot.prefix}pricewatch <game name, Steam link or app id> <target price>`, `{bot.prefix}pricewatch list` or `{bot.prefix}pricewatch remove <id>`.", public_fallback=True)
+        return
+    try:
+        target_cents = prices.parse_price_cents(price)
+    except prices.PriceError as err:
+        await ctx.reply_ephemeral(str(err), public_fallback=True)
+        return
+    app_id = await resolve_game(ctx, target.strip(), target_cents)
+    if app_id is not None:
+        await ctx.reply_ephemeral(await start_watch(ctx.author.id, app_id, target_cents), public_fallback=True)
 
 
 @watch_group.command(name="list", help="Your price watches")
 async def watch_list(ctx):
     watches = await bot.store.run(db.list_watches, ctx.author.id)
     if not watches:
-        await ctx.reply_ephemeral(f"no watches yet - try `{bot.prefix}watch <steam link or app id> <target price>`.", public_fallback=True)
+        await ctx.reply_ephemeral(f"no watches yet - try `{bot.prefix}pricewatch <game name, Steam link or app id> <target price>`.", public_fallback=True)
         return
     lines = []
     for w in watches:

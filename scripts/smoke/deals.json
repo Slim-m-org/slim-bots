@@ -2,9 +2,9 @@
   "ready_seconds": 8,
   "steps": [
     {"say": "!deals", "expect_contains": ["deals setup"], "timeout": 15},
-    {"say": "!deals sources origin", "expect_contains": ["pick from"], "timeout": 15},
     {"say": "!pricewatch", "expect_contains": ["usage"], "timeout": 15},
-    {"say": "!pricewatch not-a-game 5", "expect_contains": ["Steam store link"], "timeout": 15},
+    {"say": "!pricewatch portal 2 cheap", "expect_contains": ["target price"], "timeout": 15},
+    {"say": "!pricewatch zzzqqqxxnotagame 5", "expect_contains": ["no game matching"], "timeout": 15},
     {"say": "!pricewatch list", "expect_contains": ["no watches yet"], "timeout": 15},
     {"say": "!pricewatch remove 999", "expect_contains": ["no watch"], "timeout": 15}
   ]
