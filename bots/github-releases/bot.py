@@ -45,7 +45,7 @@ bot = Bot(prefix="!", require_channels=True, default_data_path="github-releases.
 
 @dataclass
 class Config:
-    repo: str
+    repo: str | None
     token: str | None
     poll_seconds: int
     prefixes: tuple
@@ -57,7 +57,7 @@ def clamp_poll(seconds):
 
 
 config = Config(
-    repo=bot.setting("GH_REPO", "Slim-m-org/slim-m"),
+    repo=bot.setting("GH_REPO", None),
     token=bot.setting("GITHUB_TOKEN", None),
     poll_seconds=clamp_poll(bot.setting("GH_POLL_SECONDS", 600, type=int)),
     prefixes=tuple(bot.setting("GH_TAG_PREFIXES", ["client-v", "server-v"], type=list)),
@@ -153,5 +153,16 @@ async def poll():
     return await poll_once(releases_feed)
 
 
+def require_repo():
+    # No default: another community running this should never announce slim-m's own releases by accident.
+    if not config.repo:
+        return "GH_REPO is not set: name the owner/repo whose releases to announce"
+    return None
+
+
+def main():
+    bot.run_cli(check=require_repo)
+
+
 if __name__ == "__main__":
-    bot.run_cli()
+    main()

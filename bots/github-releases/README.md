@@ -60,7 +60,7 @@ Unauthenticated, GitHub allows 60 requests an hour per address, which a 10 minut
 | Variable | Meaning |
 | --- | --- |
 | `SLIMM_CHANNELS` | The one channel releases are posted to. |
-| `GH_REPO` | `owner/name` to watch, default `Slim-m-org/slim-m`. |
+| `GH_REPO` | `owner/name` to watch, required; the bot exits at startup without it. |
 | `GH_TAG_PREFIXES` | Comma-separated tag prefixes to post, default `client-v,server-v`. |
 | `GH_POLL_SECONDS` | Poll interval, default 600, never below 60. |
 | `GH_ANNOUNCE_LATEST` | `1` to post the newest matching release on the very first run, default off. |

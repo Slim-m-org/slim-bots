@@ -206,5 +206,18 @@ def test_the_poll_interval_is_never_under_a_minute():
     assert releases.clamp_poll(600) == 600
 
 
+def test_startup_refuses_without_a_repo_to_watch():
+    saved = releases.config.repo
+    releases.config.repo = None
+    try:
+        releases.main()
+    except SystemExit as stop:
+        assert "GH_REPO" in str(stop)
+    else:
+        raise AssertionError("main() ran with no GH_REPO")
+    finally:
+        releases.config.repo = saved
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

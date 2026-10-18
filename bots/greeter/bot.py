@@ -17,7 +17,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 bot = Bot(prefix="!", default_data_path="greeter.db", store_migrate=init_db)
 
 GREETER_MESSAGE = bot.setting("GREETER_MESSAGE", "Welcome, {member}! Make yourself at home.")
-GREETER_CHANNEL = bot.setting("GREETER_CHANNEL", "general/chat")
+GREETER_CHANNEL = bot.setting("GREETER_CHANNEL", "")
 
 CHANNEL_KEY = "welcome_channel"
 
@@ -37,19 +37,23 @@ def _write_setting(conn, key, value):
 
 
 async def welcome_channel():
-    """SLIMM_CHANNELS pins it outright; otherwise an admin's `!welcome here`, else `GREETER_CHANNEL`."""
+    """SLIMM_CHANNELS pins it outright; otherwise an admin's `!welcome here`, else `GREETER_CHANNEL`; None until one is set."""
     if bot.channel:
         return bot.channel
     store = await bot.open_store()
     stored = await store.run(_read_setting, CHANNEL_KEY)
-    return stored or await bot.space.find_channel_by_path(GREETER_CHANNEL)
+    if stored:
+        return stored
+    if GREETER_CHANNEL:
+        return await bot.space.find_channel_by_path(GREETER_CHANNEL)
+    return None
 
 
 @bot.event
 async def on_member_join(member):
     channel_id = await welcome_channel()
     if channel_id is None:
-        print(f"no welcome channel: nothing matches GREETER_CHANNEL={GREETER_CHANNEL!r}; run !welcome here")
+        print(f"no welcome channel (GREETER_CHANNEL={GREETER_CHANNEL!r}); run !welcome here or set GREETER_CHANNEL")
         return
     await bot.client.send(channel_id, welcome_text(member))
 

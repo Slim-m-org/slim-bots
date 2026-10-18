@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The notes condenser and message renderer on real release-please bodies; run directly: python3 test_notes.py."""
 
+import time
 
 import fixtures
 import notes
@@ -90,6 +91,17 @@ def test_a_closes_clause_after_the_links_is_dropped_with_them():
         "[#1621](https://github.com/Slim-m-org/slim-m/issues/1621) [#1622](https://github.com/Slim-m-org/slim-m/issues/1622)"
     )
     assert notes.bullets(line) == ["batch 4 of the october audit"]
+
+
+def test_a_huge_whitespace_run_does_not_stall_the_cleanup():
+    start = time.monotonic()
+    notes.bullets("* fix" + " " * 50_000 + "x" + " " * 50_000 + "(#12)")
+    assert time.monotonic() - start < 1
+
+
+def test_a_closes_clause_with_a_comma_and_extra_spaces_is_still_dropped():
+    line = "* tidy it up ([#9](https://x/9)),   closes   [#7](https://x/7)"
+    assert notes.bullets(line) == ["tidy it up"]
 
 if __name__ == "__main__":
     run_module_tests(globals())

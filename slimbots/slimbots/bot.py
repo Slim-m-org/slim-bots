@@ -26,7 +26,7 @@ from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
 from .lifecycle import Periodic, guard_dispatch, run_periodic, run_with_shutdown
 from .models import Member
-from .registration import RegistrationRejected, register_commands
+from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
 from .store import Store
@@ -108,6 +108,7 @@ class Bot:
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
+        self.permissions_readable: bool | None = None
         self.mention_commands = mention_commands
         self.listen_voice_chats = listen_voice_chats or os.environ.get("SLIMM_LISTEN_VOICE_CHATS") == "1"
         self._url = url
@@ -385,7 +386,33 @@ class Bot:
 
     async def _resolve_author(self, author_id: str) -> Member | None:
         assert self.space is not None, "_resolve_author needs an open connection"
-        return await self.space.find_member(author_id)
+        member = await self.space.find_member(author_id)
+        if member is not None and self.space.roles_readable is False and self.permissions_readable:
+            await self._refresh_author_permissions(member)
+        return member
+
+    async def _refresh_author_permissions(self, member: Member) -> None:
+        assert self.space is not None
+        try:
+            await self.space.refresh_permissions(member)
+        except ApiError as err:
+            log.error("could not read %s's permissions (%s); a requires= command will refuse them", member.id, err)
+
+    async def _adopt_assigned_prefix(self, me: dict[str, Any]) -> None:
+        """The server assigns each bot its prefix; it wins over the constructor default and SLIMM_PREFIX."""
+        assigned = me.get("bot_prefix")
+        if not assigned:
+            return
+        if assigned != self.prefix:
+            log.warning("using the prefix %r the server assigned this bot, not the configured %r", assigned, self.prefix)
+        self.prefix = assigned
+
+    async def _register_commands(self) -> None:
+        assert self.client is not None
+        try:
+            await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
+        except RegistrationConflict as err:
+            log.error("the server refused this bot's commands: %s", err.reason or err)
 
     async def process_message(self, message: dict[str, Any]) -> None:
         """One `message.created` payload: the bot-ignore default, command
@@ -483,13 +510,41 @@ class Bot:
 
     async def _reload_roles(self) -> None:
         assert self.space is not None
+        if await self._load_roles():
+            self.space.reapply_roles()
+
+    async def _load_roles(self) -> bool:
+        """Loads the role table; False, with the cause logged, when this bot may not read roles."""
+        assert self.space is not None
         try:
             await self.space.refresh_roles()
         except ApiError as err:
             if not is_forbidden(err):
                 raise
+            await self._note_roles_unreadable()
+            return False
+        return True
+
+    async def _note_roles_unreadable(self) -> None:
+        """Probes the read-only permissions route once and logs what that means for `requires=` commands."""
+        if self.permissions_readable is not None:
             return
-        self.space.reapply_roles()
+        assert self.client is not None
+        try:
+            await self.client.member_permissions(self.me_id or "")
+        except ApiError as err:
+            self.permissions_readable = False
+            log.error(
+                "cannot read roles (GET /roles needs MANAGE_ROLES) and the permissions route failed (%s): "
+                "commands that use requires= will refuse everyone. Grant this bot MANAGE_ROLES or upgrade the server.",
+                err,
+            )
+            return
+        self.permissions_readable = True
+        log.warning(
+            "cannot read roles (GET /roles needs MANAGE_ROLES); reading each member's permissions from "
+            "GET /members/{id}/permissions instead",
+        )
 
     async def _apply_channel_frame(self, frame: dict[str, Any]) -> None:
         assert self.space is not None
@@ -506,6 +561,12 @@ class Bot:
         )
         await self._dispatch_event("on_command_not_found", ctx, CommandNotFound(invoked_with))
 
+    def _permission_refusal(self, err: CommandError) -> str | None:
+        """Names the real cause when a permission check failed only because this bot cannot read roles."""
+        if isinstance(err, MissingPermissions) and self.permissions_readable is False:
+            return "I can't check permissions yet: my account needs the Manage roles permission."
+        return None
+
     async def _invoke(self, ctx, command):
         try:
             for global_check in self._global_checks:
@@ -518,7 +579,7 @@ class Bot:
             await ctx.reply_ephemeral(str(err), public_fallback=True)
             await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
-            await ctx.reply(str(err))
+            await ctx.reply(self._permission_refusal(err) or str(err))
             await self._dispatch_event("on_command_error", ctx, err)
         except ApiError as err:
             if is_token_revoked(err):
@@ -627,13 +688,11 @@ class Bot:
         self.me_id = me["id"]
         self.username = me.get("username")
         await self.space.refresh_channels()
-        try:
-            await self.space.refresh_roles()
-        except ApiError as err:
-            if not is_forbidden(err):
-                raise
+        self.permissions_readable = None
+        await self._load_roles()
         await self.space.refresh_members()
-        await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
+        await self._adopt_assigned_prefix(me)
+        await self._register_commands()
         if self._ui:
             self._ui_registered = await register_ui(self.client, self._ui)
         await self._dispatch_event("on_connect")

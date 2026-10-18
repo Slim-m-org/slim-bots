@@ -16,8 +16,9 @@ CHANNELS = [
 CATEGORIES = [{"id": "cat-general", "name": "general"}, {"id": "cat-dev", "name": "dev"}]
 
 
-def setup(pinned=None):
+def setup(pinned=None, channel="general/chat"):
     """A fresh store per test, so `!welcome here` from one test never leaks into the next."""
+    greeter.GREETER_CHANNEL = channel
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/channels", CHANNELS)
     client.respond("GET", "/categories", CATEGORIES)
@@ -49,8 +50,8 @@ def command(client, text, *, author_permissions):
     ))
 
 
-def test_by_default_the_welcome_goes_to_chat_in_general_not_a_chat_elsewhere():
-    client = setup()
+def test_greeter_channel_picks_chat_in_general_not_a_chat_elsewhere():
+    client = setup(channel="general/chat")
     join(client)
     assert client.sent[-1]["channel_id"] == "c-chat"
     assert "@newbie" in client.sent[-1]["content"]
@@ -86,13 +87,15 @@ def test_slimm_channels_still_pins_the_channel_outright():
 
 
 def test_no_matching_channel_posts_nothing_rather_than_guessing():
-    client = setup()
-    greeter.GREETER_CHANNEL = "nowhere/lobby"
-    try:
-        join(client)
-        assert client.sent == []
-    finally:
-        greeter.GREETER_CHANNEL = "general/chat"
+    client = setup(channel="nowhere/lobby")
+    join(client)
+    assert client.sent == []
+
+
+def test_with_nothing_configured_it_posts_nothing_rather_than_guessing():
+    client = setup(channel="")
+    join(client)
+    assert client.sent == []
 
 
 def test_a_custom_message_template_is_honoured():

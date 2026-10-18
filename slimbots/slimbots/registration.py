@@ -18,6 +18,14 @@ class RegistrationRejected(ApiError):
         self.route = route
 
 
+class RegistrationConflict(ApiError):
+    """The server answered 409: another bot holds this prefix and command name, or the prefix is not the assigned one."""
+
+    def __init__(self, route: str, cause: ApiError) -> None:
+        super().__init__(cause.status, cause.body)
+        self.route = route
+
+
 MAX_REGISTERED_COMMANDS = 50
 MAX_DESCRIPTION_LEN = 100
 MAX_USAGE_LEN = 80
@@ -54,4 +62,6 @@ async def register_commands(client: AsyncClient, *, prefix: str, commands: list[
             return False
         if err.status == 400:
             raise RegistrationRejected("/bots/commands", err) from err
+        if err.status == 409:
+            raise RegistrationConflict("/bots/commands", err) from err
         raise
