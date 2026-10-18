@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source parsers against recorded Epic, GamerPower and Steam answers; run directly: python3 test_sources.py."""
+"""Source parsers against recorded GamerPower and Steam answers; run directly: python3 test_sources.py."""
 
 import os
 import sys
@@ -22,50 +22,38 @@ def web(**answers):
     return transport
 
 
-def test_epic_keeps_only_games_free_right_now():
-    offers = sources.parse_epic(fixtures.load("epic_free_games"))
-    assert [o.title for o in offers] == ["Bad Cheese", "Agent A: A puzzle in disguise"], "upcoming and discounted-but-paid entries are skipped"
-    assert offers[0].url == "https://store.epicgames.com/en-US/p/bad-cheese-4256d9" and offers[0].store == "epic"
-    assert offers[0].ends_at.isoformat() == "2026-10-22T15:00:00+00:00"
-
-
-def test_epic_ignores_add_ons_and_a_missing_window():
-    data = fixtures.load("epic_free_games")
-    for element in data["data"]["Catalog"]["searchStore"]["elements"]:
-        if element["title"] == "Bad Cheese":
-            element["offerType"] = "ADD_ON"
-    assert [o.title for o in sources.parse_epic(data)] == ["Agent A: A puzzle in disguise"]
-
-
-def test_gamerpower_steam_and_gog_items_become_offers():
-    steam = sources.parse_gamerpower(fixtures.load("gamerpower_steam"), "steam")
+def test_gamerpower_steam_items_become_offers():
+    steam = sources.parse_gamerpower(fixtures.load("gamerpower_steam"))
     assert [(o.store, o.offer_id, o.worth) for o in steam] == [("steam", "3716", "$9.99")]
     assert steam[0].ends_at is None, "N/A means no end date"
-    gog = sources.parse_gamerpower(fixtures.load("gamerpower_gog"), "gog")
-    assert gog[0].title.startswith("Example Quest") and gog[0].url.endswith("example-quest-gog-giveaway")
 
 
 def test_gamerpower_empty_answer_is_no_offers_and_expired_or_dlc_are_skipped():
-    assert sources.parse_gamerpower(fixtures.load("gamerpower_gog_empty"), "gog") == []
+    assert sources.parse_gamerpower({}) == []
     items = fixtures.load("gamerpower_steam")
     items[0]["status"] = "Expired"
-    assert sources.parse_gamerpower(items, "steam") == []
+    assert sources.parse_gamerpower(items) == []
     items[0].update(status="Active", type="DLC")
-    assert sources.parse_gamerpower(items, "steam") == []
+    assert sources.parse_gamerpower(items) == []
 
 
-def test_fetch_offers_isolates_a_failing_source():
-    transport = web(
-        freeGamesPromotions=(500, b""), **{"platform=steam": (200, fixtures.raw("gamerpower_steam"))},
-        **{"platform=gog": (201, fixtures.raw("gamerpower_gog_empty"))},
-    )
-    offers, errors = sources.fetch_offers(["epic", "steam", "gog"], transport)
-    assert [o.store for o in offers] == ["steam"] and errors == {"epic": "http 500"}
+def test_steam_is_the_only_store_asked_for():
+    asked = []
+
+    def transport(url, headers):
+        asked.append(url)
+        return 200, fixtures.raw("gamerpower_steam")
+
+    offers, error = sources.fetch_offers(transport)
+    assert [o.store for o in offers] == ["steam"] and error == ""
+    assert len(asked) == 1 and "platform=steam" in asked[0]
+    assert not hasattr(sources, "parse_epic") and not any(w in sources.GAMERPOWER_URL for w in ("gog", "epic"))
 
 
 def test_fetch_offers_reports_connection_and_garbage_errors_without_raising():
-    _, errors = sources.fetch_offers(["epic", "steam"], web(freeGamesPromotions=OSError("down"), **{"platform=steam": (200, b"<html>")}))
-    assert errors == {"epic": "could not connect (OSError)", "steam": "the answer is not JSON"}
+    assert sources.fetch_offers(web(platform=OSError("down")))[1] == "could not connect (OSError)"
+    assert sources.fetch_offers(web(platform=(200, b"<html>")))[1] == "the answer is not JSON"
+    assert sources.fetch_offers(web(platform=(500, b"")))[1] == "http 500"
 
 
 def test_quote_reads_price_currency_and_discount():

@@ -1,0 +1,71 @@
+{
+ "total": 10,
+ "items": [
+  {
+   "type": "app",
+   "name": "Portal 2",
+   "id": 620,
+   "price": {
+    "currency": "USD",
+    "initial": 999,
+    "final": 999
+   },
+   "metascore": "95"
+  },
+  {
+   "type": "app",
+   "name": "Portal",
+   "id": 400,
+   "price": {
+    "currency": "USD",
+    "initial": 999,
+    "final": 999
+   },
+   "metascore": "90"
+  },
+  {
+   "type": "app",
+   "name": "Portal Knights",
+   "id": 374040,
+   "price": {
+    "currency": "USD",
+    "initial": 1999,
+    "final": 1999
+   },
+   "metascore": "72"
+  },
+  {
+   "type": "app",
+   "name": "Bridge Constructor Portal",
+   "id": 684410,
+   "price": {
+    "currency": "USD",
+    "initial": 999,
+    "final": 999
+   },
+   "metascore": "77"
+  },
+  {
+   "type": "app",
+   "name": "Bridge Constructor Portal - Portal Proficiency",
+   "id": 1113550,
+   "price": {
+    "currency": "USD",
+    "initial": 399,
+    "final": 399
+   },
+   "metascore": ""
+  },
+  {
+   "type": "app",
+   "name": "Portal Dungeon",
+   "id": 1679220,
+   "price": {
+    "currency": "USD",
+    "initial": 1499,
+    "final": 1499
+   },
+   "metascore": ""
+  }
+ ]
+}

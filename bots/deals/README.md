@@ -1,8 +1,8 @@
-# deals
+# Steam Deals
 
-A slim-m bot that posts free-to-keep games from the Epic Games Store, Steam and GOG into one channel, and pings a member in that channel when a Steam game they are watching falls to their target price.
+A slim-m bot (directory `bots/deals`, command `!deals`) that posts free-to-keep Steam games into one channel, and pings a member in that channel when a Steam game they are watching falls to their target price.
 
-Needs `slim-m>=0.9.3`.
+Needs `slim-m>=0.14.0`.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `deals.db`).
 No API key is needed anywhere, and it uses only the standard library for fetching (`urllib`) and parsing (`json`).
@@ -22,11 +22,18 @@ It does not use `SLIMM_CHANNELS`: it posts where `!deals setup` was run.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `!deals setup` | Manage Server | make this channel the deals channel; the first check runs within a minute |
-| `!deals sources <list>` | Manage Server | choose among `epic`, `steam`, `gog`, comma separated |
 | `!deals now` | Manage Server | check free games and watches right away (once a minute at most) |
-| `!pricewatch <steam link or app id> <price>` | anyone | watch a game, for example `!pricewatch store.steampowered.com/app/620/ 4.99` |
+| `!pricewatch <game name, Steam link or app id> <price>` | anyone | watch a game, for example `!pricewatch portal 2 4.99` or `!pricewatch store.steampowered.com/app/620/ 4.99` |
 | `!pricewatch list` | anyone | your own watches with the last price seen |
 | `!pricewatch remove <id>` | anyone | stop one of your watches |
+
+A name is looked up with Steam's store search.
+One clear hit (the only result, or the only one whose name equals what you typed) is used, and the reply names the game and its app id so a wrong match is easy to spot.
+Otherwise the bot posts a short list of buttons that only you can press; a link or an app id skips the search.
+If Steam finds nothing, the reply asks for the store link or the app id.
+
+A command that fails unexpectedly answers with one short line only you can see, and the details go to the bot's log.
+`!deals now` also says when the deals channel refused a post.
 
 Replies to watch commands, refusals and `!deals now` are private ("only you can see this"); the free-game posts and price pings are public, in the deals channel.
 Watching the same game again updates the target and re-arms the ping.
@@ -34,15 +41,14 @@ Each member can hold 20 watches.
 
 ## Where the data comes from
 
-| Store | Source | Notes |
+| What | Source | Notes |
 | --- | --- | --- |
-| Epic | Epic's own `freeGamesPromotions` endpoint, used by the store's front page | A game counts only while its price is 0 and a promotion is live; upcoming weeks are ignored. Epic writes a free game as `discountPercentage: 0`. The country follows `DEALS_CC`. |
-| Steam | [GamerPower](https://www.gamerpower.com/api-read) giveaways, `platform=steam&type=game` | Keyless. Includes publisher key giveaways as well as 100% off promotions, since both are free to keep. |
-| GOG | GamerPower, `platform=gog&type=game` | Keyless. GOG has no public giveaway API of its own, so this depends on GamerPower noticing the giveaway. It answered "none active" when the fixtures were recorded, so `fixtures/gamerpower_gog.json` is the recorded Epic answer reshaped for GOG, not a real GOG capture. |
-| Steam prices | `store.steampowered.com/api/appdetails` (`filters=basic,price_overview`) | Keyless. Steam allows roughly 200 requests per five minutes; the daily check asks once per distinct game and waits `DEALS_STEAM_DELAY` seconds between games. |
+| Free games | [GamerPower](https://www.gamerpower.com/api-read) giveaways, `platform=steam&type=game` | Keyless. Includes publisher key giveaways as well as 100% off promotions, since both are free to keep. Epic and GOG are no longer checked. |
+| Prices | `store.steampowered.com/api/appdetails` (`filters=basic,price_overview`) | Keyless. Steam allows roughly 200 requests per five minutes; the daily check asks once per distinct game and waits `DEALS_STEAM_DELAY` seconds between games. |
+| Game search | `store.steampowered.com/api/storesearch/?term=...&cc=...&l=en` | Keyless. Used only by `!pricewatch` with a name. |
 
 GamerPower asks callers to stay under about four requests per second and to link back; the bot makes at most three requests every three hours.
-Each offer is posted once, keyed by store and offer id in sqlite, and its message id is derived from that key, so a crash between the post and the bookkeeping cannot double post.
+Each offer is posted once, keyed by offer id in sqlite, and its message id is derived from that key, so a crash between the post and the bookkeeping cannot double post.
 An offer whose post is refused is not marked seen and is retried on the next run.
 A run posts at most 10 offers.
 
@@ -61,8 +67,7 @@ A Steam outage leaves watches untouched.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DEALS_SOURCES` | `epic,steam,gog` | sources used until `!deals sources` changes them |
-| `DEALS_CC` | `us` | Steam country code for prices, and Epic's country |
+| `DEALS_CC` | `us` | Steam country code for prices and search |
 | `DEALS_FREEBIES_INTERVAL` | `10800` | seconds between free-game checks, at least 900 |
 | `DEALS_WATCH_INTERVAL` | `86400` | seconds between price checks, at least 3600 |
 | `DEALS_STEAM_DELAY` | `1.5` | seconds between Steam lookups in one price check |
@@ -84,7 +89,7 @@ Compose entry, following the other bots (the `command` path is hardcoded per bot
 
 ## What it does not do
 
-- No stores beyond Steam for price watches, and no DMs: pings are public mentions in the deals channel.
+- No store beyond Steam, and no DMs: pings are public mentions in the deals channel.
 - No DLC, demos or in-game item giveaways; only games.
 - No claiming: it links to the offer and the member claims it themselves.
 - Steam region quirks (a game priced differently per country) are not compared; a watch uses the one configured country.

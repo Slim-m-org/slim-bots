@@ -1,4 +1,4 @@
-"""Loads the recorded API answers in fixtures/ (Epic, GamerPower, Steam appdetails) for the tests."""
+"""Loads the recorded API answers in fixtures/ (GamerPower, Steam appdetails and storesearch) for the tests."""
 
 import json
 import os
