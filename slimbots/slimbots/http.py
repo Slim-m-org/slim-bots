@@ -146,6 +146,10 @@ class AsyncClient:
             params["after"] = after
         return await self.call("GET", "/members", params=params)
 
+    async def member_permissions(self, user_id: str) -> Any:
+        """A member's effective permission bits; a bot may read these without MANAGE_ROLES."""
+        return await self.call("GET", f"/members/{user_id}/permissions")
+
     async def list_channels(self) -> Any:
         return await self.call("GET", "/channels")
 
