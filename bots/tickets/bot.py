@@ -125,7 +125,7 @@ async def open_ticket(interaction):
     if number is None:
         _, channel_id = await bot.store.run(ticketdb.live_ticket, interaction.user_id)
         channel = bot.space.get_channel(channel_id) if channel_id else None
-        where = f"#{channel.name}" if channel else "one that is still being set up"
+        where = f"<#{channel_id}>" if channel else "one that is still being set up"
         await interaction.reply_ephemeral(f"you already have an open ticket: {where}. close it before opening another.")
         return
     try:
@@ -136,12 +136,15 @@ async def open_ticket(interaction):
         await interaction.reply_ephemeral("could not open a ticket: the bot needs Manage Channels and Manage Roles. tell an admin.")
         return
     await bot.store.run(ticketdb.activate, number, channel["id"])
-    await bot.client.send(
-        channel["id"], f"Ticket {number:04d} for <@{interaction.user_id}>. Staff will be with you soon. "
-        f"Say what it is about with `{bot.prefix}ticket reason <text>`.",
-        components=ticket_buttons(claimed=False),
-    )
-    await interaction.reply_ephemeral(f"your ticket is open: #{channel['name']}")
+    await bot.client.send(channel["id"], await opening_message(number, interaction.user_id, role_id), components=ticket_buttons(claimed=False))
+    await interaction.reply_ephemeral(f"Your ticket is open: <#{channel['id']}>")
+
+
+async def opening_message(number, opener_id, role_id):
+    opener = await bot.space.find_member(opener_id)
+    role = bot.space.get_role(role_id)
+    pings = " ".join(p for p in (f"@{opener.username}" if opener else "", f"@[{role.name}]" if role else "") if p)
+    return f"Ticket {number:04d} for {pings}. Staff will be with you soon. Say what it is about with `{bot.prefix}ticket reason <text>`."
 
 
 async def create_private_channel(number, opener_id, role_id):
