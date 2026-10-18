@@ -3,8 +3,10 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
-## Unreleased
+## 0.13.0
 
+- A bot takes the prefix the server assigned it when it was added (the `bot_prefix` on `/me`) and logs a warning when that differs from the configured one. A command the server refuses because another bot already answers to it under the same prefix is logged and skipped instead of retried.
+- When a bot cannot read roles it falls back to `GET /members/{id}/permissions`, which needs no role permission, and says once in the log that it is doing so. `space.refresh_permissions(member)` does that lookup on demand.
 - `ValidationError` is a `BadArgument`, so a command that lets a `require_*` check raise replies with its text instead of each command catching it.
 - `requires=` is typed as the permission bit it holds, and `requires_message=` sets the reply a member without it gets. That reply (`MissingPermissions`) now goes only to them, falling back to a public reply on a server without ephemeral messages.
 - `bot.run_cli(check=...)` is the `__main__` entry point: it runs pre-flight checks, turns a config `RuntimeError` into an exit message, and exits with `run()`'s code.
