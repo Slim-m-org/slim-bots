@@ -5,16 +5,15 @@ import asyncio
 import json
 import os
 import re
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("MC_LOG_PATH", "unused.log")
 
 import mc_core as core  # noqa: E402
 from logtail import LogTail  # noqa: E402
 from rcon import RconAuthError, RconClient, RconError  # noqa: E402
 from rcon_fake import FakeRcon  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 MAX_LINE = 8192
 VANILLA = "[12:00:01] [Server thread/INFO]: "
@@ -218,8 +217,4 @@ def test_rcon_wrong_password_raises_auth_error_without_leaking_it():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

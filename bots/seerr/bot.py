@@ -2,7 +2,6 @@
 """bot-seerr: announces new, approved, declined and available requests, and answers `!request`; see README.md.
 Split per docs/framework.md: this is the entry point, seerr_core.py holds the Seerr side, bots/arrkit the shared half."""
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -29,11 +28,11 @@ async def send_post(post):
 
 
 async def poll_once():
-    requests = await asyncio.to_thread(seerr_core.fetch_recent_requests)
+    requests = await seerr_core.fetch_recent_requests()
     if await bot.store.run(seerr_core.bootstrap, requests):
         return
     wanted = await bot.store.run(seerr_core.fresh_media, requests)
-    infos = {pair: await asyncio.to_thread(seerr_core.media_details, *pair) for pair in wanted}
+    infos = {pair: await seerr_core.media_details(*pair) for pair in wanted}
     for post in await bot.store.run(seerr_core.plan_posts, requests, lambda kind, tmdb_id: infos[(kind, tmdb_id)]):
         try:
             await send_post(post)

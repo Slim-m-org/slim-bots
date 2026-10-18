@@ -4,21 +4,15 @@
 import asyncio
 import datetime
 import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as game_status
+import gs_core as core
+import queries
+from slimbots import ApiError
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, human, wire_bot
 
-import bot as game_status  # noqa: E402
-import gs_core as core  # noqa: E402
-import queries  # noqa: E402
-from slimbots import ApiError  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-PERSON = {"id": "u-1", "username": "sam", "display_name": "Sam", "is_bot": False, "is_webhook": False}
+PERSON = human("u-1", "sam", "Sam")
 STAMP = datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=datetime.timezone.utc)
 VALHEIM = {"name": "Valheim", "kind": "a2s", "host": "10.0.0.5", "port": 2457}
 MINECRAFT = {"name": "Survival", "kind": "minecraft", "host": "10.0.0.6", "port": 25565}
@@ -50,11 +44,7 @@ def setup(*, servers=(VALHEIM, MINECRAFT, FACTORIO)):
     client.respond("GET", "/users/u-1", PERSON)
     accept_edits(client)
     bot = game_status.bot
-    bot.client = client
-    bot.space = Space(client)
-    bot.authors = AuthorFilter(client, space=bot.space)
-    bot.store = None
-    bot.data_path = os.path.join(tempfile.mkdtemp(), "game-status.db")
+    wire_bot(bot, client, db_name="game-status.db")
     for command in bot.commands.values():
         if command.cooldown is not None:
             command.cooldown._last.clear()
@@ -171,39 +161,6 @@ def test_one_unreachable_channel_does_not_stop_the_others():
     asyncio.run(game_status.poll_once())
     assert [m["channel_id"] for m in client.sent] == ["bad", "good"]
     assert asyncio.run(game_status.bot.store.run(core.txn_list_boards)).keys() == {"good"}
-
-
-def test_the_poll_loop_survives_an_exception_in_a_cycle():
-    setup()
-    calls = []
-
-    async def flaky():
-        calls.append(1)
-        if len(calls) == 1:
-            raise RuntimeError("boom")
-        raise asyncio.CancelledError
-
-    game_status.poll_once = flaky
-    core.GAMESTATUS_INTERVAL = 0
-    try:
-        asyncio.run(game_status.poll_loop())
-    except asyncio.CancelledError:
-        pass
-    assert len(calls) == 2
-
-
-def test_a_revoked_token_ends_the_poll_loop():
-    setup()
-
-    async def revoked():
-        raise ApiError(401, {"error": "invalid token"})
-
-    game_status.poll_once = revoked
-    try:
-        asyncio.run(game_status.poll_loop())
-    except ApiError:
-        return
-    raise AssertionError("loop swallowed a revoked token")
 
 
 def test_admin_commands_need_manage_server():

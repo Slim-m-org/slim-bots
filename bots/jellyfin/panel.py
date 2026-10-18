@@ -5,9 +5,9 @@ from __future__ import annotations
 import contextlib
 
 from slimbots import ApiError, Button, rows
+from slimbots.media import format_hms
 
 import quality
-from stream_session import format_hms
 
 SKIP_SECONDS = 30
 ID_PREFIX = "jf:"

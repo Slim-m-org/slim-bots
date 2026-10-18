@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Batching, the rate limits and the roster rules, on a fake clock; run directly: python3 test_flow.py."""
 
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import mc_core as core  # noqa: E402
-from flow import Batcher, Bridge, MinuteCap  # noqa: E402
+import mc_core as core
+from flow import Batcher, Bridge, MinuteCap
+from slimbots.testing import run_module_tests
 
 
 class Clock:
@@ -119,8 +116,4 @@ def test_announce_setting_filters_kinds_but_still_tracks_the_roster():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

@@ -1,4 +1,4 @@
 # Everything on the game-server side is the standard library (asyncio sockets); the slim-m side uses slimbots.
 websockets>=12
 httpx>=0.27
-slim-m>=0.9.3
+slim-m>=0.13.0

@@ -1,12 +1,12 @@
 """bot-pelican's settings, Pelican Client API access, and rendering; see docs/framework.md.
 Never imports `bot` (the entry point) - see "Splitting a bot across files" there for why."""
 
-import json
-import urllib.error
 import urllib.parse
-import urllib.request
 
 from slimbots import Permissions
+from slimbots.text import format_duration
+from slimbots.urlpolicy import service_url_problem
+from slimbots.web import JsonService, ServiceAuthError, ServiceError, ServiceHTTPError, ServiceUnreachable
 
 USER_AGENT = "slimm-bot-pelican/1.0"
 REQUEST_TIMEOUT_SECONDS = 20
@@ -34,26 +34,11 @@ class PelicanAuthError(PelicanError):
     """The panel rejected the API key - terminal for the status loop."""
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect would replay the Authorization header at wherever it points, so none is followed."""
-
-    def redirect_request(self, *_args, **_kwargs):
-        return None
-
-
-_opener = urllib.request.build_opener(_NoRedirect)
-
-
 def url_problem(url, allow_http):
     """Why `url` cannot be the panel address, or None; https is required unless the operator opted into LAN http."""
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ("https", "http") or not parts.hostname:
-        return "PELICAN_URL must be an http(s) URL with a host"
-    if parts.username or parts.password:
-        return "PELICAN_URL must not embed credentials; the key goes in PELICAN_API_KEY"
-    if parts.scheme == "http" and not allow_http:
-        return "PELICAN_URL is http; use https, or set PELICAN_ALLOW_HTTP=1 for a trusted LAN panel"
-    return None
+    return service_url_problem(
+        "PELICAN_URL", url, allow_http=allow_http, loopback_http=False, opt_in="PELICAN_ALLOW_HTTP", key_setting="PELICAN_API_KEY",
+    )
 
 
 def permission_problem(name):
@@ -87,35 +72,32 @@ def check_config():
     return url_problem(PELICAN_URL, PELICAN_ALLOW_HTTP) or permission_problem(PELICAN_CONTROL_PERMISSION)
 
 
-def _request(method, path, params=None, body=None):
-    query = f"?{urllib.parse.urlencode(params)}" if params else ""
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(f"{PELICAN_URL}/api/client{path}{query}", data=data, method=method)
-    request.add_header("authorization", f"Bearer {PELICAN_API_KEY}")
-    request.add_header("accept", "application/json")
-    request.add_header("user-agent", USER_AGENT)
-    if data is not None:
-        request.add_header("content-type", "application/json")
+async def _request(method, path, params=None, body=None):
+    # No redirect is followed: one would replay the Authorization header at wherever it points.
+    panel = JsonService(
+        "the panel", PELICAN_URL, headers={"authorization": f"Bearer {PELICAN_API_KEY}", "accept": "application/json"},
+        user_agent=USER_AGENT, timeout=REQUEST_TIMEOUT_SECONDS, max_redirects=0,
+    )
     try:
-        with _opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as err:
-        if err.code in (401, 403):
-            raise PelicanAuthError(f"the panel refused the API key (HTTP {err.code})") from None
-        raise PelicanError(f"the panel answered HTTP {err.code}") from None
-    except (urllib.error.URLError, TimeoutError, OSError):
+        return await panel.request(method, f"/api/client{path}", params=params or None, body=body)
+    except ServiceAuthError as err:
+        raise PelicanAuthError(f"the panel refused the API key (HTTP {err.status})") from None
+    except ServiceHTTPError as err:
+        raise PelicanError(f"the panel answered HTTP {err.status}") from None
+    except ServiceUnreachable:
         raise PelicanError("the panel could not be reached") from None
-    return json.loads(raw) if raw else None
+    except ServiceError:
+        raise PelicanError("the panel answered with something that is not JSON") from None
 
 
-def api_get(path, params=None):
-    """One authenticated GET, parsed. Sync (urllib); called via asyncio.to_thread."""
-    return _request("GET", path, params)
+async def api_get(path, params=None):
+    """One authenticated GET, parsed."""
+    return await _request("GET", path, params)
 
 
-def api_power(identifier, signal):
-    """One power signal. Sync (urllib); called via asyncio.to_thread."""
-    _request("POST", f"/servers/{urllib.parse.quote(identifier, safe='')}/power", body={"signal": signal})
+async def api_power(identifier, signal):
+    """One power signal."""
+    await _request("POST", f"/servers/{urllib.parse.quote(identifier, safe='')}/power", body={"signal": signal})
 
 
 def is_allowed(server):
@@ -124,11 +106,11 @@ def is_allowed(server):
     return server["name"].lower() in PELICAN_SERVERS or server["identifier"].lower() in PELICAN_SERVERS
 
 
-def list_servers():
-    """Every server the key can see and the filter allows, following pagination. Sync."""
+async def list_servers():
+    """Every server the key can see and the filter allows, following pagination."""
     servers = []
     for page in range(1, MAX_PAGES + 1):
-        payload = api_get("", {"per_page": PAGE_SIZE, "page": page})
+        payload = await api_get("", {"per_page": PAGE_SIZE, "page": page})
         servers.extend(item["attributes"] for item in payload.get("data", []))
         pagination = (payload.get("meta") or {}).get("pagination") or {}
         if page >= pagination.get("total_pages", 1):
@@ -136,9 +118,9 @@ def list_servers():
     return [server for server in servers if is_allowed(server)]
 
 
-def fetch_resources(identifier):
-    """The `attributes` of one server's resource utilisation. Sync."""
-    return api_get(f"/servers/{urllib.parse.quote(identifier, safe='')}/resources")["attributes"]
+async def fetch_resources(identifier):
+    """The `attributes` of one server's resource utilisation."""
+    return (await api_get(f"/servers/{urllib.parse.quote(identifier, safe='')}/resources"))["attributes"]
 
 
 def find_servers(servers, query):
@@ -169,13 +151,6 @@ def format_bytes(count):
     return f"{value:.1f} TiB"
 
 
-def format_uptime(milliseconds):
-    minutes = int(milliseconds // 60000)
-    days, minutes = divmod(minutes, 1440)
-    hours, minutes = divmod(minutes, 60)
-    return f"{days}d {hours}h" if days else f"{hours}h {minutes}m"
-
-
 def memory_text(server, resources):
     used = format_bytes(resources.get("memory_bytes", 0))
     limit_mb = (server.get("limits") or {}).get("memory") or 0
@@ -202,7 +177,7 @@ def detail_text(server, stats):
     lines = [summary_line(server, stats), f"id `{server['identifier']}` on node {server.get('node', '?')}"]
     resources = (stats or {}).get("resources")
     if resources:
-        lines.append(f"disk {format_bytes(resources.get('disk_bytes', 0))}, uptime {format_uptime(resources.get('uptime', 0))}")
+        lines.append(f"disk {format_bytes(resources.get('disk_bytes', 0))}, uptime {format_duration(resources.get('uptime', 0) // 1000, 'uptime')}")
         lines.append(
             f"network in {format_bytes(resources.get('network_rx_bytes', 0))}, out {format_bytes(resources.get('network_tx_bytes', 0))}"
         )

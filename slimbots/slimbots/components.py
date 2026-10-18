@@ -56,6 +56,11 @@ class Button:
 Rows = Sequence[Union[Sequence[Button], "dict[str, Any]"]]
 
 
+def grid(buttons: Sequence[Button], per_row: int = MAX_BUTTONS_PER_ROW) -> list[list[Button]]:
+    """`buttons` split into rows of at most `per_row`, in order, ready for `rows(*grid(...), [extra])`."""
+    return [list(buttons[i:i + per_row]) for i in range(0, len(buttons), per_row)]
+
+
 def rows(*layout: Sequence[Button] | dict[str, Any]) -> list[dict[str, Any]]:
     """`rows([Button("Hit", "hit"), Button("Stand", "stand")], [...])` as the `components` a send takes."""
     return to_wire(layout)

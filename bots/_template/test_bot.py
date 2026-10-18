@@ -3,28 +3,20 @@
 
 import asyncio
 import os
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as template
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
-import bot as template  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-PERSON = {"id": "u-1", "username": "sam", "display_name": "Sam", "is_bot": False, "is_webhook": False}
+PERSON = human("u-1", "sam", "Sam")
 
 
 def setup():
     """A fresh store and cooldown per test, so nothing leaks from one test into the next."""
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/users/u-1", PERSON)
-    template.bot.client = client
-    template.bot.space = Space(client)
-    template.bot.authors = AuthorFilter(client, space=template.bot.space)
-    template.bot.store = None
+    wire_bot(template.bot, client)
     template.bot.commands["vote"].cooldown._last.clear()
     template.bot.data_path = os.path.join(tempfile.mkdtemp(), "template.db")
     asyncio.run(template.bot.space.refresh_members())
@@ -91,8 +83,4 @@ def test_a_press_with_an_unknown_choice_is_acked_not_counted():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

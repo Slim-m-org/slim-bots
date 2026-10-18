@@ -34,13 +34,8 @@ def session_for_panel(message_id):
     return None
 
 
-def channel_name(bot, channel_id):
-    channel = bot.space.channels.get(channel_id)
-    return f"#{channel.name}" if channel is not None else channel_id
-
-
 def _names(bot, channel_ids):
-    return ", ".join(channel_name(bot, channel_id) for channel_id in channel_ids)
+    return ", ".join(bot.space.channel_label(channel_id) for channel_id in channel_ids)
 
 
 async def resolve_session(ctx):
@@ -59,5 +54,5 @@ async def resolve_session(ctx):
     if channel_id is None:
         await answers.tell(ctx, f"streams are playing in {running} - join the voice channel you mean, then try again.")
     else:
-        await answers.tell(ctx, f"nothing is playing in {channel_name(ctx.bot, channel_id)} (streaming in {running}).")
+        await answers.tell(ctx, f"nothing is playing in {ctx.bot.space.channel_label(channel_id)} (streaming in {running}).")
     return None

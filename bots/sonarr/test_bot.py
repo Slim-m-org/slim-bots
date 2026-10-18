@@ -4,10 +4,7 @@
 import asyncio
 import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SONARR_URL", "http://sonarr:8989")
 os.environ.setdefault("SONARR_API_KEY", "fake-key")
 
@@ -16,6 +13,7 @@ import sonarr_cog  # noqa: E402
 import sonarr_core as core  # noqa: E402
 from arrkit import history, poller, store  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
+from slimbots.testing import run_module_tests  # noqa: E402
 
 harness = Harness(sonarr.bot, core.init_db)
 
@@ -160,7 +158,7 @@ def test_a_configured_profile_name_and_root_folder_win_over_the_first_listed():
     try:
         api = FakeApi(**{"/qualityprofile": [{"id": 1, "name": "SD"}, {"id": 9, "name": "Ultra"}], "/rootfolder": [{"path": "/media/tv"}]})
         with Patched(core, "api", api):
-            core.add({"title": "X", "tvdbId": 5})
+            asyncio.run(core.add({"title": "X", "tvdbId": 5}))
     finally:
         core.QUALITY_PROFILE, core.ROOT_FOLDER = saved
     assert api.posts()[0][3]["qualityProfileId"] == 9 and api.posts()[0][3]["rootFolderPath"] == "/media/other"
@@ -174,8 +172,4 @@ def test_adding_with_no_profile_or_root_folder_says_what_sonarr_lacks():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

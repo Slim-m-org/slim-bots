@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """A 0.2.0 database carried over into 0.3.0 must pick up new columns, not crash; run directly: python3 test_migrations.py."""
 
-import os
 import sqlite3
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as board  # noqa: E402
+import bot as board
+from slimbots.testing import run_module_tests
 
 
 def a_0_2_0_items_table():
@@ -59,8 +56,4 @@ def test_a_fresh_0_3_0_database_still_gets_added_by_from_the_create_table_itself
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

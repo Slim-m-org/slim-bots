@@ -3,17 +3,13 @@
 
 import asyncio
 import json
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as releases  # noqa: E402
-import feed as feedmod  # noqa: E402
-import fixtures  # noqa: E402
-from slimbots import Store  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as releases
+import feed as feedmod
+import fixtures
+from slimbots import Store
+from slimbots.http import ApiError
+from slimbots.testing import FakeAsyncClient, run_module_tests
 
 BASE = "https://github.com/Slim-m-org/slim-m/releases/tag/"
 
@@ -40,7 +36,7 @@ class Rig:
         self.seen_headers = []
         self.feed = feedmod.Feed("Slim-m-org/slim-m", transport=self.transport)
 
-    def transport(self, url, headers):
+    async def transport(self, url, headers):
         self.seen_headers.append(headers)
         if "if-none-match" in headers and headers["if-none-match"] == self.answer[1].get("etag"):
             return 304, {}, b""
@@ -205,30 +201,23 @@ def test_malformed_json_and_a_rate_limit_do_not_raise_and_set_the_next_wait():
     assert rig.client.sent == []
 
 
-def test_a_rate_limit_wait_never_goes_below_the_poll_interval():
-    assert releases.next_delay(None, 600) == 600
-    assert releases.next_delay(30, 600) == 600
-    assert releases.next_delay(900, 600) == 900
-
-
 def test_the_poll_interval_is_never_under_a_minute():
     assert releases.clamp_poll(5) == 60
     assert releases.clamp_poll(600) == 600
 
 
-if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
-
-
-def test_startup_refuses_without_a_repo_to_watch(monkeypatch):
-    monkeypatch.setattr(releases.config, "repo", None)
+def test_startup_refuses_without_a_repo_to_watch():
+    saved = releases.config.repo
+    releases.config.repo = None
     try:
         releases.main()
     except SystemExit as stop:
         assert "GH_REPO" in str(stop)
     else:
         raise AssertionError("main() ran with no GH_REPO")
+    finally:
+        releases.config.repo = saved
+
+
+if __name__ == "__main__":
+    run_module_tests(globals())

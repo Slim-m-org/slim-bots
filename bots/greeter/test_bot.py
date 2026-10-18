@@ -2,19 +2,12 @@
 """Event-layer tests against FakeAsyncClient; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bot as greeter
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
-import bot as greeter  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
-
-NEWBIE = {"id": "u-new", "username": "newbie", "display_name": "Newbie", "is_bot": False, "is_webhook": False}
+NEWBIE = human("u-new", "newbie", "Newbie")
 CHANNELS = [
     {"id": "c-chat", "name": "chat", "kind": "text", "category_id": "cat-general", "created_at": 0},
     {"id": "c-chat-dev", "name": "chat", "kind": "text", "category_id": "cat-dev", "created_at": 0},
@@ -30,11 +23,7 @@ def setup(pinned=None, channel="general/chat"):
     client.respond("GET", "/channels", CHANNELS)
     client.respond("GET", "/categories", CATEGORIES)
     greeter.bot.channels = {pinned} if pinned else None
-    greeter.bot.client = client
-    greeter.bot.space = Space(client)
-    greeter.bot.authors = AuthorFilter(client, space=greeter.bot.space)
-    greeter.bot.store = None
-    greeter.bot.data_path = os.path.join(tempfile.mkdtemp(), "greeter.db")
+    wire_bot(greeter.bot, client, db_name="greeter.db")
     asyncio.run(greeter.bot.space.refresh_members())
     asyncio.run(greeter.bot.open_store(migrate=greeter.init_db))
     return client
@@ -50,7 +39,7 @@ def join(client):
 
 
 def command(client, text, *, author_permissions):
-    author = {"id": "u-admin", "username": "admin", "display_name": "Admin", "is_bot": False, "is_webhook": False}
+    author = human("u-admin", "admin", "Admin")
     client.respond("GET", "/users/u-admin", author)
     greeter.bot.space.members.pop("u-admin", None)
     member = greeter.bot.space._make_member({**author, "role_ids": []})
@@ -129,8 +118,4 @@ def test_an_unresolvable_join_posts_nothing():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

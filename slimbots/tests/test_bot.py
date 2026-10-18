@@ -132,7 +132,7 @@ async def test_permission_gate_denies_without_roles_loaded(bot, client):
         await ctx.reply("promoted")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!promote @nick"})
-    assert "do not have permission" in client.sent[-1]["content"]
+    assert "do not have permission" in client.ephemerals[-1]["content"]
 
 
 async def test_permission_gate_allows_a_role_holder(client):
@@ -317,3 +317,13 @@ async def test_a_token_revocation_propagates_instead_of_being_swallowed(bot, cli
 
     with pytest.raises(ApiError):
         await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!whoami"})
+
+
+async def test_permission_gate_replies_with_the_commands_own_message_privately(bot, client):
+    @bot.command(requires=Permissions.MANAGE_ROLES, requires_message="only someone with Manage Roles can promote.")
+    async def promote(ctx):
+        await ctx.reply("promoted")
+
+    await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!promote"})
+    assert client.ephemerals[-1]["content"] == "only someone with Manage Roles can promote."
+    assert client.sent == []

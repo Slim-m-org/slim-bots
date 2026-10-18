@@ -1,7 +1,6 @@
-# The Jellyfin side is plain HTTP/JSON via urllib, run off the event loop
-# with asyncio.to_thread. The slim-m side uses slimbots' Bot.
+# Talks to Jellyfin through slimbots' JsonService (0.13.0) and uses slimbots' Bot, voice helpers and Chooser.
 websockets>=12
 httpx>=0.27
-slim-m>=0.9.7
+slim-m>=0.13.0
 # For `!watch`: bot.voice publishes through this. ffmpeg must also be on PATH - see README.md.
 livekit>=1.0

@@ -4,14 +4,14 @@
 import asyncio
 import os
 import sqlite3
-import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("JELLYFIN_URL", "https://fake-jellyfin.invalid")
 os.environ.setdefault("JELLYFIN_API_KEY", "fake-key")
 
 import bot as jellyfin  # noqa: E402
+from slimbots.testing import run_module_tests
+from test_bot import asynced
 
 core = jellyfin.jellyfin_core
 DAY = 86400
@@ -54,7 +54,7 @@ class Feed:
             self.sent.append(entry["item_ids"])
 
         saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
-        core.items_since = lambda cursor: [i for i in self.items if i["DateCreated"] >= cursor]
+        core.items_since = asynced(lambda cursor: [i for i in self.items if i["DateCreated"] >= cursor])
         jellyfin.send_post = send_post
         jellyfin.bot.store = FakeStore(self.conn)
         try:
@@ -182,8 +182,4 @@ def test_the_setting_reads_from_the_environment_style_names():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

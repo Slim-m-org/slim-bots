@@ -5,7 +5,7 @@ import datetime
 import re
 import sqlite3
 
-from slimbots import Embed, Permissions
+from slimbots import Embed
 
 from queries import KINDS
 
@@ -166,7 +166,3 @@ def status_embed(rows, now):
     for server, status in rows:
         embed.add_field(server_title(server, status), server_line(status))
     return embed
-
-
-def may_manage(member):
-    return member.has_permission(Permissions.MANAGE_SERVER)

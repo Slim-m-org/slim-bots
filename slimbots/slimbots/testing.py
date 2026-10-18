@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
+import tempfile
 import time
+from collections.abc import Callable
 from typing import Any
 
+from .authors import AuthorFilter
 from .http import AsyncClient
+from .space import Space
 from .voice import VoiceError
 
 
@@ -204,3 +210,38 @@ class FakeVoice:
     async def find_member(self, user_id: str) -> str | None:
         """The channel id `member_channels` says `user_id` is in, or None - set it directly in a test."""
         return self.member_channels.get(user_id)
+
+
+def human(user_id: str, username: str | None = None, display_name: str | None = None, **extra: Any) -> dict[str, Any]:
+    """The user dict a `GET /users/{id}` or `GET /members` answers with for a plain person."""
+    username = username or user_id
+    return {
+        "id": user_id, "username": username, "display_name": display_name or username.title(),
+        "is_bot": False, "is_webhook": False, **extra,
+    }
+
+
+def wire_bot(bot: Any, client: FakeAsyncClient, *, me_id: str | None = None, db_name: str | None = None) -> None:
+    """Points `bot` at `client` with a fresh Space and AuthorFilter, and (with `db_name`) an unopened temp-dir store path."""
+    bot.client = client
+    bot.space = Space(client)
+    bot.authors = AuthorFilter(client, space=bot.space)
+    if me_id is not None:
+        bot.me_id = me_id
+    if db_name is not None:
+        bot.store = None
+        bot.data_path = os.path.join(tempfile.mkdtemp(), db_name)
+
+
+def handle_frame(bot: Any, frame: dict[str, Any]) -> None:
+    """Drives one gateway frame through `bot` to completion."""
+    asyncio.run(bot._handle_frame(frame))
+
+
+def run_module_tests(namespace: dict[str, Any]) -> None:
+    """The `__main__` runner for a test script: runs every `test_*` callable in `namespace` and prints the tally."""
+    tests: list[Callable[[], Any]] = [v for k, v in list(namespace.items()) if k.startswith("test_") and callable(v)]
+    for test in tests:
+        test()
+        print(f"PASS: {test.__name__}")
+    print(f"all {len(tests)} tests passed")

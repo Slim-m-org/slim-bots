@@ -3,7 +3,7 @@
 A slim-m bot that posts each new GitHub release of a project, with its notes condensed to a short plain list, into one channel.
 Pointed at `Slim-m-org/slim-m` it announces client and server releases without anyone leaving the app.
 
-Needs `slim-m>=0.8.0` (bool and list settings).
+Needs `slim-m>=0.13.0` (`JsonService`; bool and list settings arrived in 0.8.0).
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `github-releases.db`).
 

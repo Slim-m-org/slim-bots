@@ -6,6 +6,8 @@ import json
 import urllib.parse
 from dataclasses import dataclass
 
+from slimbots.text import clip, one_line
+
 MAX_BODY = 64 * 1024
 MAX_HEADER_LINES = 64
 SOURCES = ("kuma", "grafana", "healthchecks", "generic")
@@ -29,8 +31,7 @@ class BadPayload(ValueError):
 
 
 def _text(value, limit=300):
-    text = " ".join(str(value or "").split())
-    return text if len(text) <= limit else text[: limit - 3] + "..."
+    return clip(one_line(value), limit)
 
 
 def parse(source, payload):

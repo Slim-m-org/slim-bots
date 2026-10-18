@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from types import ModuleType
-from typing import Any, Awaitable, Callable, Coroutine, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, NoReturn, Sequence
 
 from . import catchup, cursor
 from . import events as ev
@@ -24,7 +24,7 @@ from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
 from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_ui
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
-from .lifecycle import guard_dispatch, run_with_shutdown
+from .lifecycle import Periodic, guard_dispatch, run_periodic, run_with_shutdown
 from .models import Member
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
@@ -138,6 +138,8 @@ class Bot:
         self.me_id: str | None = None
         self._cursor_conn: sqlite3.Connection | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._periodic: dict[str, Periodic] = {}
+        self._periodic_started: set[str] = set()
         self._fatal_error: BaseException | None = None
         self._main_task: asyncio.Task[Any] | None = None
         self._gateway: Gateway | None = None
@@ -190,6 +192,33 @@ class Bot:
         task.add_done_callback(self._on_background_done)
         return task
 
+    def every(
+        self, seconds: float | Callable[[], float], *, name: str, fatal: tuple[type[BaseException], ...] = (),
+        delay_first: bool = False, on: Literal["connect", "ready"] = "connect",
+        enabled: Callable[[], bool] | None = None, before: Callable[[], Awaitable[Any]] | None = None,
+    ) -> Callable[[Callable[[], Awaitable[Any]]], Callable[[], Awaitable[Any]]]:
+        """Runs the decorated coroutine every `seconds` as a supervised task, started once per process, not per reconnect."""
+        def decorator(func: Callable[[], Awaitable[Any]]) -> Callable[[], Awaitable[Any]]:
+            if name in self._periodic:
+                raise ValueError(f"a periodic task called `{name}` is already registered")
+            self._periodic[name] = Periodic(func, seconds, tuple(fatal), delay_first)
+
+            async def start() -> None:
+                if name in self._periodic_started or (enabled is not None and not enabled()):
+                    return
+                if before is not None:
+                    await before()
+                self._periodic_started.add(name)
+                self.background(self.periodic(name), name=name)
+
+            self._listeners.setdefault(f"on_{on}", []).append(start)
+            return func
+        return decorator
+
+    def periodic(self, name: str) -> Coroutine[Any, Any, None]:
+        """The loop registered under `name` by `every`, for a test to drive without a connection."""
+        return run_periodic(name, self._periodic[name])
+
     def _on_background_done(self, task: asyncio.Task[Any]) -> None:
         self._background_tasks.discard(task)
         if task.cancelled():
@@ -238,26 +267,26 @@ class Bot:
 
     def command(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None, usage: str | None = None,
-        cooldown: float | None = None, cooldown_bucket: str = "user", requires: str | None = None,
+        cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
         check: Callable[[Context], Any] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             self.add_command(Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
-                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, check=check,
+                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
             ))
             return func
         return decorator
 
     def group(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
-        cooldown: float | None = None, cooldown_bucket: str = "user", requires: str | None = None,
+        cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
         check: Callable[[Context], Any] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Group]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Group:
             grp = Group(
                 func, name=name or func.__name__, aliases=aliases, help=help,
-                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, check=check,
+                cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
             )
             self.add_command(grp)
             return grp
@@ -546,6 +575,9 @@ class Bot:
                     await ctx.reply(refusal)
                     return
             await command.invoke(ctx)
+        except MissingPermissions as err:
+            await ctx.reply_ephemeral(str(err), public_fallback=True)
+            await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
             await ctx.reply(self._permission_refusal(err) or str(err))
             await self._dispatch_event("on_command_error", ctx, err)
@@ -796,6 +828,19 @@ class Bot:
                 self._cursor_conn.close()
             if self.store is not None:
                 await self.store.close()
+
+    def run_cli(self, *, check: Callable[[], str | None] | Iterable[Callable[[], str | None]] = ()) -> NoReturn:
+        """The `__main__` entry point: a failed pre-flight check or a config RuntimeError exits with its message."""
+        checks = [check] if callable(check) else list(check)
+        for preflight in checks:
+            problem = preflight()
+            if problem:
+                raise SystemExit(problem)
+        try:
+            code = self.run() or 0
+        except RuntimeError as err:
+            raise SystemExit(str(err))
+        raise SystemExit(code)
 
     def run(self, *, url=None, token=None):
         """A cancelled `start()` (SIGTERM, or a fatal background task) becomes 0 for a clean shutdown, 1 otherwise."""

@@ -1,16 +1,15 @@
 """bot-jellyfin's settings, Jellyfin API client, and post grouping/rendering; see docs/framework.md.
 Never imports `bot` (the entry point) - see "Splitting a bot across files" there for why."""
 
-import http.client
-import json
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 
-from slimbots import Embed
+from slimbots import Embed, KeyValueTable, LedgerTable
+from slimbots import jellyfin as jellyfin_api
+from slimbots.jellyfin import JellyfinAuthError
+from slimbots.web import ServiceError
 from slimbots.limits import Cooldown
 from slimbots.migrations import ensure_columns
 
@@ -41,6 +40,8 @@ STREAM_FIELDS = "RunTimeTicks,MediaStreams"
 STREAM_AUDIO_CHANNELS = 2
 STREAM_AUDIO_BITRATE = 256_000
 
+# An httpx transport, for tests to answer in place of the network.
+TRANSPORT = None
 # Populated once by configure(); a bot script calls it right after building Bot().
 JELLYFIN_URL = ""
 JELLYFIN_API_KEY = ""
@@ -128,12 +129,7 @@ def configure(bot):
 
 def check_jellyfin_config():
     """A plaintext, non-loopback JELLYFIN_URL leaks the API key; presence is `bot.setting`'s job, not this one's."""
-    if not JELLYFIN_URL:
-        return None
-    loopback = urllib.parse.urlsplit(JELLYFIN_URL).hostname in ("localhost", "127.0.0.1", "::1")
-    if not JELLYFIN_URL.startswith("https://") and not loopback:
-        return "refusing a plaintext, non-loopback JELLYFIN_URL: a token on the wire is a leak"
-    return None
+    return jellyfin_api.url_problem(JELLYFIN_URL)
 
 
 def target_channel(bot, library_id):
@@ -147,54 +143,44 @@ def is_excluded(item):
     return bool(genres & JELLYFIN_EXCLUDE_GENRES)
 
 
-class JellyfinAuthError(Exception):
-    """The Jellyfin API key was rejected. Not something to retry."""
-
-
 def jellyfin_auth_header():
-    """`Authorization: MediaBrowser Token="..."` - the one form this Jellyfin version accepts; see README.md."""
-    return f'MediaBrowser Token="{JELLYFIN_API_KEY}"'
+    return jellyfin_api.auth_header(JELLYFIN_API_KEY)
 
 
-def jf_get(path, params=None):
-    """One authenticated Jellyfin GET, returning parsed JSON. Sync (urllib); called via asyncio.to_thread."""
-    query = urllib.parse.urlencode(params or {}, doseq=True)
-    request = urllib.request.Request(f"{JELLYFIN_URL}{path}?{query}")
-    request.add_header("authorization", jellyfin_auth_header())
-    request.add_header("user-agent", USER_AGENT)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.loads(response.read())
-    except urllib.error.HTTPError as err:
-        if err.code == 401:
-            raise JellyfinAuthError("jellyfin api key rejected") from err
-        raise
+def service():
+    """The Jellyfin `JsonService` for the configured url and key; built per call so a test can repoint it."""
+    return jellyfin_api.service(JELLYFIN_URL, JELLYFIN_API_KEY, user_agent=USER_AGENT, transport=TRANSPORT)
 
 
-def jf_get_bytes(path):
+async def jf_get(path, params=None):
+    """One authenticated Jellyfin GET, returning parsed JSON; a rejected key raises `JellyfinAuthError`."""
+    return await service().get(path, params)
+
+
+async def jf_get_bytes(path):
     """One authenticated Jellyfin GET for raw bytes, or None - a missing poster never blocks its message."""
-    request = urllib.request.Request(f"{JELLYFIN_URL}{path}")
-    request.add_header("authorization", jellyfin_auth_header())
-    request.add_header("user-agent", USER_AGENT)
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.read()
-    except (OSError, http.client.HTTPException) as err:
+        return await service().get_bytes(path)
+    except ServiceError as err:
         print(f"jellyfin GET {path.split('?')[0]} failed: {type(err).__name__}: {err}", file=sys.stderr)
         return None
+
+
+STATE = KeyValueTable("state")
+POSTED_ITEMS = LedgerTable("posted_items", key="item_id", detail=None, at="posted_at")
 
 
 def init_db(conn):
     conn.executescript(
         """
-        CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS posted_items (item_id TEXT PRIMARY KEY, posted_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS posted_media (media_key TEXT PRIMARY KEY, posted_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS user_links (
             slimm_user_id TEXT PRIMARY KEY, jellyfin_user_id TEXT NOT NULL, jellyfin_name TEXT NOT NULL, linked_at INTEGER NOT NULL
         );
         """
     )
+    STATE.create(conn)
+    POSTED_ITEMS.create(conn)
     ensure_columns(conn, "user_links", {"verified": "INTEGER NOT NULL DEFAULT 0"})
     # Before the unique index, a jellyfin user claimed twice keeps only its oldest claim.
     conn.execute(
@@ -206,17 +192,12 @@ def init_db(conn):
 
 
 def get_cursor(conn):
-    row = conn.execute("SELECT value FROM state WHERE key = 'cursor'").fetchone()
-    return row[0] if row else None
+    return STATE.get(conn, "cursor")
 
 
 def advance_cursor(conn, value):
     """Only ever moves forward; a lexicographic compare on a fixed-width ISO 8601 UTC string sorts chronologically too."""
-    conn.execute(
-        "INSERT INTO state (key, value) VALUES ('cursor', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE excluded.value > state.value",
-        (value,),
-    )
+    STATE.advance(conn, "cursor", value)
     conn.commit()
 
 
@@ -226,7 +207,7 @@ def cursor_below_unsent(target, unsent_items):
 
 
 def already_posted(conn, item_id):
-    return conn.execute("SELECT 1 FROM posted_items WHERE item_id = ?", (item_id,)).fetchone() is not None
+    return POSTED_ITEMS.has(conn, item_id)
 
 
 def media_keys(item):
@@ -259,10 +240,7 @@ def announced_recently(conn, item):
 def mark_posted(conn, item_ids, quiet=False, items=()):
     """`items` also stamps their media keys, which is what lets a replaced file be recognised later."""
     now = int(time.time())
-    conn.executemany(
-        "INSERT OR IGNORE INTO posted_items (item_id, posted_at) VALUES (?, ?)",
-        [(item_id, 0 if quiet else now) for item_id in item_ids],
-    )
+    POSTED_ITEMS.add_many(conn, item_ids, at=0 if quiet else now)
     conn.executemany(
         "INSERT INTO posted_media (media_key, posted_at) VALUES (?, ?) "
         "ON CONFLICT(media_key) DO UPDATE SET posted_at = excluded.posted_at",
@@ -271,13 +249,13 @@ def mark_posted(conn, item_ids, quiet=False, items=()):
     conn.commit()
 
 
-def bootstrap_plan():
+async def bootstrap_plan():
     """The network half of a cold start: `(newest_at, ids at that instant)`, or None for an empty library."""
-    newest = newest_item()
+    newest = await newest_item()
     if newest is None:
         return None
     newest_at = newest["DateCreated"]
-    return newest_at, [item["Id"] for item in items_since(newest_at)]
+    return newest_at, [item["Id"] for item in await items_since(newest_at)]
 
 
 def apply_bootstrap(conn, plan):
@@ -292,7 +270,7 @@ def apply_bootstrap(conn, plan):
     advance_cursor(conn, newest_at)
 
 
-def fetch_page(library_id, start_index, limit):
+async def fetch_page(library_id, start_index, limit):
     """One `/Items` page, newest `DateCreated` first."""
     params = {
         "recursive": "true", "sortBy": "DateCreated", "sortOrder": "Descending", "fields": FIELDS,
@@ -302,25 +280,25 @@ def fetch_page(library_id, start_index, limit):
     if library_id:
         params["parentId"] = library_id
     params = {k: v for k, v in params.items() if v is not None}
-    return jf_get("/Items", params).get("Items", [])
+    return (await jf_get("/Items", params)).get("Items", [])
 
 
-def newest_item():
+async def newest_item():
     """The single newest item across every configured library, or None for an empty one."""
     newest = None
     for library_id in JELLYFIN_LIBRARY_IDS or [None]:
-        page = fetch_page(library_id, 0, 1)
+        page = await fetch_page(library_id, 0, 1)
         if page and (newest is None or page[0]["DateCreated"] > newest["DateCreated"]):
             newest = page[0]
     return newest
 
 
-def _items_since_in_library(library_id, cursor):
+async def _items_since_in_library(library_id, cursor):
     """One library's page-by-page walk backward until an item's `DateCreated` falls below `cursor`; see README.md."""
     collected = {}
     start_index = 0
     while len(collected) < MAX_ITEMS_PER_POLL:
-        page = fetch_page(library_id, start_index, PAGE_SIZE)
+        page = await fetch_page(library_id, start_index, PAGE_SIZE)
         if not page:
             return collected
         crossed_cursor = False
@@ -336,11 +314,11 @@ def _items_since_in_library(library_id, cursor):
     return collected
 
 
-def items_since(cursor):
+async def items_since(cursor):
     """Pages backward from the newest item in each configured library until `DateCreated` falls below `cursor`."""
     by_id = {}
     for library_id in JELLYFIN_LIBRARY_IDS or [None]:
-        by_id.update(_items_since_in_library(library_id, cursor))
+        by_id.update(await _items_since_in_library(library_id, cursor))
     return sorted(by_id.values(), key=lambda item: item["DateCreated"])
 
 
@@ -485,43 +463,43 @@ def render_embed(card):
     return Embed(title=card["title"], description=card.get("description"))
 
 
-def search_items(query, limit):
+async def search_items(query, limit):
     params = {
         "searchTerm": query, "recursive": "true", "fields": FIELDS,
         "includeItemTypes": ",".join(JELLYFIN_ITEM_TYPES) if JELLYFIN_ITEM_TYPES else None, "limit": limit,
     }
     params = {k: v for k, v in params.items() if v is not None}
-    return jf_get("/Items", params).get("Items", [])
+    return (await jf_get("/Items", params)).get("Items", [])
 
 
-def watch_search(query, limit):
+async def watch_search(query, limit):
     """Matches `!watch` can start or drill into: movies and episodes to play, series to browse."""
     params = {"searchTerm": query, "recursive": "true", "fields": FIELDS, "includeItemTypes": "Movie,Series,Episode", "limit": limit}
-    return jf_get("/Items", params).get("Items", [])
+    return (await jf_get("/Items", params)).get("Items", [])
 
 
-def series_seasons(series_id, user_id=None):
+async def series_seasons(series_id, user_id=None):
     params = {"userId": user_id} if user_id else {}
-    return jf_get(f"/Shows/{series_id}/Seasons", params).get("Items", [])
+    return (await jf_get(f"/Shows/{series_id}/Seasons", params)).get("Items", [])
 
 
-def season_episodes(series_id, season_id, user_id=None):
+async def season_episodes(series_id, season_id, user_id=None):
     params = {"seasonId": season_id, "fields": STREAM_FIELDS}
     if user_id:
         params["userId"] = user_id
-    return jf_get(f"/Shows/{series_id}/Episodes", params).get("Items", [])
+    return (await jf_get(f"/Shows/{series_id}/Episodes", params)).get("Items", [])
 
 
-def fetch_item_for_playback(item_id, user_id=None):
+async def fetch_item_for_playback(item_id, user_id=None):
     """One item's `RunTimeTicks`, `MediaStreams` (audio/subtitle track list) and, given a `user_id`, that user's `UserData` - what `!watch`/`!subs` need."""
     params = {"ids": item_id, "fields": STREAM_FIELDS}
     if user_id:
         params["userId"] = user_id
-    items = jf_get("/Items", params).get("Items", [])
+    items = (await jf_get("/Items", params)).get("Items", [])
     return items[0] if items else None
 
 
-def next_episode(item, user_id=None):
+async def next_episode(item, user_id=None):
     """The episode after `item` in its series, with playback fields, or None for a movie or a finale."""
     series_id = item.get("SeriesId")
     if item.get("Type") != "Episode" or not series_id:
@@ -529,7 +507,7 @@ def next_episode(item, user_id=None):
     params = {"startItemId": item["Id"], "limit": 2, "fields": STREAM_FIELDS}
     if user_id:
         params["userId"] = user_id
-    episodes = jf_get(f"/Shows/{series_id}/Episodes", params).get("Items", [])
+    episodes = (await jf_get(f"/Shows/{series_id}/Episodes", params)).get("Items", [])
     later = [e for e in episodes if e.get("Id") != item["Id"]]
     return later[0] if later else None
 

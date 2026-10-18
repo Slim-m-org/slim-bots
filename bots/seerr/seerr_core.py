@@ -2,11 +2,11 @@
 Never imports `bot` (the entry point) - see "Splitting a bot across files" there for why."""
 
 import time
-import urllib.error
 import uuid
 
 from arrkit import store
 from arrkit.service import AuthError, Service  # noqa: F401 - re-exported for the cog and bot
+from slimbots.web import ServiceHTTPError
 
 NAMESPACE = uuid.UUID("73656572-7272-4000-8000-626f74000000")
 SERVICE = Service("seerr", "/api/v1")
@@ -56,8 +56,8 @@ def permission_problem(permissions):
     return None
 
 
-def api(method, path, params=None, body=None):
-    return SERVICE.call(method, path, params, body)
+async def api(method, path, params=None, body=None):
+    return await SERVICE.call(method, path, params, body)
 
 
 def is_announced(conn, key):
@@ -99,10 +99,10 @@ def user_names(user):
     return {n.lower() for n in (user.get("displayName"), user.get("username"), user.get("jellyfinUsername"), user.get("plexUsername")) if n}
 
 
-def find_user(name):
+async def find_user(name):
     """The Seerr user whose display, jellyfin or plex name is `name` (case-insensitive), else None."""
     wanted = name.strip().lower()
-    users = (api("GET", "/user", {"take": USER_SCAN_LIMIT}) or {}).get("results", [])
+    users = (await api("GET", "/user", {"take": USER_SCAN_LIMIT}) or {}).get("results", [])
     return next((u for u in users if wanted in user_names(u)), None)
 
 
@@ -111,16 +111,16 @@ def display_name(user):
     return user.get("displayName") or user.get("username") or user.get("jellyfinUsername") or "someone"
 
 
-def fetch_recent_requests():
+async def fetch_recent_requests():
     params = {"take": WATCH_WINDOW, "skip": 0, "filter": "all", "sort": "modified"}
-    return (api("GET", "/request", params) or {}).get("results", [])
+    return (await api("GET", "/request", params) or {}).get("results", [])
 
 
-def media_details(media_type, tmdb_id):
+async def media_details(media_type, tmdb_id):
     """Title, year and tmdb link for a request's media, or a placeholder when Seerr cannot say."""
     try:
-        data = api("GET", f"/{'tv' if media_type == 'tv' else 'movie'}/{tmdb_id}") or {}
-    except urllib.error.HTTPError:
+        data = await api("GET", f"/{'tv' if media_type == 'tv' else 'movie'}/{tmdb_id}") or {}
+    except ServiceHTTPError:
         data = {}
     date = data.get("firstAirDate") or data.get("releaseDate") or ""
     return {"title": data.get("name") or data.get("title") or placeholder_details(tmdb_id)["title"], "year": date[:4]}
@@ -206,9 +206,9 @@ def render_text(post):
     return f"{HEADINGS[post['kind']]}: **{post['title']}** [{kind}] - requested by {post['by']}"
 
 
-def search(term):
+async def search(term):
     """Movie and tv matches only (Seerr also returns people), best first."""
-    results = (api("GET", "/search", {"query": term, "page": 1}) or {}).get("results", [])
+    results = (await api("GET", "/search", {"query": term, "page": 1}) or {}).get("results", [])
     return [r for r in results if r.get("mediaType") in ("movie", "tv")][:MAX_RESULTS]
 
 
@@ -219,22 +219,22 @@ def result_title(item):
     return f"{item.get('title') or item.get('name') or 'Untitled'}{year} [{kind}]"
 
 
-def create_request(item, user_id):
+async def create_request(item, user_id):
     """Files a request for a search result as `user_id`, all seasons for a show."""
     body = {"mediaType": item["mediaType"], "mediaId": item["id"]}
     if item["mediaType"] == "tv":
         body["seasons"] = "all"
     if user_id is not None:
         body["userId"] = user_id
-    return api("POST", "/request", body=body)
+    return await api("POST", "/request", body=body)
 
 
-def set_request_state(request_id, action):
+async def set_request_state(request_id, action):
     """`approve` or `decline` a request."""
-    return api("POST", f"/request/{int(request_id)}/{action}")
+    return await api("POST", f"/request/{int(request_id)}/{action}")
 
 
-def pending_requests():
+async def pending_requests():
     params = {"take": PENDING_LIMIT, "skip": 0, "filter": "pending", "sort": "added"}
-    data = api("GET", "/request", params) or {}
+    data = await api("GET", "/request", params) or {}
     return data.get("results", []), (data.get("pageInfo") or {}).get("results", 0)

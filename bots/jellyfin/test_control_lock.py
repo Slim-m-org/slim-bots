@@ -2,13 +2,10 @@
 """A typed command and a panel press serialise on the session's control lock; run directly: python3 test_control_lock.py."""
 
 import asyncio
-import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import test_seek as ts  # noqa: E402
-import watch_cog  # noqa: E402
+import test_seek as ts
+import watch_cog
+from slimbots.testing import run_module_tests
 
 
 class Author:
@@ -95,8 +92,4 @@ def test_a_typed_seek_racing_a_panel_press_leaves_one_pipeline():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

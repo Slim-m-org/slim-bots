@@ -16,7 +16,7 @@ MC_RCON_PASSWORD=... \
 python3 bot.py
 ```
 
-Needs `slim-m>=0.8.0` (see `requirements.txt`).
+Needs `slim-m>=0.13.0` (see `requirements.txt`).
 The bot needs `VIEW_CHANNEL` and `SEND_MESSAGES` in the channel.
 `SLIMM_CHANNELS` should name exactly one channel, the bridge channel, or set `MC_CHANNEL` explicitly.
 

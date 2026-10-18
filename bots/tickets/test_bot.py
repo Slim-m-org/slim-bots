@@ -2,20 +2,13 @@
 """Tests against FakeAsyncClient, no server needed; run directly: python3 test_bot.py."""
 
 import asyncio
-import os
-import sys
-import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import bot as tickets  # noqa: E402
-import ticketdb  # noqa: E402
-from slimbots.authors import AuthorFilter  # noqa: E402
-from slimbots.http import ApiError  # noqa: E402
-from slimbots.models import Channel  # noqa: E402
-from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+import bot as tickets
+import ticketdb
+from slimbots.http import ApiError
+from slimbots.models import Channel
+from slimbots.permissions import Permissions
+from slimbots.testing import FakeAsyncClient, run_module_tests, wire_bot
 
 STAFF_ROLE = {"id": "r-staff", "name": "Support", "permissions": 0}
 PEOPLE = {
@@ -38,11 +31,7 @@ def setup(*, staff_role="Support"):
     tickets.STAFF_ROLE = staff_role
     tickets.CATEGORY = ""
     tickets.MAX_TRANSCRIPT = 100000
-    tickets.bot.client = client
-    tickets.bot.space = Space(client)
-    tickets.bot.authors = AuthorFilter(client, space=tickets.bot.space)
-    tickets.bot.store = None
-    tickets.bot.data_path = os.path.join(tempfile.mkdtemp(), "tickets.db")
+    wire_bot(tickets.bot, client, db_name="tickets.db")
     asyncio.run(tickets.bot.space.refresh_roles())
     for person in PEOPLE.values():
         tickets.bot.space.members[person["id"]] = tickets.bot.space._make_member(person)
@@ -267,8 +256,4 @@ def test_reason_is_limited_and_updates_the_topic():
 
 
 if __name__ == "__main__":
-    tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"PASS: {test.__name__}")
-    print(f"all {len(tests)} tests passed")
+    run_module_tests(globals())

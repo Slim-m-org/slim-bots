@@ -24,8 +24,10 @@ async def ping(ctx):
 
 
 if __name__ == "__main__":
-    raise SystemExit(bot.run() or 0)
+    bot.run_cli()
 ```
+
+`bot.run_cli(check=...)` is the `__main__` entry point: it runs each pre-flight `check` (a function returning a problem string or `None`), exits with the first problem or with a missing-config `RuntimeError`'s message, and otherwise exits with `run()`'s code.
 
 `Bot()` reads `SLIMM_URL`, `SLIMM_BOT_TOKEN`, and `SLIMM_CHANNELS` (comma-separated channel ids) itself - nothing above needs `import os` just to wire those up. Run it with:
 
@@ -103,6 +105,17 @@ async def poll_loop():
         await asyncio.sleep(300)
 ```
 
+For a loop that just does something every so often, use `bot.every` instead of writing the loop:
+
+```python
+@bot.every(300, name="poll", fatal=(ServiceAuthError,))
+async def poll():
+    await do_the_poll()
+```
+
+It starts once per process (not once per reconnect), logs a failed cycle and retries on the next one, and stops the bot on a revoked token or any `fatal` type.
+`seconds` may be a function read every cycle, `delay_first=True` waits one interval before the first run, `on="ready"` starts it after the backlog replay, and a number returned from the function is a minimum wait before the next cycle.
+
 A plain `asyncio.create_task(...)` is only weakly referenced by the event loop and can be silently garbage-collected mid-run; `bot.background` holds a strong reference for as long as it runs. An unhandled exception in it (a `401` included) is treated as fatal: logged, the bot's main loop cancelled, and `bot.run()` exits non-zero so a container restarts it, instead of the loop's failure going unnoticed while the rest of the bot carries on.
 
 ## Embeds
@@ -143,7 +156,7 @@ Pre-stubbed routes (`/me`, `/channels`, `/members`, `/roles`, `/bots/commands`) 
 
 ## Where to go deeper
 
-`docs/framework.md` and the seven bot templates in [slim-bots](https://github.com/Slim-m-org/slim-bots) cover the rest: command registration with the server, channel scoping and durable cursors, cooldowns and permission gates, the Canvas model for the Voice Canvas, typed event dispatch, and every safeguard's own reasoning.
+`docs/framework.md` and the seven bot templates in [slim-bots](https://github.com/Slim-m-org/slim-bots) cover the rest: command registration with the server, channel scoping and durable cursors, cooldowns and permission gates, the Canvas model for the Voice Canvas, typed event dispatch, calling outside services with `JsonService` and the url policy, button choosers, and every safeguard's own reasoning.
 
 ## Installing an unreleased version
 

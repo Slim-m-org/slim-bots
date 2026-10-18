@@ -2,9 +2,9 @@
 
 import json
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
+
+from slimbots.web import JsonService
 
 MAX_WAIT = 3600
 
@@ -18,20 +18,16 @@ class Result:
     detail: str = ""
 
 
-def urllib_transport(url, headers):
+async def web_transport(url, headers):
     """One GET returning (status, lowercase headers, body); a non-2xx answer is a result, not an exception."""
-    request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.status, {k.lower(): v for k, v in response.headers.items()}, response.read()
-    except urllib.error.HTTPError as err:
-        return err.code, {k.lower(): v for k, v in err.headers.items()}, err.read()
+    response = await JsonService("github").send("GET", url, headers=headers)
+    return response.status, response.headers, response.body
 
 
 class Feed:
     """The etag moves only on `accept`, so a list whose posts failed is fetched in full again next cycle."""
 
-    def __init__(self, repo, token=None, transport=urllib_transport, clock=time.time):
+    def __init__(self, repo, token=None, transport=web_transport, clock=time.time):
         self.url = f"https://api.github.com/repos/{repo}/releases?per_page=30"
         self.token = token
         self.transport = transport
@@ -46,9 +42,9 @@ class Feed:
             headers["if-none-match"] = self.etag
         return headers
 
-    def fetch(self):
+    async def fetch(self):
         try:
-            status, headers, body = self.transport(self.url, self._headers())
+            status, headers, body = await self.transport(self.url, self._headers())
         except Exception as err:
             return Result("error", detail=f"{type(err).__name__}")
         if status == 304:

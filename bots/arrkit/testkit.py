@@ -3,13 +3,11 @@
 import asyncio
 
 from slimbots import Store
-from slimbots.authors import AuthorFilter
-from slimbots.space import Space
-from slimbots.testing import FakeAsyncClient
+from slimbots.testing import FakeAsyncClient, human, wire_bot
 
 MEMBERS = [
-    {"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []},
-    {"id": "u2", "username": "amy", "display_name": "Amy", "is_bot": False, "is_webhook": False, "role_ids": []},
+    human("u1", "nick", "Nick", role_ids=[]),
+    human("u2", "amy", "Amy", role_ids=[]),
 ]
 
 
@@ -24,7 +22,7 @@ class FakeApi:
         self.post_result = {"id": 99}
         self.fallback = None
 
-    def __call__(self, method, path, params=None, body=None):
+    async def __call__(self, method, path, params=None, body=None):
         self.calls.append((method, path, params, body))
         if self.fail_with:
             raise self.fail_with
@@ -77,10 +75,7 @@ class Harness:
             client.edited.append({"channel_id": channel_id, "message_id": message_id, "content": content})
 
         client.edit_message = record_edit
-        bot.client = client
-        bot.space = Space(client)
-        bot.authors = AuthorFilter(client, space=bot.space)
-        bot.me_id = "bot-1"
+        wire_bot(bot, client, me_id="bot-1")
         asyncio.run(bot.space.refresh_members())
         if roles:
             asyncio.run(bot.space.refresh_roles())

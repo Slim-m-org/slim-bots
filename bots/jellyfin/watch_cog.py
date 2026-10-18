@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from slimbots import Permissions
+from slimbots.media import format_hms, parse_hms
 from slimbots.voice import VoiceError
 
 import answers
@@ -13,7 +14,7 @@ import picker
 import quality
 import session_registry
 import watch_start
-from stream_session import StreamError, format_hms, parse_hms
+from stream_session import StreamError
 
 
 ENDED = "that watch party has ended."
@@ -191,7 +192,7 @@ def setup(bot):
         await run_quality(ctx, preset)
 
     bot.button(prefix=panel.ID_PREFIX)(controls.on_panel_press)
-    bot.button(prefix=picker.ID_PREFIX)(picker.on_pick_press)
+    picker.CHOOSER.register(bot)
     for control_id, label, icon, action in controls.CALL_CONTROLS:
         bot.call_control(control_id, label, icon=icon)(controls.call_control_handler(action))
     bot.call_control(

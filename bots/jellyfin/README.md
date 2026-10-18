@@ -18,8 +18,8 @@ python3 bot.py
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 `Bot` owns `SLIMM_URL`, `SLIMM_BOT_TOKEN`, `SLIMM_CHANNELS` and `SLIMM_DB_PATH` (where this bot's own tables live); every `JELLYFIN_*` variable is read through `bot.setting()`.
 A missing `JELLYFIN_URL` or `JELLYFIN_API_KEY` is reported in the same start-up error as a missing `SLIMM_URL`.
-The Jellyfin side is plain HTTP/JSON via `urllib`, run off the event loop with `asyncio.to_thread`.
-It is called at most once per `JELLYFIN_POLL_SECONDS` and cooldown-guarded from a command, so it does not need `httpx`.
+The Jellyfin side is the library's `JsonService` (`slimbots.jellyfin`), so a redirect never leaves the Jellyfin host and a plaintext `JELLYFIN_URL` is refused unless it is loopback.
+It is called at most once per `JELLYFIN_POLL_SECONDS` and cooldown-guarded from a command.
 
 The bot always holds a websocket connection.
 `SLIMM_CHANNELS` is both where new-item posts land by default and where `!jellyfin` is answered.

@@ -1,17 +1,13 @@
-"""One outside HTTP/JSON service: its url and key from the environment, and the blocking call the bots thread out."""
+"""One outside HTTP/JSON service: its url and key from the environment, and the async call the bots make."""
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
+from slimbots.urlpolicy import service_url_problem
+from slimbots.web import JsonService, ServiceAuthError
 
-
-class AuthError(Exception):
-    """The service rejected the bot's api key. Not something to retry."""
+AuthError = ServiceAuthError
 
 
 class Service:
-    """A Sonarr-shaped api: `X-Api-Key` header, JSON in and out, urllib so no second HTTP stack is needed."""
+    """A Sonarr-shaped api: `X-Api-Key` header, JSON in and out, over the library's `JsonService`."""
 
     def __init__(self, name, api_root):
         self.name = name
@@ -19,6 +15,7 @@ class Service:
         self.url = ""
         self.key = ""
         self.poll_seconds = 60
+        self.transport = None
 
     def configure(self, bot):
         """Reads `<NAME>_URL`, `<NAME>_API_KEY` and `<NAME>_POLL_SECONDS` through `bot.setting()`."""
@@ -31,26 +28,12 @@ class Service:
         """Plaintext is fine on loopback or to a bare docker service name, which never leaves the host's bridge."""
         if not self.url:
             return None
-        host = urllib.parse.urlsplit(self.url).hostname or ""
-        private = host in ("localhost", "127.0.0.1", "::1") or "." not in host
-        if not self.url.startswith("https://") and not private:
-            return f"refusing a plaintext {self.name.upper()}_URL to a public host: the api key on the wire is a leak"
-        return None
+        return service_url_problem(f"{self.name.upper()}_URL", self.url, bare_hostnames=True)
 
-    def call(self, method, path, params=None, body=None):
-        """One authenticated call returning parsed JSON. Sync; called via asyncio.to_thread."""
-        query = urllib.parse.urlencode(params or {}, doseq=True)
-        data = json.dumps(body).encode() if body is not None else None
-        request = urllib.request.Request(f"{self.url}{self.api_root}{path}?{query}", data=data, method=method)
-        request.add_header("x-api-key", self.key)
-        request.add_header("user-agent", f"slimm-bot-{self.name}/1.0")
-        if data is not None:
-            request.add_header("content-type", "application/json")
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                raw = response.read()
-                return json.loads(raw) if raw else None
-        except urllib.error.HTTPError as err:
-            if err.code in (401, 403):
-                raise AuthError(f"{self.name} api key rejected") from err
-            raise
+    async def call(self, method, path, params=None, body=None):
+        """One authenticated call returning parsed JSON; a rejected key raises `AuthError`."""
+        service = JsonService(
+            self.name, f"{self.url}{self.api_root}", headers={"x-api-key": self.key}, user_agent=f"slimm-bot-{self.name}/1.0",
+            transport=self.transport,
+        )
+        return await service.request(method, path, params=params or None, body=body)
