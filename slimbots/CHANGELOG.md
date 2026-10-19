@@ -3,6 +3,11 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.15.1
+
+- A command typed while the bot was offline is no longer run when it reconnects. A replayed command older than `max_replay_age` (default 300 seconds) is skipped with one log line and the cursor still moves past it; plain messages still reach `on_message`. Pass `Bot(max_replay_age=None)` to replay every command.
+- A bot without `channels=` now catches up the same way as a scoped one, over every channel it can see, so an outage no longer drops its commands or its `on_message` backlog silently.
+
 ## 0.15.0
 
 - `@bot.command(choices={"param": ("a", "b")})` fixes the values a parameter takes. The composer shows them as a pick list after the command, a value is matched ignoring case, and any other is a `BadArgument` naming the choices. A command with choices registers `options` with the server, which needs slim-m 0.114 or later; an older server ignores the field.
