@@ -165,8 +165,10 @@ A failed cycle is logged and retried on the next one, whatever it raised; a revo
 
 `Bot(default_data_path="casino.db")` gives `bot.data_path`: `SLIMM_DB_PATH` if set, else that default - the one place a bot's own sqlite file path is derived, instead of every bot re-deriving `os.environ.get("SLIMM_DB_PATH", "...")` by hand.
 
-A bot with `channels` set gets a persisted, cross-restart `seq` cursor for free, at `bot.data_path` when the bot has one (sharing the same file as its business data, the way `bot-casino` does) or a generic default (`slimbots-cursor.db`) otherwise; `Bot` bootstraps and `/sync`-replays the backlog through `process_message` on every connect, before `on_ready` fires (the socket is already open, so a replayed command can use `ctx.typing()` and `ctx.confirm`, and a live message that arrives meanwhile is held and processed once the replay ends) - no bot code calls `cursor`/`catchup` directly any more.
+Every bot gets a persisted, cross-restart `seq` cursor for free, at `bot.data_path` when the bot has one (sharing the same file as its business data, the way `bot-casino` does) or a generic default (`slimbots-cursor.db`) otherwise; `Bot` bootstraps and `/sync`-replays the backlog through `process_message` on every connect, before `on_ready` fires (the socket is already open, so a replayed command can use `ctx.typing()` and `ctx.confirm`, and a live message that arrives meanwhile is held and processed once the replay ends) - no bot code calls `cursor`/`catchup` directly any more.
 The replay follows the server's `has_more` page by page until the backlog is drained, and a channel the server says is too far behind to replay (`reset`) skips ahead to its newest message instead of replaying anything.
+A bot without `channels=` replays every channel it can see, the same as a scoped one.
+A replayed command older than `max_replay_age` (300 seconds by default, `None` to replay all) is skipped with one log line while the cursor still advances; plain messages are never skipped, so event handlers see the whole backlog.
 `cursor_path=` on `Bot()` still exists to point the cursor at a file *other* than `data_path`, for the rare bot that wants them separate.
 
 `on_raw_message(message)` still fires for every in-scope message, command or not - for a bot that wants its own hook into every message, not for cursor-keeping any more.

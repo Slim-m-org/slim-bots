@@ -34,6 +34,7 @@ from .voice import Voice
 
 DEFAULT_USER_AGENT = "slimbots/0.3"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
+DEFAULT_MAX_REPLAY_AGE = 300.0
 
 log = logging.getLogger(__name__)
 UNEXPECTED_ERROR_REPLY = "something went wrong running that command; try again in a moment."
@@ -105,12 +106,13 @@ class Bot:
         max_delay: float = 60.0, help_command: bool = True, channels: set[str] | list[str] | None = None,
         require_channels: bool = False, cursor_path: str | None = None, default_data_path: str | None = None,
         store_migrate: Callable[[Any], None] | None = None, listen_voice_chats: bool = False,
-        mention_commands: bool = True,
+        mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE,
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
         self.permissions_readable: bool | None = None
         self.mention_commands = mention_commands
+        self.max_replay_age = max_replay_age
         self.listen_voice_chats = listen_voice_chats or os.environ.get("SLIMM_LISTEN_VOICE_CHATS") == "1"
         self._url = url
         self._token = token
@@ -148,6 +150,7 @@ class Bot:
         self._replayed_ids: set[str] = set()
         self.moderation_head: int | None = None
         self._clock: Callable[[], float] = time.monotonic
+        self._wall_clock: Callable[[], float] = time.time
         self._channel_miss_at: dict[str, float] = {}
         self.store: Store | None = None
         self._extensions: dict[str, ModuleType] = {}
@@ -662,14 +665,20 @@ class Bot:
         if self._cursor_conn is not None and seq is not None and channel_id is not None:
             cursor.set(self._cursor_conn, channel_id, seq)
 
+    def _catch_up_channels(self) -> list[str]:
+        """The configured channels, or every visible channel for a bot that was not scoped."""
+        if self.channels:
+            return sorted(self.channels)
+        return sorted(self.space.channels) if self.space is not None else []
+
     async def _catch_up(self) -> None:
-        """Replays the `/sync` backlog for `channels` through `process_message`, page by page, persisting the cursor as it goes."""
+        """Replays the `/sync` backlog through `process_message`, page by page, persisting the cursor as it goes."""
         assert self.client is not None, "_catch_up needs start() to have run"
-        if not self.channels or self._cursor_conn is None:
+        pending = self._catch_up_channels()
+        if not pending or self._cursor_conn is None:
             return
-        for channel_id in self.channels:
+        for channel_id in pending:
             await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
-        pending = list(self.channels)
         while pending:
             scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in pending]
             more, starved = [], []
@@ -689,8 +698,20 @@ class Bot:
         assert self._cursor_conn is not None
         for message in messages:
             self._replayed_ids.add(message["id"])
+            if self._is_stale_command(message):
+                log.info("skipped a command typed while this bot was offline: message %s", message["id"])
+                continue
             await guard_dispatch(self.process_message, message)
         cursor.set(self._cursor_conn, channel_id, messages[-1]["seq"])
+
+    def _is_stale_command(self, message: dict[str, Any]) -> bool:
+        """A replayed command older than `max_replay_age`; plain messages are never stale, so event handlers see them all."""
+        created_at = message.get("created_at")
+        if self.max_replay_age is None or not isinstance(created_at, int):
+            return False
+        if self._strip_invocation(message.get("content") or "") is None:
+            return False
+        return self._wall_clock() * 1000 - created_at > self.max_replay_age * 1000
 
     async def _connect_once(self, reset_delay: Callable[[], None]) -> None:
         assert self.client is not None and self.space is not None, "_connect_once needs start() to have run"
@@ -810,9 +831,7 @@ class Bot:
             raise RuntimeError(f"set {', '.join(missing)}")
         return base, token
 
-    def _open_cursor_if_scoped(self):
-        if not self.channels:
-            return
+    def _open_cursor(self):
         path = self.cursor_path or self.data_path or os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB
         self._cursor_conn = sqlite3.connect(path, isolation_level=None)
         cursor.init_table(self._cursor_conn)
@@ -822,7 +841,7 @@ class Bot:
         self.client = AsyncClient(base, token, self.user_agent)
         self.space = Space(self.client)
         self.authors = AuthorFilter(self.client, space=self.space)
-        self._open_cursor_if_scoped()
+        self._open_cursor()
         if self._store_migrate is not None:
             await self.open_store(migrate=self._store_migrate)
         self._main_task = asyncio.create_task(self._run_forever())
