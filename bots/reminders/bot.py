@@ -5,7 +5,7 @@ import sys
 import time
 import uuid
 
-from slimbots import Bot, Duration, Embed, RateLimiter, TimeOfDay
+from slimbots import Bot, Duration, RateLimiter, TimeOfDay, style
 from slimbots.http import ApiError, is_rate_limited, is_token_revoked
 from slimbots.lifecycle import guard_dispatch
 from slimbots.limits import ValidationError, require_len, require_range
@@ -251,7 +251,7 @@ async def _create_and_ack(ctx, due_at, text, recur=None):
 @bot.group(name="remind", help="`in <duration> <text>`, `at <HH:MM> <text>`, or `every <spec> [at HH:MM] <text>`")
 async def remind(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(f"try `{p}remind in 2h <text>`, `{p}remind at 15:30 <text>`, or `{p}remind every monday <text>`")
+    await ctx.reply(style.usage_text(f"{p}remind in 2h <text>", f"{p}remind at 15:30 <text>", f"{p}remind every monday <text>"))
 
 
 @remind.command(name="in", help="Remind you after a duration", usage="<duration> <text>")
@@ -337,7 +337,7 @@ async def reminders_group(ctx, rest: str = ""):
         await ctx.reply("\n".join(lines))
         return
     p = bot.prefix
-    await ctx.reply(f"try `{p}reminders`, `{p}reminders cancel <n>`, `{p}reminders edit <n> <text>`, or `{p}reminders snooze <n> <duration>`")
+    await ctx.reply(style.usage_text(f"{p}reminders", f"{p}reminders cancel <n>", f"{p}reminders edit <n> <text>", f"{p}reminders snooze <n> <duration>"))
 
 
 @reminders_group.command(name="cancel", help="Cancel one by its listed number", usage="<n>")
@@ -381,10 +381,10 @@ async def timezone_cmd(ctx, tz_name: str = None):
 async def deliver_reminder(row):
     (reminder_id, channel_id, request_message_id, text, due_at,
      recur_kind, interval_seconds, weekday, hour, minute, tz_name) = row
-    embed = Embed(title="Reminder", footer=format_recurrence(recur_kind, interval_seconds, weekday, hour, minute).strip() or None)
+    embed = style.card("info", title="Reminder", footer_text=format_recurrence(recur_kind, interval_seconds, weekday, hour, minute).strip() or None)
     await bot.client.send(
         channel_id, f"reminder: {render_reminder_text(text)}", message_id=delivery_id(reminder_id, due_at),
-        reply_to_id=request_message_id, embeds=[embed.to_wire()], fallback_content=f"reminder: {render_reminder_text(text)}",
+        reply_to_id=request_message_id, **style.send_kwargs(embed, f"reminder: {render_reminder_text(text)}"),
     )
     now = int(time.time())
     if recur_kind == "interval":

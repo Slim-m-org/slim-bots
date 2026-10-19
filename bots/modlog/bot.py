@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from slimbots import ApiError, Bot, Embed
+from slimbots import ApiError, Bot, style
 from slimbots.http import is_forbidden
 from slimbots.text import format_duration
 
@@ -83,8 +83,8 @@ async def post(kind, text):
     so there is nothing here worth deduplicating against the way a command reply is."""
     global _open_gap_notice
     _open_gap_notice = None
-    embed = Embed(footer=kind)
-    await bot.client.send(bot.channel, text, message_id=str(uuid.uuid4()), embeds=[embed.to_wire()], fallback_content=text)
+    embed = style.card("neutral", footer_text=kind)
+    await bot.client.send(bot.channel, text, message_id=str(uuid.uuid4()), **style.send_kwargs(embed, text))
     await bot.store.run(record_event, kind, text)
 
 
@@ -319,18 +319,15 @@ async def show_permissions(ctx):
     )
 
 
-@bot.command(name="modlog", help="Show stats, gaps or permissions from this bot's own local transcript", usage="<stats|gaps|permissions>")
+@bot.command(name="modlog", help="Show stats, gaps or permissions from this bot's own local transcript", usage="<stats|gaps|permissions>", choices={"sub": ("stats", "gaps", "permissions")})
 async def modlog_cmd(ctx, sub: str):
     sub = sub.lower()
     if sub == "stats":
         await show_stats(ctx)
     elif sub == "gaps":
         await show_gaps(ctx)
-    elif sub == "permissions":
-        await show_permissions(ctx)
     else:
-        p = bot.prefix
-        await ctx.reply(f"try `{p}modlog stats`, `{p}modlog gaps`, or `{p}modlog permissions`")
+        await show_permissions(ctx)
 
 
 @bot.event

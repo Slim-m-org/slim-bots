@@ -6,8 +6,7 @@ import asyncio
 import contextlib
 from collections import deque
 
-from slimbots import Embed
-from slimbots import media
+from slimbots import media, style
 from slimbots.media import PCM_CHANNELS as AUDIO_CHANNELS
 from slimbots.media import PCM_CHUNK_MS as AUDIO_CHUNK_MS
 from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
@@ -193,7 +192,7 @@ class MusicSession:
 
     def now_playing_embed(self):
         track = self.current
-        embed = Embed(title=track.title if track else "nothing playing")
+        embed = style.info(track.title if track else "nothing playing")
         if track is not None:
             embed.add_field("position", media.format_hms(self.position_seconds), inline=True)
             if track.duration_seconds:

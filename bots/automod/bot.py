@@ -7,7 +7,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 
-from slimbots import ApiError, Bot, Member, Permissions
+from slimbots import ApiError, Bot, Member, Permissions, style
 
 from link_rules import link_domains, strip_punctuation, visible_text
 
@@ -186,7 +186,7 @@ def rules_summary():
     return lines
 
 
-@bot.command(name="automod", help="Show the rules that are on, what they did, or lift a timeout", usage="<rules|stats|lift @member>")
+@bot.command(name="automod", help="Show the rules that are on, what they did, or lift a timeout", usage="<rules|stats|lift @member>", choices={"sub": ("rules", "stats", "lift")})
 async def automod_cmd(ctx, sub: str, member: Member = None):
     sub = sub.lower()
     if sub == "rules":
@@ -204,7 +204,7 @@ async def automod_cmd(ctx, sub: str, member: Member = None):
         await ctx.reply(f"{member.mention()} can speak again.")
     else:
         p = bot.prefix
-        await ctx.reply(f"try `{p}automod rules`, `{p}automod stats`, or `{p}automod lift @member`")
+        await ctx.reply(style.usage_text(f"{p}automod lift @member"))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import asyncio
 import sqlite3
 
 import bot as modlog
-from slimbots import Store
+from slimbots import Store, style
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 MEMBERS = [human("u1", "nick", "Nick", role_ids=[], roles=[])]
@@ -62,7 +62,7 @@ def test_member_removed_is_logged():
     client.respond("GET", "/users/u1", {**MEMBERS[0]})
     dispatch_frame({"type": "member.removed", "user_id": "u1"})
     assert "was removed from the Space" in client.sent[-1]["content"]
-    assert client.sent[-1]["embeds"] == [{"footer": {"text": "member.removed"}}]
+    assert client.sent[-1]["embeds"] == [{"color": style.NEUTRAL, "footer": {"text": "member.removed"}}]
 
 
 def test_role_change_first_sighting_reads_now_holds():
@@ -132,17 +132,15 @@ class prefixed:
 
 
 def test_modlog_hints_name_the_configured_prefix():
-    client = setup()
+    setup()
     with prefixed():
-        process(client, message("u1", "?modlog nonsense"))
-        assert "try `?modlog stats`" in client.sent[-1]["content"]
         assert "`?modlog permissions`" in modlog.gap_notice_text(1, 3600)
 
 
 def test_modlog_bad_subcommand_is_a_clear_reply():
     client = setup()
     process(client, message("u1", "!modlog nonsense"))
-    assert "try `!modlog" in client.sent[-1]["content"]
+    assert "`sub` must be one of: stats, gaps, permissions" in client.sent[-1]["content"]
 
 
 def test_reconnect_gap_is_recorded_and_reported():

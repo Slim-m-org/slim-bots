@@ -49,6 +49,8 @@ def _entry(command: Command, name: str) -> dict[str, Any]:
         entry["usage"] = command.usage[:MAX_USAGE_LEN]
     if command.requires is not None:
         entry["permission"] = int(command.requires)
+    if command.options:
+        entry["options"] = command.options
     return entry
 
 

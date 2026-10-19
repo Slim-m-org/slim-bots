@@ -7,7 +7,7 @@ import datetime
 import sys
 import uuid
 
-from slimbots import ApiError, Bot, Permissions
+from slimbots import ApiError, Bot, Permissions, style
 from slimbots.http import is_not_found, is_token_revoked
 
 import gs_core as core
@@ -87,7 +87,7 @@ async def gamestatus(ctx):
 @bot.group(name="gameserver", help="`add`, `remove`, `list`, `board`, `unboard` (Manage Server)")
 async def gameserver(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(f"try `{p}gameserver add <kind> <host> <port> <name>`, `remove <name>`, `list`, `board` or `unboard`.")
+    await ctx.reply(style.usage_text(f"{p}gameserver add <kind> <host> <port> <name>", f"{p}gameserver remove <name>", f"{p}gameserver list", f"{p}gameserver board", f"{p}gameserver unboard"))
 
 
 MANAGE_DENIED = "only someone with Manage Server can change the game server list."

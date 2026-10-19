@@ -4,7 +4,7 @@ Split per docs/framework.md: this is the entry point and the poll loop, jellyfin
 
 import sys
 
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, style
 from slimbots.http import is_token_revoked
 
 import jellyfin_core
@@ -49,7 +49,7 @@ async def send_post(entry):
     embed = jellyfin_core.render_embed(entry)
     await bot.client.send(
         channel_id, "", message_id=entry["message_id"], attachment_ids=[attachment_id],
-        embeds=[embed.to_wire()], fallback_content=text,
+        **style.send_kwargs(embed, text),
     )
 
 

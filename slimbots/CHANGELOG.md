@@ -3,6 +3,11 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.15.0
+
+- `@bot.command(choices={"param": ("a", "b")})` fixes the values a parameter takes. The composer shows them as a pick list after the command, a value is matched ignoring case, and any other is a `BadArgument` naming the choices. A command with choices registers `options` with the server, which needs slim-m 0.114 or later; an older server ignores the field.
+- `slimbots.style` is the shared look of a bot's output: a palette from the app's design tokens, `card`, `info`, `success`, `warn` and `error` embeds, `footer`, `error_text`, `usage_text` and `send_kwargs`. The bots in this repo use it, and a test fails on a raw `Embed(` in one.
+
 ## 0.14.0
 
 - A command that raises an unexpected exception now answers with one generic line ("something went wrong running that command; try again in a moment."), privately and publicly only on a server without private replies, and logs the traceback. Before, it logged to stderr and said nothing in chat. The exception text is never sent to chat, and `on_command_error` still fires. A command that failed with an `ApiError` other than a permission refusal gets the same line.

@@ -1,6 +1,6 @@
 """bot-casino's blackjack commands - deal/hit/stand/double/split/surrender; an extension, see docs/framework.md."""
 
-from slimbots import Embed
+from slimbots import style
 
 import blackjack
 import casino_core
@@ -194,7 +194,7 @@ async def _reply_finish_hand(ctx, result):
     if result["next"]:
         await ctx.reply(f"hand {result['index'] + 1}: {casino_core.render_hand(result['player'])}\n`!hit`, `!stand`, `!double` or `!surrender` for this hand")
         return
-    embed = Embed(title="Blackjack", description="\n".join(result["lines"]), footer=f"balance: {result['balance']}")
+    embed = style.info("Blackjack", "\n".join(result["lines"]), footer_text=style.footer(f"balance: {result['balance']}"))
     await ctx.reply(embed=embed)
 
 
@@ -209,10 +209,10 @@ def setup(bot):
             await ctx.reply(result["error"])
             return
         if result["resolved"]:
-            embed = Embed(
-                title="Blackjack",
-                description=f"you: {casino_core.render_hand(result['player'])}\ndealer: {casino_core.render_hand(result['dealer'])}\n{result['outcome']}",
-                footer=f"balance: {result['balance']}",
+            embed = style.info(
+                "Blackjack",
+                f"you: {casino_core.render_hand(result['player'])}\ndealer: {casino_core.render_hand(result['dealer'])}\n{result['outcome']}",
+                footer_text=style.footer(f"balance: {result['balance']}"),
             )
             await ctx.reply(embed=embed)
             return
