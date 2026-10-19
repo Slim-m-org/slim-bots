@@ -169,6 +169,10 @@ Every bot gets a persisted, cross-restart `seq` cursor for free, at `bot.data_pa
 The replay follows the server's `has_more` page by page until the backlog is drained, and a channel the server says is too far behind to replay (`reset`) skips ahead to its newest message instead of replaying anything.
 A bot without `channels=` replays every channel it can see, the same as a scoped one.
 A replayed command older than `max_replay_age` (300 seconds by default, `None` to replay all) is skipped with one log line while the cursor still advances; plain messages are never skipped, so event handlers see the whole backlog.
+A handler can tell a replayed command with `ctx.replayed` (or `bot.is_replay(message)`); `on_raw_message` and the other frame events are live only and never fire for a replay.
+Unscoped bots, decided per bot: `deals`, `feeds`, `game-status`, `tickets` and `pelican` have no `on_message` handler, so a replay only runs a command typed within `max_replay_age`, the same as a scoped bot.
+`automod` acts in `on_raw_message`, which a replay never reaches, so it neither re-moderates nor double-acts; spam posted while it was down is not swept.
+`greeter` acts on `on_member_join`, a live frame, so nothing is re-greeted.
 `cursor_path=` on `Bot()` still exists to point the cursor at a file *other* than `data_path`, for the rare bot that wants them separate.
 
 `on_raw_message(message)` still fires for every in-scope message, command or not - for a bot that wants its own hook into every message, not for cursor-keeping any more.

@@ -704,6 +704,10 @@ class Bot:
             await guard_dispatch(self.process_message, message)
         cursor.set(self._cursor_conn, channel_id, messages[-1]["seq"])
 
+    def is_replay(self, message: dict[str, Any]) -> bool:
+        """True while `message` is a backlog message being replayed after a reconnect, not a live one."""
+        return message.get("id") in self._replayed_ids
+
     def _is_stale_command(self, message: dict[str, Any]) -> bool:
         """A replayed command older than `max_replay_age`; plain messages are never stale, so event handlers see them all."""
         created_at = message.get("created_at")
