@@ -5,14 +5,14 @@ import datetime
 import re
 import sqlite3
 
-from slimbots import Embed
+from slimbots import style
 
 from queries import KINDS
 
 MAX_SERVERS = 25
 MAX_NAME = 40
 HOST_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,253}$")
-COLORS = {"all_up": 0x2ECC71, "mixed": 0xF1C40F, "all_down": 0xE74C3C}
+COLORS = {"all_up": style.SUCCESS, "mixed": style.WARN, "all_down": style.ERROR}
 
 GAMESTATUS_SERVERS = []
 GAMESTATUS_CHANNELS = []
@@ -161,7 +161,7 @@ def status_text(rows, now):
 def status_embed(rows, now):
     ups = sum(1 for _, status in rows if status.up)
     color = COLORS["all_up" if ups == len(rows) else "all_down" if ups == 0 else "mixed"]
-    embed = Embed(title="Game servers", color=color, footer=f"last checked {checked_at(now)}", timestamp=now)
+    embed = style.card("info", title="Game servers", color=color, footer_text=f"last checked {checked_at(now)}", timestamp=now)
     embed.description = f"{ups} of {len(rows)} up" if rows else "no servers are configured."
     for server, status in rows:
         embed.add_field(server_title(server, status), server_line(status))

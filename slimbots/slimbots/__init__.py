@@ -1,6 +1,6 @@
 """A discord.py-shaped bot framework for slim-m; see docs/framework.md."""
 
-from . import catchup, cursor
+from . import catchup, cursor, style
 from . import events
 from . import migrations
 from .bot import Bot

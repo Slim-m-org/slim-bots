@@ -10,7 +10,7 @@ import db
 import prices
 import search
 import sources
-from slimbots import ApiError, Bot, Chooser, Embed, Permissions, Pick
+from slimbots import ApiError, Bot, Chooser, Permissions, Pick, style
 from slimbots.http import is_forbidden, is_token_revoked
 
 POST_NAMESPACE = uuid.UUID("5d0c8f1e-3a47-4b62-9e15-c7a2f4d6b983")
@@ -42,7 +42,10 @@ def ends_text(offer):
 
 def offer_embed(offer):
     detail = f"Free to keep on {sources.STORE_NAME}, {ends_text(offer)}."
-    return Embed(title=clean(offer.title), description=detail + (f" Normally {offer.worth}." if offer.worth else ""), url=offer.url, footer=sources.STORE_NAME)
+    return style.card(
+        "success", title=clean(offer.title), description=detail + (f" Normally {offer.worth}." if offer.worth else ""),
+        url=offer.url, footer_text=style.footer(sources.STORE_NAME),
+    )
 
 
 def offer_fallback(offer):
@@ -59,7 +62,7 @@ async def post(channel_id, content, *, message_id, embed=None, fallback=None):
     try:
         await bot.client.send(
             channel_id, content, message_id=message_id,
-            embeds=[embed.to_wire()] if embed else None, fallback_content=fallback,
+            **(style.send_kwargs(embed, fallback) if embed else {}),
         )
     except ApiError as err:
         if is_token_revoked(err):
@@ -195,7 +198,7 @@ async def allowed(ctx):
 @bot.group(name="deals", help="`setup`, `now`")
 async def deals_group(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(f"try `{p}deals setup` in the channel for free Steam games or `{p}deals now`. Price watches: `{p}pricewatch <game name, Steam link or app id> <target price>`.")
+    await ctx.reply(style.usage_text(f"{p}deals setup", f"{p}deals now", f"{p}pricewatch <game name, Steam link or app id> <target price>"))
 
 
 @deals_group.command(name="setup", help="Post free games and watch alerts in this channel")
@@ -288,7 +291,7 @@ async def offer_choices(ctx, target, target_cents, games):
 async def watch_group(ctx, rest: str = ""):
     target, _, price = rest.strip().rpartition(" ")
     if not target.strip() or not price.strip():
-        await ctx.reply_ephemeral(f"usage: `{bot.prefix}pricewatch <game name, Steam link or app id> <target price>`, `{bot.prefix}pricewatch list` or `{bot.prefix}pricewatch remove <id>`.", public_fallback=True)
+        await ctx.reply_ephemeral(style.usage_text(f"{bot.prefix}pricewatch <game name, Steam link or app id> <target price>", f"{bot.prefix}pricewatch list", f"{bot.prefix}pricewatch remove <id>"), public_fallback=True)
         return
     try:
         target_cents = prices.parse_price_cents(price)

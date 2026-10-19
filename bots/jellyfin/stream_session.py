@@ -9,8 +9,7 @@ import sys
 import time
 import uuid
 
-from slimbots import Embed
-from slimbots import media
+from slimbots import media, style
 from slimbots.media import PCM_CHANNELS as AUDIO_CHANNELS
 from slimbots.media import PCM_CHUNK_MS as AUDIO_CHUNK_MS
 from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
@@ -429,7 +428,7 @@ class WatchSession:
         )
 
     def now_playing_embed(self):
-        embed = Embed(title=self.title)
+        embed = style.info(self.title)
         embed.add_field("position", format_hms(self.position_seconds), inline=True)
         if self.duration_seconds:
             embed.add_field("duration", format_hms(self.duration_seconds), inline=True)

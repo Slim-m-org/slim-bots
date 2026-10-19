@@ -3,7 +3,7 @@
 import secrets
 import time
 
-from slimbots import Embed, Member
+from slimbots import Member, style
 from slimbots.text import format_duration
 
 import casino_core
@@ -72,7 +72,7 @@ def setup(bot):
     @bot.command(aliases=["bal"], help="See your balance")
     async def balance(ctx):
         bal = await bot.store.run(casino_core.get_balance, ctx.author.id)
-        embed = Embed(title=ctx.author.display_name).add_field("chips", str(bal))
+        embed = style.info(ctx.author.display_name).add_field("chips", str(bal))
         await ctx.reply(embed=embed)
 
     @bot.command(help="Claim your daily chips")

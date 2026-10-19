@@ -3,7 +3,7 @@
 import asyncio
 import sys
 
-from slimbots import ApiError, Embed
+from slimbots import ApiError, style
 from slimbots.http import is_token_revoked
 
 from . import history, store
@@ -13,8 +13,8 @@ from .service import AuthError
 async def send_history_post(bot, post):
     assert bot.client is not None, "send_history_post runs only once connected"
     text = history.render_text(post)
-    embed = Embed(title=text, color=history.COLORS[post["kind"]])
-    await bot.client.send(bot.channel, "", message_id=post["message_id"], embeds=[embed.to_wire()], fallback_content=text)
+    embed = style.card(history.STYLES[post["kind"]], title=text)
+    await bot.client.send(bot.channel, "", message_id=post["message_id"], **style.send_kwargs(embed, text))
 
 
 async def history_poll_once(bot, core):

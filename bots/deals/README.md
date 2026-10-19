@@ -2,7 +2,7 @@
 
 A slim-m bot (directory `bots/deals`, command `!deals`) that posts free-to-keep Steam games into one channel, and pings a member in that channel when a Steam game they are watching falls to their target price.
 
-Needs `slim-m>=0.14.0`.
+Needs `slim-m>=0.15.0`.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `deals.db`).
 No API key is needed anywhere, and it uses only the standard library for fetching (`urllib`) and parsing (`json`).

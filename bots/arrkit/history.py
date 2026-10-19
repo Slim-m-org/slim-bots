@@ -10,7 +10,7 @@ MAX_PAGES = 5
 GRAB_WINDOW_SECONDS = 24 * 3600
 FAILURE_TEXT_MAX = 200
 HEADINGS = {"grabbed": "Grabbed", "downloaded": "Downloaded", "upgraded": "Upgraded", "failed": "Failed"}
-COLORS = {"grabbed": 0x3B82F6, "downloaded": 0x22C55E, "upgraded": 0x14B8A6, "failed": 0xEF4444}
+STYLES = {"grabbed": "info", "downloaded": "success", "upgraded": "success", "failed": "error"}
 WATCHED = ("grabbed", "downloadFolderImported", "downloadFailed")
 
 

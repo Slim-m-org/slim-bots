@@ -3,7 +3,7 @@
 A slim-m bot that follows RSS, Atom, YouTube, Reddit, Mastodon and Forgejo/Gitea release feeds and posts each new item into a channel as an embed.
 It generalizes the poll loop in `bots/github-releases` to any number of feeds chosen from chat.
 
-Needs `slim-m>=0.13.0`.
+Needs `slim-m>=0.15.0`.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `feeds.db`).
 It fetches through the library's `JsonService` and parses with the standard library (`xml.etree`), so there is no feed-parser dependency to pin.

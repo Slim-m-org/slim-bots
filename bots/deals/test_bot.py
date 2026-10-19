@@ -256,7 +256,7 @@ def test_watch_add_by_link_and_by_id_then_list_and_remove_are_private_and_per_us
 def test_watch_add_refuses_bad_input_unavailable_free_and_outages():
     rig = Rig()
     rig.say("!pricewatch")
-    assert "usage" in rig.last_private()
+    assert "try `!pricewatch" in rig.last_private()
     rig.say("!pricewatch portal 5")
     assert "could not search Steam (http 404)" in rig.last_private()
     rig.say("!pricewatch 620 cheap")

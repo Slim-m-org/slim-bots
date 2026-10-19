@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import time
 from types import ModuleType
-from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, NoReturn, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, Mapping, NoReturn, Sequence
 
 from . import catchup, cursor
 from . import events as ev
@@ -269,12 +269,13 @@ class Bot:
     def command(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None, usage: str | None = None,
         cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
-        check: Callable[[Context], Any] | None = None,
+        check: Callable[[Context], Any] | None = None, choices: Mapping[str, Sequence[str]] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             self.add_command(Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
                 cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
+                choices=choices,
             ))
             return func
         return decorator

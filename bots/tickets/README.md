@@ -3,7 +3,7 @@
 A slim-m bot for support tickets: a button opens a private channel for one member and your staff, staff claim and close it, and a plain-text transcript is kept in the bot's own sqlite.
 
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
-It needs `slim-m>=0.13.0`.
+It needs `slim-m>=0.15.0`.
 
 ```bash
 pip install -r requirements.txt

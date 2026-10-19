@@ -10,7 +10,7 @@ import uuid
 import db
 import parse as parsemod
 import source
-from slimbots import ApiError, Bot, Duration, Embed, Permissions
+from slimbots import ApiError, Bot, Duration, Permissions, style
 from slimbots.http import is_token_revoked
 from slimbots.text import format_duration
 
@@ -40,8 +40,8 @@ def host_of(url):
 
 
 def build_embed(entry, source_name):
-    return Embed(
-        title=entry.title, description=entry.summary[:SUMMARY_LIMIT] or None, footer=source_name,
+    return style.card(
+        "info", title=entry.title, description=entry.summary[:SUMMARY_LIMIT] or None, footer_text=style.footer(source_name),
         url=entry.link if entry.link.startswith(("http://", "https://")) else None, timestamp=entry.published,
     )
 
@@ -53,7 +53,7 @@ async def post_entry(feed, entry, source_name):
     try:
         await bot.client.send(
             feed["channel_id"], entry.link or entry.title, message_id=str(uuid.uuid5(POST_NAMESPACE, f"{feed['id']}|{entry.key}")),
-            embeds=[embed.to_wire()], fallback_content=fallback,
+            **style.send_kwargs(embed, fallback),
         )
     except ApiError as err:
         if is_token_revoked(err):
@@ -121,7 +121,7 @@ MANAGE_DENIED = "only someone with Manage Server can change feeds."
 @bot.group(name="feed", help="`add <url> [keywords]`, `list`, `remove <id>`, `filter <id> <keywords|off>`, `interval <id> <duration>`")
 async def feed_group(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(f"try `{p}feed add <url>`, `{p}feed list`, `{p}feed remove <id>`, `{p}feed filter <id> <keywords|off>` or `{p}feed interval <id> <10m|2h|1d>`")
+    await ctx.reply(style.usage_text(f"{p}feed add <url>", f"{p}feed list", f"{p}feed remove <id>", f"{p}feed filter <id> <keywords|off>", f"{p}feed interval <id> <10m|2h|1d>"))
 
 
 @feed_group.command(name="add", help="Follow a feed in this channel", usage="<url> [keywords]", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)

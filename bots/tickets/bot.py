@@ -4,7 +4,7 @@
 import logging
 import uuid
 
-from slimbots import ApiError, Bot, Button, Permissions, rows
+from slimbots import ApiError, Bot, Button, Permissions, rows, style
 from slimbots.hidden_chars import has_hidden_char
 
 import ticketdb
@@ -54,7 +54,7 @@ def ticket_buttons(*, claimed):
 @bot.group(name="ticket", help="`panel` posts the open-a-ticket button, `transcript <n>` reads a closed one, `reason <text>` sets this ticket's reason")
 async def ticket(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply_ephemeral(f"try `{p}ticket panel`, `{p}ticket transcript <number>` or `{p}ticket reason <text>`", public_fallback=True)
+    await ctx.reply_ephemeral(style.usage_text(f"{p}ticket panel", f"{p}ticket transcript <number>", f"{p}ticket reason <text>"), public_fallback=True)
 
 
 @ticket.command(

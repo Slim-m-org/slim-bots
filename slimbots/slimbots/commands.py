@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, Sequence
 
+from .choices import canonical_choice, option_entries, validate_choices
 from .converters import Duration, TimeOfDay
 from .exceptions import BadArgument, CheckFailure, CommandOnCooldown, MissingPermissions, MissingRequiredArgument
 from .http import ApiError
@@ -112,6 +113,7 @@ class Command:
         self, func: Callable[..., Awaitable[Any]], *, name: str, aliases: tuple[str, ...] = (),
         help: str | None = None, usage: str | None = None, cooldown: float | None = None,
         cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
+        choices: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         self.func = func
         self.name = name
@@ -123,6 +125,7 @@ class Command:
         self.cooldown = Cooldown(cooldown) if cooldown else None
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
         self.params = _handler_params(func)
+        self.choices = validate_choices(self.params, choices)
         self.usage = usage or " ".join(_usage_token(p) for p in self.params)
 
     @property
@@ -139,6 +142,21 @@ class Command:
         message = self.cooldown.check(_cooldown_key(self.cooldown_bucket, ctx))
         if message:
             raise CommandOnCooldown(message)
+
+    @property
+    def options(self) -> list[dict[str, Any]]:
+        """The wire `options` this command advertises; empty unless some argument has choices."""
+        return option_entries(self.params, self.choices, _NO_DEFAULT)
+
+    def _pick(self, name: str, token: str) -> str:
+        """`token` in its declared spelling when `name` has choices; anything else is a BadArgument naming them."""
+        values = self.choices.get(name)
+        if values is None:
+            return token
+        picked = canonical_choice(token, values)
+        if picked is None:
+            raise BadArgument(f"`{name}` must be one of: {', '.join(values)}")
+        return picked
 
     async def _convert(self, ctx: Context, annotation: Any, token: str, name: str) -> Any:
         if annotation is Member:
@@ -165,7 +183,8 @@ class Command:
         for idx, param in enumerate(self.params):
             annotation = param.annotation if param.annotation is not _NO_DEFAULT else str
             if idx == len(self.params) - 1 and annotation is str:
-                values.append(self._rest_value(tokens, i, param))
+                rest = self._rest_value(tokens, i, param)
+                values.append(self._pick(param.name, rest) if i < len(tokens) else rest)
                 i = len(tokens)
                 continue
             if i >= len(tokens):
@@ -173,7 +192,7 @@ class Command:
                     values.append(param.default)
                     continue
                 raise MissingRequiredArgument(param.name)
-            values.append(await self._convert(ctx, annotation, tokens[i], param.name))
+            values.append(await self._convert(ctx, annotation, self._pick(param.name, tokens[i]), param.name))
             i += 1
         return values
 
@@ -208,6 +227,7 @@ class Group(Command):
         self.cooldown = Cooldown(cooldown) if cooldown else None
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
         self.params = _handler_params(func)
+        self.choices: dict[str, tuple[str, ...]] = {}
         self.subcommands: dict[str, Command] = {}
         self._unique_subcommands: list[Command] = []
 
@@ -215,11 +235,13 @@ class Group(Command):
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
         usage: str | None = None, cooldown: float | None = None, cooldown_bucket: str = "user",
         requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
+        choices: Mapping[str, Sequence[str]] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             sub = Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
                 cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
+                choices=choices,
             )
             for sub_name in sub.names:
                 if sub_name in self.subcommands:

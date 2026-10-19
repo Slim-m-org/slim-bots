@@ -42,7 +42,7 @@ A bot script imports `Bot` and little else.
 
 ## Commands
 
-`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None)` registers a function `async def name(ctx, *typed_args)`.
+`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None, choices=None)` registers a function `async def name(ctx, *typed_args)`.
 `requires` is a `Permissions` bit; a member without it gets a private `MissingPermissions` reply (`requires_message` if given), before the arguments are parsed.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
@@ -52,6 +52,10 @@ Arguments convert from the function's own annotations (`slimbots/commands.py`):
 - `Duration` - `10m`, `2h30m`, `1d` parsed to an int count of seconds (`slimbots/converters.py`); replaces a bot's own duration regex.
 - `TimeOfDay` - `HH:MM` parsed to a `.hour`/`.minute` pair, range-checked; replaces a bot's own clock regex.
 - A parameter with a default is optional; a missing required one raises `MissingRequiredArgument` naming it.
+
+`choices={"param": ("a", "b")}` fixes the values a parameter accepts: a value is matched ignoring case and handed to the function in its declared spelling, any other is a `BadArgument` naming the choices, and the composer offers them as a pick list after the command (below).
+A choice is 1-100 characters with no whitespace, a parameter has at most 25, and a command with choices takes at most 5 parameters; a name that is no parameter, or a list the server would refuse, raises when the command is declared.
+A `@group.command()` subcommand takes `choices=` and enforces it, but only a top-level command advertises its choices.
 
 `help` is auto-generated from the registered set (name, aliases, usage, help text) unless a bot registers its own `help` command first.
 
@@ -298,10 +302,11 @@ The one case that needs it is a webhook, which never appears in `GET /members` a
 
 ## Command registration
 
-`@bot.command` registers itself with the server automatically, on every connect: `PUT /bots/commands` with `{prefix, commands: [{name, description, usage?, permission?}]}` (`slimbots/registration.py`), a full bulk overwrite each time, per decision 0031 in slim-m.
+`@bot.command` registers itself with the server automatically, on every connect: `PUT /bots/commands` with `{prefix, commands: [{name, description, usage?, permission?, options?}]}` (`slimbots/registration.py`), a full bulk overwrite each time, per decision 0031 in slim-m.
 Every alias is registered as its own composer entry alongside its command's name, each truncated to the server's caps (name 1-32 `[A-Za-z0-9_-]`, description 1-100 chars, usage at most 80, at most 50 entries total).
 A `@bot.group()` still contributes exactly one entry, whatever it names, not one per `@group.command()` subcommand - its `usage` is the subcommand names joined by `|` instead, so a bot with several grouped shapes cannot blow past the cap the way registering every subcommand separately would.
 A `requires=` permission becomes the entry's single-bit `permission`, which only hides the row in the composer for a caller who lacks it - it is never enforced against the message a bot receives, so the command's own `requires=` check still runs.
+A command declared with `choices=` also sends `options: [{name, required, choices}]`, one per parameter in order, so the composer knows which argument is being typed (needs a server with migration 0135; an older one ignores the field).
 A 404 or 405 is treated as "server too old" and skipped quietly; any other error (400 naming the violated cap, 403 if the token somehow isn't a bot's) is raised, so the framework works against today's production server exactly as it will against tomorrow's.
 
 ## Private replies
@@ -376,6 +381,16 @@ None of the three retries on its own, because a retried write only deepens a 429
 `ctx.send(content, embed=Embed(...))` and `ctx.reply(...)` send the real `RequestEmbed` wire shape decision 0030 defines (title/description/url/color/author/fields/footer/timestamp/image/thumbnail), capped to the same limits the server enforces (10 embeds/message elsewhere is a bot's own concern; per-embed caps live in `slimbots/embeds.py`).
 `content` is never sent blank - slim-m refuses that - so a bare `embed=` with no `content` sends the embed's own `render_fallback()` text alongside the real embed.
 If the server rejects the request with `embeds` present (an older deployment), `AsyncClient.send` retries once, under the same message id, as plain fallback text - the one case `render_fallback()` is the whole reply rather than a companion to it.
+
+## Official bot style
+
+Every slim-bot shapes its output through `slimbots.style`, so the fleet reads as one product; `scripts/tests/test_bots_use_style.py` fails on a raw `Embed(` or `.to_wire()` in a bot.
+
+- Colour comes from a fixed palette taken from the app's design tokens: `style.INFO` (accent), `SUCCESS` (online), `WARN` (away), `ERROR` (danger) and `NEUTRAL`. `style.card(kind, ...)`, or `style.info`, `success`, `warn` and `error`, build the embed; a status with its own meaning (game-status) passes `color=` from those same constants.
+- A title is a short sentence-case label or the thing named (a game, a track). A description is lowercase-leading prose or a list, as bots already write replies. A field name is a lowercase noun (`position`, `state`).
+- A footer holds lowercase facts joined by a middle dot through `style.footer(...)`: where it came from, a balance, a recurrence, when it was last checked. Never a bot name, since the author line already says that.
+- A command that fails replies with plain text: lowercase, one sentence ending in a full stop, then at most one hint. `style.error_text(what, hint)` builds it, and `style.usage_text("!cmd a", "!cmd b")` builds the `try ...` reply for a command run without what it needs. Use `choices=` instead of a hand-written "must be one of" reply.
+- A post a bot makes on its own (not a reply) goes out through `client.send(..., **style.send_kwargs(embed, fallback))`, which carries the plain text an older server shows when it refuses embeds. `fallback` defaults to the embed's own text.
 
 ## Text helpers
 

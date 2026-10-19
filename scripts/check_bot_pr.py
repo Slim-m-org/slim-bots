@@ -16,6 +16,7 @@ EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+    (r"\bfrom slimbots import [^\n]*\bstyle\b|\bslimbots\.style\b|\bchoices=\{", "slimbots.style and command choices", (0, 15, 0)),
     (r"\.run_cli\(|\.every\(|\brequires_message=|\b(?:KeyValueTable|LedgerTable)\b", "run_cli, every, requires_message and the kv/ledger tables", (0, 13, 0)),
     (
         r"\bslimbots\.(?:web|urlpolicy|chooser|media|text|jellyfin)\b|\bJsonService\b|\bjoin_to_speak\b|\bwatch_empty\b|\.channel_label\(",

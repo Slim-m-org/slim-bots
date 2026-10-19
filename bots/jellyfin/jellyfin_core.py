@@ -6,7 +6,7 @@ import time
 import urllib.parse
 import uuid
 
-from slimbots import Embed, KeyValueTable, LedgerTable
+from slimbots import KeyValueTable, LedgerTable, style
 from slimbots import jellyfin as jellyfin_api
 from slimbots.jellyfin import JellyfinAuthError
 from slimbots.web import ServiceError
@@ -460,7 +460,7 @@ def render_text(card):
 
 def render_embed(card):
     """`render_text`'s seam as a real `Embed`; the poster stays a separate attachment - see docs/framework.md."""
-    return Embed(title=card["title"], description=card.get("description"))
+    return style.info(card["title"], card.get("description"))
 
 
 async def search_items(query, limit):
