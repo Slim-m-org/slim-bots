@@ -380,7 +380,7 @@ class Bot:
     def _register_default_help(self) -> None:
         @self.command(name="help", help="Show this list, or one command's usage")
         async def help_command(ctx: Context, command_name: str | None = None) -> None:
-            await ctx.reply(build_help_text(self, command_name=command_name))
+            await ctx.reply_ephemeral(build_help_text(self, command_name=command_name), public_fallback=True)
 
     async def _dispatch_event(self, name: str, *args: Any) -> None:
         for handler in self._listeners.get(name, []):
@@ -574,21 +574,21 @@ class Bot:
             for global_check in self._global_checks:
                 refusal = await global_check(ctx)
                 if refusal:
-                    await ctx.reply(refusal)
+                    await ctx.reply_ephemeral(refusal, public_fallback=True)
                     return
             await command.invoke(ctx)
         except MissingPermissions as err:
             await ctx.reply_ephemeral(str(err), public_fallback=True)
             await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
-            await ctx.reply(self._permission_refusal(err) or str(err))
+            await ctx.reply_ephemeral(self._permission_refusal(err) or str(err), public_fallback=True)
             await self._dispatch_event("on_command_error", ctx, err)
         except ApiError as err:
             if is_token_revoked(err):
                 raise
             reply = f"I can't do that: {err.reason or 'missing permission'}" if is_forbidden(err) \
                 else UNEXPECTED_ERROR_REPLY
-            await ctx.reply(reply)
+            await ctx.reply_ephemeral(reply, public_fallback=True)
             await self._dispatch_event("on_command_error", ctx, err)
         except Exception as err:
             log.error("unhandled error in command `%s`", command.name, exc_info=err)

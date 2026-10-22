@@ -200,7 +200,7 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
     assert "Manage Server" in rig.last_private()
     rig.say("!deals now", keep_cooldowns=True)
     rig.say("!deals now", keep_cooldowns=True)
-    assert "slow down" in rig.last_reply()
+    assert "slow down" in rig.client.ephemerals[-1]["content"]
 
 
 def test_deals_now_says_when_a_post_is_refused():

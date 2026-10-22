@@ -238,20 +238,20 @@ async def _duration_allowed(ctx, seconds):
     try:
         require_range(seconds, max_value=MAX_DURATION_SECONDS, field="a reminder duration")
     except ValidationError as err:
-        await ctx.reply(f"{err} seconds (a year)")
+        await ctx.reply_ephemeral(f"{err} seconds (a year)", public_fallback=True)
         return False
     return True
 
 
 async def _create_and_ack(ctx, due_at, text, recur=None):
     message = await bot.store.run(_txn_create_reminder, ctx.channel_id, ctx.author.id, ctx.message["id"], due_at, text, recur)
-    await ctx.reply(message)
+    await ctx.reply_ephemeral(message, public_fallback=True)
 
 
 @bot.group(name="remind", help="`in <duration> <text>`, `at <HH:MM> <text>`, or `every <spec> [at HH:MM] <text>`")
 async def remind(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(style.usage_text(f"{p}remind in 2h <text>", f"{p}remind at 15:30 <text>", f"{p}remind every monday <text>"))
+    await ctx.reply_ephemeral(style.usage_text(f"{p}remind in 2h <text>", f"{p}remind at 15:30 <text>", f"{p}remind every monday <text>"), public_fallback=True)
 
 
 @remind.command(name="in", help="Remind you after a duration", usage="<duration> <text>")
@@ -279,7 +279,7 @@ async def remind_every(ctx, spec: str, rest: str):
     if weekday is None:
         duration = Duration.parse(spec)
         if duration is None:
-            await ctx.reply(f"not a duration or weekday I understand: `{spec}`")
+            await ctx.reply_ephemeral(f"not a duration or weekday I understand: `{spec}`", public_fallback=True)
             return
         interval_seconds = int(duration)
         if not await _duration_allowed(ctx, interval_seconds):
@@ -291,15 +291,15 @@ async def remind_every(ctx, spec: str, rest: str):
         clock_token, _, remaining_text = remainder.partition(" ")
         clock = TimeOfDay.parse(clock_token)
         if clock is None:
-            await ctx.reply(f"not a time I understand: `{clock_token}`")
+            await ctx.reply_ephemeral(f"not a time I understand: `{clock_token}`", public_fallback=True)
             return
         if weekday is None:
-            await ctx.reply("`at HH:MM` only makes sense with a weekday, not a plain interval")
+            await ctx.reply_ephemeral("`at HH:MM` only makes sense with a weekday, not a plain interval", public_fallback=True)
             return
         hour, minute, text = clock.hour, clock.minute, remaining_text
 
     if not text:
-        await ctx.reply("missing a value for `text`")
+        await ctx.reply_ephemeral("missing a value for `text`", public_fallback=True)
         return
 
     if weekday is not None:
@@ -328,29 +328,29 @@ async def reminders_group(ctx, rest: str = ""):
     if not rest:
         rows, tz_name = await bot.store.run(_txn_list_pending, ctx.channel_id, ctx.author.id)
         if not rows:
-            await ctx.reply("you have no pending reminders here")
+            await ctx.reply_ephemeral("you have no pending reminders here", public_fallback=True)
             return
         lines = []
         for i, (_, due_at, text, recur_kind, interval_seconds, weekday, hour, minute, _tz) in enumerate(rows, 1):
             note = format_recurrence(recur_kind, interval_seconds, weekday, hour, minute)
             lines.append(f"{i}. {recurrence.format_local(due_at, tz_name)}{note} - {text}")
-        await ctx.reply("\n".join(lines))
+        await ctx.reply_ephemeral("\n".join(lines), public_fallback=True)
         return
     p = bot.prefix
-    await ctx.reply(style.usage_text(f"{p}reminders", f"{p}reminders cancel <n>", f"{p}reminders edit <n> <text>", f"{p}reminders snooze <n> <duration>"))
+    await ctx.reply_ephemeral(style.usage_text(f"{p}reminders", f"{p}reminders cancel <n>", f"{p}reminders edit <n> <text>", f"{p}reminders snooze <n> <duration>"), public_fallback=True)
 
 
 @reminders_group.command(name="cancel", help="Cancel one by its listed number", usage="<n>")
 async def reminders_cancel(ctx, n: int):
     ok = await bot.store.run(cancel_nth, ctx.channel_id, ctx.author.id, n)
-    await ctx.reply(f"cancelled reminder {n}" if ok else f"no reminder {n}")
+    await ctx.reply_ephemeral(f"cancelled reminder {n}" if ok else f"no reminder {n}", public_fallback=True)
 
 
 @reminders_group.command(name="edit", help="Change one's text by its listed number", usage="<n> <text>")
 async def reminders_edit(ctx, n: int, text: str):
     text = require_len(text, max_len=MAX_TEXT_LEN, field="a reminder")
     ok = await bot.store.run(edit_nth_text, ctx.channel_id, ctx.author.id, n, text)
-    await ctx.reply(f"updated reminder {n}" if ok else f"no reminder {n}")
+    await ctx.reply_ephemeral(f"updated reminder {n}" if ok else f"no reminder {n}", public_fallback=True)
 
 
 @reminders_group.command(name="snooze", help="Push one back by a duration", usage="<n> <duration>")
@@ -359,23 +359,23 @@ async def reminders_snooze(ctx, n: int, duration: Duration):
         return
     new_due = await bot.store.run(snooze_nth, ctx.channel_id, ctx.author.id, n, int(duration))
     if new_due is None:
-        await ctx.reply(f"no reminder {n}")
+        await ctx.reply_ephemeral(f"no reminder {n}", public_fallback=True)
         return
     tz_name = await bot.store.run(get_timezone, ctx.author.id)
-    await ctx.reply(f"reminder {n} pushed to {recurrence.format_local(new_due, tz_name)}")
+    await ctx.reply_ephemeral(f"reminder {n} pushed to {recurrence.format_local(new_due, tz_name)}", public_fallback=True)
 
 
 @bot.command(name="timezone", help="Show or set the timezone `at`/`every ... at` and the listing are shown in", usage="[IANA name]")
 async def timezone_cmd(ctx, tz_name: str = None):
     if tz_name is None:
         current = await bot.store.run(get_timezone, ctx.author.id)
-        await ctx.reply(f"your timezone is `{current}`")
+        await ctx.reply_ephemeral(f"your timezone is `{current}`", public_fallback=True)
         return
     if not recurrence.is_valid_timezone(tz_name):
-        await ctx.reply(f"`{tz_name}` isn't a timezone I recognise - use an IANA name like `America/New_York`")
+        await ctx.reply_ephemeral(f"`{tz_name}` isn't a timezone I recognise - use an IANA name like `America/New_York`", public_fallback=True)
         return
     await bot.store.run(set_timezone, ctx.author.id, tz_name)
-    await ctx.reply(f"timezone set to `{tz_name}`")
+    await ctx.reply_ephemeral(f"timezone set to `{tz_name}`", public_fallback=True)
 
 
 async def deliver_reminder(row):

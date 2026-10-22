@@ -51,7 +51,7 @@ async def test_channel_bucket_blocks_a_different_user_in_the_same_channel(bot):
     await b.process_message(message("u1", "c1", "!daily", "m1"))
     await b.process_message(message("u2", "c1", "!daily", "m2"))
     assert client.sent[0]["content"] == "granted"
-    assert "try again" in client.sent[1]["content"]
+    assert "try again" in client.ephemerals[0]["content"]
 
 
 async def test_channel_bucket_does_not_block_a_different_channel(bot):
@@ -77,7 +77,7 @@ async def test_deployment_bucket_blocks_every_user_in_every_channel(bot):
     await b.process_message(message("u1", "c1", "!daily", "m1"))
     await b.process_message(message("u2", "c2", "!daily", "m2"))
     assert client.sent[0]["content"] == "granted"
-    assert "try again" in client.sent[1]["content"]
+    assert "try again" in client.ephemerals[0]["content"]
 
 
 async def test_group_subcommands_accept_a_cooldown_bucket_too(bot):
@@ -94,7 +94,7 @@ async def test_group_subcommands_accept_a_cooldown_bucket_too(bot):
     await b.process_message(message("u1", "c1", "!shop buy", "m1"))
     await b.process_message(message("u2", "c1", "!shop buy", "m2"))
     assert client.sent[0]["content"] == "bought"
-    assert "try again" in client.sent[1]["content"]
+    assert "try again" in client.ephemerals[0]["content"]
 
 
 def test_an_unknown_bucket_name_is_rejected_up_front():

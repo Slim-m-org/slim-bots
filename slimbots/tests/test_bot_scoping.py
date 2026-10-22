@@ -109,7 +109,7 @@ async def test_mention_commands_can_be_switched_off(monkeypatch):
 async def test_help_names_the_bot_and_both_ways_to_call_it(monkeypatch):
     bot, client = await make_bot(monkeypatch, prefix="j!")
     await say(bot, "j!help")
-    header = client.sent[-1]["content"].splitlines()[0]
+    header = client.ephemerals[-1]["content"].splitlines()[0]
     assert header == "**jellyfin commands** (prefix `j!`, or `@jellyfin <command>`)"
 
 
@@ -118,4 +118,4 @@ async def test_help_falls_back_before_the_username_is_known(monkeypatch, usernam
     bot, client = await make_bot(monkeypatch)
     bot.username = username
     await say(bot, "!help")
-    assert client.sent[-1]["content"].splitlines()[0] == "**Commands** (prefix `!`)"
+    assert client.ephemerals[-1]["content"].splitlines()[0] == "**Commands** (prefix `!`)"
