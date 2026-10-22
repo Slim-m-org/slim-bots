@@ -245,7 +245,7 @@ def test_the_log_and_usage_hint_name_the_configured_prefix():
 def test_an_unlisted_subcommand_is_refused_with_the_choices():
     client = setup()
     asyncio.run(automod.bot.process_message({"id": "cmd", "channel_id": "c-chat", "author_id": "u1", "content": "!automod nonsense", "seq": 1}))
-    assert "`sub` must be one of: rules, stats, lift" in client.sent[-1]["content"]
+    assert "`sub` must be one of: rules, stats, lift" in client.ephemerals[-1]["content"]
 
 
 def test_a_message_from_an_author_the_server_cannot_resolve_is_left_alone():

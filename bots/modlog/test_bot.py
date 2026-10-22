@@ -140,7 +140,7 @@ def test_modlog_hints_name_the_configured_prefix():
 def test_modlog_bad_subcommand_is_a_clear_reply():
     client = setup()
     process(client, message("u1", "!modlog nonsense"))
-    assert "`sub` must be one of: stats, gaps, permissions" in client.sent[-1]["content"]
+    assert "`sub` must be one of: stats, gaps, permissions" in client.ephemerals[-1]["content"]
 
 
 def test_reconnect_gap_is_recorded_and_reported():

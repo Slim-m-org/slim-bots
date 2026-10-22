@@ -32,7 +32,7 @@ async def test_a_command_that_lets_a_validation_error_escape_replies_with_its_te
         require_len(text, max_len=3, field="a note")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!note toolong"})
-    assert client.sent[-1]["content"] == "a note must be between 0 and 3 characters"
+    assert client.ephemerals[-1]["content"] == "a note must be between 0 and 3 characters"
 
 
 async def test_a_validation_error_reaches_on_command_error(rig):

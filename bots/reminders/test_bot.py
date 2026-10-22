@@ -40,7 +40,7 @@ def process(client, *messages):
 def test_remind_in_creates_a_reminder_and_acks():
     client = setup()
     process(client, message("!remind in 2h water the plants"))
-    assert "will remind you" in client.sent[-1]["content"]
+    assert "will remind you" in client.ephemerals[-1]["content"]
     rows = reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1")
     assert len(rows) == 1
     assert rows[0][2] == "water the plants"
@@ -49,58 +49,58 @@ def test_remind_in_creates_a_reminder_and_acks():
 def test_remind_in_bad_duration_is_refused_without_creating_one():
     client = setup()
     process(client, message("!remind in banana water the plants"))
-    assert "duration" in client.sent[-1]["content"]
+    assert "duration" in client.ephemerals[-1]["content"]
     assert reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1") == []
 
 
 def test_remind_at_creates_a_reminder():
     client = setup()
     process(client, message("!remind at 09:00 standup"))
-    assert "will remind you" in client.sent[-1]["content"]
+    assert "will remind you" in client.ephemerals[-1]["content"]
 
 
 def test_remind_at_bad_time_is_refused():
     client = setup()
     process(client, message("!remind at 25:99 standup"))
-    assert "time" in client.sent[-1]["content"]
+    assert "time" in client.ephemerals[-1]["content"]
     assert reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1") == []
 
 
 def test_remind_every_weekday_recurs():
     client = setup()
     process(client, message("!remind every monday at 09:00 standup"))
-    assert "every monday at 09:00" in client.sent[-1]["content"]
+    assert "every monday at 09:00" in client.ephemerals[-1]["content"]
 
 
 def test_remind_every_weekday_defaults_to_the_default_hour():
     client = setup()
     process(client, message("!remind every monday standup"))
-    assert f"every monday at {reminders.DEFAULT_RECUR_HOUR:02d}:00" in client.sent[-1]["content"]
+    assert f"every monday at {reminders.DEFAULT_RECUR_HOUR:02d}:00" in client.ephemerals[-1]["content"]
 
 
 def test_remind_every_interval_below_the_floor_is_refused():
     client = setup()
     process(client, message("!remind every 10s spam"))
-    assert "at least" in client.sent[-1]["content"]
+    assert "at least" in client.ephemerals[-1]["content"]
 
 
 def test_remind_every_at_clock_on_a_plain_interval_is_refused():
     client = setup()
     process(client, message("!remind every 1d at 09:00 spam"))
-    assert "only makes sense with a weekday" in client.sent[-1]["content"]
+    assert "only makes sense with a weekday" in client.ephemerals[-1]["content"]
     assert reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1") == []
 
 
 def test_remind_every_unrecognised_spec_is_refused():
     client = setup()
     process(client, message("!remind every someday spam"))
-    assert "not a duration or weekday" in client.sent[-1]["content"]
+    assert "not a duration or weekday" in client.ephemerals[-1]["content"]
 
 
 def test_remind_bare_shows_the_usage_hint():
     client = setup()
     process(client, message("!remind"))
-    assert "try `!remind" in client.sent[-1]["content"]
+    assert "try `!remind" in client.ephemerals[-1]["content"]
 
 
 class prefixed:
@@ -117,36 +117,36 @@ def test_usage_hints_name_the_configured_prefix():
     client = setup()
     with prefixed():
         process(client, message("?remind"), message("?reminders nonsense", "m2"))
-    assert "try `?remind in 2h" in client.sent[-2]["content"]
-    assert "try `?reminders`" in client.sent[-1]["content"]
+    assert "try `?remind in 2h" in client.ephemerals[-2]["content"]
+    assert "try `?reminders`" in client.ephemerals[-1]["content"]
 
 
 def test_reminders_lists_pending():
     client = setup()
     process(client, message("!remind in 1h water the plants", "m1"))
     process(client, message("!reminders", "m2"))
-    assert "water the plants" in client.sent[-1]["content"]
+    assert "water the plants" in client.ephemerals[-1]["content"]
 
 
 def test_reminders_cancel_removes_it():
     client = setup()
     process(client, message("!remind in 1h water the plants", "m1"))
     process(client, message("!reminders cancel 1", "m2"))
-    assert "cancelled reminder 1" in client.sent[-1]["content"]
+    assert "cancelled reminder 1" in client.ephemerals[-1]["content"]
     assert reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1") == []
 
 
 def test_reminders_cancel_out_of_range_says_so():
     client = setup()
     process(client, message("!reminders cancel 5"))
-    assert "no reminder 5" in client.sent[-1]["content"]
+    assert "no reminder 5" in client.ephemerals[-1]["content"]
 
 
 def test_reminders_edit_changes_the_text():
     client = setup()
     process(client, message("!remind in 1h old text", "m1"))
     process(client, message("!reminders edit 1 new text", "m2"))
-    assert "updated reminder 1" in client.sent[-1]["content"]
+    assert "updated reminder 1" in client.ephemerals[-1]["content"]
     rows = reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1")
     assert rows[0][2] == "new text"
 
@@ -163,21 +163,21 @@ def test_reminders_snooze_pushes_the_due_time():
 def test_reminders_unrecognised_subcommand_shows_the_usage_hint():
     client = setup()
     process(client, message("!reminders bogus"))
-    assert "try `!reminders`" in client.sent[-1]["content"]
+    assert "try `!reminders`" in client.ephemerals[-1]["content"]
 
 
 def test_timezone_set_and_show():
     client = setup()
     process(client, message("!timezone America/New_York", "m1"))
-    assert "timezone set" in client.sent[-1]["content"]
+    assert "timezone set" in client.ephemerals[-1]["content"]
     process(client, message("!timezone", "m2"))
-    assert "America/New_York" in client.sent[-1]["content"]
+    assert "America/New_York" in client.ephemerals[-1]["content"]
 
 
 def test_timezone_rejects_an_unknown_name():
     client = setup()
     process(client, message("!timezone Mars/Nowhere"))
-    assert "isn't a timezone" in client.sent[-1]["content"]
+    assert "isn't a timezone" in client.ephemerals[-1]["content"]
 
 
 def test_timezone_rejects_names_the_zoneinfo_loader_raises_other_errors_for():
@@ -191,7 +191,7 @@ def test_pending_cap_refuses_a_new_reminder():
     for i in range(reminders.MAX_PENDING_PER_USER):
         reminders.add_reminder(reminders.bot.store.connection, f"r{i}", "c1", "u1", "m0", int(time.time()) + 3600, "x")
     process(client, message("!remind in 1h one more"))
-    assert "cancel one first" in client.sent[-1]["content"]
+    assert "cancel one first" in client.ephemerals[-1]["content"]
 
 
 def test_due_reminder_is_delivered_with_a_backtick_wrapped_and_embed():
@@ -289,7 +289,7 @@ def test_a_number_from_the_listing_still_means_the_reminder_it_showed():
     for rid, due, text in (("a", now + 10, "A soon"), ("b", now + 3600, "B"), ("c", now + 7200, "C")):
         reminders.add_reminder(conn, rid, "c1", "u1", "m0", due, text)
     process(client, message("!reminders", "m1"))
-    assert client.sent[-1]["content"].splitlines()[1].endswith("- B")
+    assert client.ephemerals[-1]["content"].splitlines()[1].endswith("- B")
     reminders.mark_sent(conn, "a")
     process(client, message("!reminders cancel 2", "m2"))
     assert [row[2] for row in reminders.pending_for_user(conn, "c1", "u1")] == ["C"], "cancelled the wrong reminder"
@@ -304,7 +304,7 @@ def test_a_listed_number_whose_reminder_already_fired_is_refused_not_redirected(
     process(client, message("!reminders", "m1"))
     reminders.mark_sent(conn, "a")
     process(client, message("!reminders cancel 1", "m2"))
-    assert client.sent[-1]["content"] == "no reminder 1"
+    assert client.ephemerals[-1]["content"] == "no reminder 1"
     assert [row[2] for row in reminders.pending_for_user(conn, "c1", "u1")] == ["B"]
 
 
