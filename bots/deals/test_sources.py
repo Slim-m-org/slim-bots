@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import fixtures  # noqa: E402
+import digest  # noqa: E402
 import prices  # noqa: E402
 import sources  # noqa: E402
 
@@ -54,6 +55,45 @@ def test_fetch_offers_reports_connection_and_garbage_errors_without_raising():
     assert sources.fetch_offers(web(platform=OSError("down")))[1] == "could not connect (OSError)"
     assert sources.fetch_offers(web(platform=(200, b"<html>")))[1] == "the answer is not JSON"
     assert sources.fetch_offers(web(platform=(500, b"")))[1] == "http 500"
+
+
+def test_specials_become_deals_biggest_discount_first():
+    deals = digest.parse_specials(fixtures.load("featuredcategories_specials"))
+    assert len(deals) == 6 and deals[0].name == "Moon Sweepers" and deals[0].percent == 15
+    assert [d.percent for d in deals] == sorted((d.percent for d in deals), reverse=True)
+    assert (deals[0].cents, deals[0].currency) == (764, "USD")
+
+
+def test_specials_skip_undiscounted_and_malformed_entries_and_refuse_a_new_shape():
+    data = fixtures.load("featuredcategories_specials")
+    items = data["specials"]["items"]
+    items[0]["discounted"] = False
+    items[1]["final_price"] = items[1]["original_price"] + 1
+    items[2]["id"] = "x"
+    items.append("junk")
+    assert len(digest.parse_specials(data)) == 3
+    for bad in ({}, {"specials": []}, {"specials": {"items": "no"}}, []):
+        try:
+            digest.parse_specials(bad)
+        except sources.SourceError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
+
+
+def test_fetch_specials_reports_errors_without_raising():
+    assert digest.fetch_specials(web(featuredcategories=OSError("down")), "us") == ([], "could not connect (OSError)")
+    assert digest.fetch_specials(web(featuredcategories=(200, b"<html>")), "us")[1] == "the answer is not JSON"
+    deals, error = digest.fetch_specials(web(featuredcategories=(200, fixtures.raw("featuredcategories_specials"))), "gb")
+    assert error == "" and len(deals) == 6
+
+
+def test_the_digest_text_links_every_game_is_capped_and_cannot_ping_or_break_a_link():
+    deal = digest.Deal(1, "Evil [x](http://bad) @everyone", 50, 500, 1000, "USD")
+    text = digest.line(deal, "https://store.steampowered.com/app/1/")
+    assert "@" not in text and text.count("[") == 1 and "(https://store.steampowered.com/app/1/)" in text
+    many = [digest.Deal(n, "G" * 200, 30, 700, 1000, "USD") for n in range(30)]
+    shown_text, shown = digest.render(many, lambda app_id: f"https://store.steampowered.com/app/{app_id}/")
+    assert shown == len(shown_text.splitlines()) and shown <= digest.MAX_GAMES and len(shown_text) <= digest.MAX_TEXT
 
 
 def test_quote_reads_price_currency_and_discount():

@@ -1,0 +1,63 @@
+{
+ "specials": {
+  "id": "cat_specials",
+  "name": "Specials",
+  "items": [
+   {
+    "id": 4348910,
+    "name": "Probably Stolen - Cyberpunk Shopkeeper Sim",
+    "discounted": true,
+    "discount_percent": 10,
+    "original_price": 1999,
+    "final_price": 1799,
+    "currency": "USD"
+   },
+   {
+    "id": 5335510,
+    "name": "Moon Sweepers",
+    "discounted": true,
+    "discount_percent": 15,
+    "original_price": 899,
+    "final_price": 764,
+    "currency": "USD"
+   },
+   {
+    "id": 4688700,
+    "name": "Project Exhibitionist",
+    "discounted": true,
+    "discount_percent": 10,
+    "original_price": 2999,
+    "final_price": 2699,
+    "currency": "USD"
+   },
+   {
+    "id": 1203620,
+    "name": "Enshrouded",
+    "discounted": true,
+    "discount_percent": 10,
+    "original_price": 3999,
+    "final_price": 3599,
+    "currency": "USD"
+   },
+   {
+    "id": 4922630,
+    "name": "The Long Dark: Iron Road",
+    "discounted": true,
+    "discount_percent": 10,
+    "original_price": 2499,
+    "final_price": 2249,
+    "currency": "USD"
+   },
+   {
+    "id": 4954910,
+    "name": "Scam With Your Friends",
+    "discounted": true,
+    "discount_percent": 10,
+    "original_price": 999,
+    "final_price": 899,
+    "currency": "USD"
+   }
+  ]
+ },
+ "status": 1
+}

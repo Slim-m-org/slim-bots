@@ -22,6 +22,7 @@ It does not use `SLIMM_CHANNELS`: it posts where `!deals setup` was run.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `!deals setup` | Manage Server | make this channel the deals channel; the first check runs within a minute |
+| `!deals digest on|off|<hour>` | Manage Server | a daily list of the best Steam discounts in the deals channel, off by default; the hour is UTC (18 unless set) |
 | `!deals now` | Manage Server | check free games and watches right away (once a minute at most) |
 | `!pricewatch <game name, Steam link or app id> <price>` | anyone | watch a game, for example `!pricewatch portal 2 4.99` or `!pricewatch store.steampowered.com/app/620/ 4.99` |
 | `!pricewatch list` | anyone | your own watches with the last price seen |
@@ -45,12 +46,20 @@ Each member can hold 20 watches.
 | --- | --- | --- |
 | Free games | [GamerPower](https://www.gamerpower.com/api-read) giveaways, `platform=steam&type=game` | Keyless. Includes publisher key giveaways as well as 100% off promotions, since both are free to keep. Epic and GOG are no longer checked. |
 | Prices | `store.steampowered.com/api/appdetails` (`filters=basic,price_overview`) | Keyless. Steam allows roughly 200 requests per five minutes; the daily check asks once per distinct game and waits `DEALS_STEAM_DELAY` seconds between games. |
+| Daily digest | `store.steampowered.com/api/featuredcategories` (the `specials` list) | Keyless. One request a day when the digest is on. |
 | Game search | `store.steampowered.com/api/storesearch/?term=...&cc=...&l=en` | Keyless. Used only by `!pricewatch` with a name. |
 
 GamerPower asks callers to stay under about four requests per second and to link back; the bot makes at most three requests every three hours.
 Each offer is posted once, keyed by offer id in sqlite, and its message id is derived from that key, so a crash between the post and the bookkeeping cannot double post.
 An offer whose post is refused is not marked seen and is retried on the next run.
 A run posts at most 10 offers.
+
+## Daily digest
+
+`!deals digest on` makes the bot post one message a day after the chosen UTC hour: up to 10 of Steam's featured specials, biggest discount first, each as a link with the percentage off and the price now and before.
+It mentions no one, and the text is capped well under the message limit.
+A game is not featured again for seven days, so a quiet week posts nothing rather than the same list.
+The post is keyed by the day, so a restart cannot double post, and a Steam outage or a refused post is retried on the next tick.
 
 ## Price watches
 
