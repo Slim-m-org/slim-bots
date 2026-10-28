@@ -14,6 +14,7 @@ One `<bot>.json` per bot, read by `scripts/smoke_bot.py <bot>`.
 
 - `say` is typed into the private channel by the tester account.
 - `prefix` is the command prefix the smoke bot is created with, for a bot whose commands are not under `!`; `channel_kind` is `voice` for a bot that needs a voice channel.
+- `register_wait` is how many seconds to wait for the bot to register its commands before typing at it; `0` skips the wait for a bot that registers none, and `ready_seconds` is then the plain wait. `smoke_all.py` sets `SLIMM_SMOKE_BOT_ID` so the wait can look.
 - `pause` waits that many seconds before the step is typed, for a command with a cooldown.
 - `expect_contains` lists substrings the replies must contain; leave it out to only require some reply.
 - `env` is passed to the bot process on top of the caller's environment.

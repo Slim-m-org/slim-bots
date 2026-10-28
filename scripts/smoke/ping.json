@@ -8,5 +8,6 @@
       ],
       "timeout": 15
     }
-  ]
+  ],
+  "register_wait": 0
 }

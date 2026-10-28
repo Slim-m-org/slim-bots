@@ -153,3 +153,20 @@ def test_a_pause_over_the_cap_is_refused(tmp_path):
     p.write_text(json.dumps({"steps": [{"say": "x", "pause": s.MAX_PAUSE + 1}]}))
     with pytest.raises(ValueError):
         s.load_manifest(p)
+
+
+def test_waiting_for_registration_stops_as_soon_as_the_bot_has_registered():
+    answers = iter([False, False, True])
+    slept = []
+    assert s.wait_until_registered(lambda: next(answers), 30, sleep=slept.append)
+    assert len(slept) == 2
+
+
+def test_waiting_for_registration_gives_up_at_its_limit_and_survives_a_failed_poll():
+    slept = []
+
+    def failing():
+        raise s.httpx.ConnectError("not up yet")
+
+    assert not s.wait_until_registered(failing, 3, sleep=slept.append)
+    assert len(slept) == 3

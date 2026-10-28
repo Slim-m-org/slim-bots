@@ -26,6 +26,7 @@ MAX_STEPS = 50
 MAX_TIMEOUT = 120
 MAX_READY = 60
 MAX_PAUSE = 30
+REGISTER_WAIT = 60  # how long to wait for a bot to register its commands before typing at it anyway
 ENV_HELP = """Needs (all from env, none printed):
   SLIMM_URL                  server root
   SLIMM_BOT_TOKEN            the bot's token
@@ -77,6 +78,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(data.get("env", {}), dict) or not all(isinstance(v, str) for v in data.get("env", {}).values()):
         raise ValueError(f"{path.name}: 'env' must map names to strings")
     bounded_number(data.get("ready_seconds", 8), f"{path.name}: ready_seconds", MAX_READY)
+    if "register_wait" in data and data["register_wait"] != 0:
+        bounded_number(data["register_wait"], f"{path.name}: register_wait", REGISTER_WAIT)
     for i, step in enumerate(steps):
         bounded_number(step.get("timeout", 15), f"{path.name}: step {i} timeout", MAX_TIMEOUT)
         if "pause" in step:
@@ -86,6 +89,20 @@ def load_manifest(path: Path) -> dict[str, Any]:
         if not all(isinstance(s, str) for s in step.get("expect_contains", [])):
             raise ValueError(f"{path.name}: step {i} 'expect_contains' must be strings")
     return data
+
+
+def wait_until_registered(
+    registered: Callable[[], bool], limit: float, sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Polls until the bot has registered its commands, which is the first sign it is up and listening."""
+    for _ in range(int(limit)):
+        try:
+            if registered():
+                return True
+        except httpx.HTTPError:
+            pass
+        sleep(1)
+    return False
 
 
 def missing_env(env: dict[str, str]) -> list[str]:
@@ -198,7 +215,11 @@ def main(argv: list[str] | None = None) -> int:
     proc = subprocess.Popen([sys.executable, "bot.py"], cwd=bot_dir, env=env)
     results: list[dict[str, Any]] = []
     try:
-        time.sleep(manifest.get("ready_seconds", 8))
+        bot_id = os.environ.get("SLIMM_SMOKE_BOT_ID")
+        limit = manifest.get("register_wait", REGISTER_WAIT)
+        if bot_id and limit:
+            wait_until_registered(lambda: bool(http.get(f"/bots/{bot_id}/commands").json().get("commands")), limit)
+        time.sleep(manifest.get("ready_seconds", 8) if not bot_id or not limit else 2)
         for step in manifest["steps"]:
             results.append(run_step(step, say, fetch, tester_id, private=private.replies_to))
     finally:

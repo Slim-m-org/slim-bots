@@ -49,19 +49,20 @@ class Stack:
         body: dict[str, Any] = {"username": username, "display_name": username, "password": PASSWORD, "device_name": "smoke"}
         return self.http.post("/auth/register", json=body).raise_for_status().json()["access_token"]
 
-    def bot_and_channel(self, name: str, prefix: str | None = None, kind: str = "text") -> tuple[str, str]:
+    def bot_and_channel(self, name: str, prefix: str | None = None, kind: str = "text") -> tuple[str, str, str]:
         """A bot holding every permission (bots are full principals) and an unrestricted channel only it and the tester are in."""
         bot = self.http.post("/bots", headers=self.admin_headers, json={"username": f"smoke-{name}"[:32], "permissions": self.permissions, "prefix": prefix})
         channel = self.http.post("/channels", headers=self.admin_headers, json={"name": f"smoke-{name}"[:64], "kind": kind})
-        return bot.raise_for_status().json()["token"], channel.raise_for_status().json()["id"]
+        created = bot.raise_for_status().json()
+        return created["token"], channel.raise_for_status().json()["id"], created["bot"]["user_id"]
 
 
 def smoke_one(stack: Stack, base: str, name: str) -> int:
     manifest = json.loads((SMOKE_DIR / f"{name}.json").read_text())
-    token, channel = stack.bot_and_channel(name, manifest.get("prefix"), manifest.get("channel_kind", "text"))
+    token, channel, bot_id = stack.bot_and_channel(name, manifest.get("prefix"), manifest.get("channel_kind", "text"))
     env = {
         **os.environ, "SLIMM_URL": base, "SLIMM_BOT_TOKEN": token, "SLIMM_SMOKE_TESTER_TOKEN": stack.tester,
-        "SLIMM_SMOKE_CHANNEL": channel, "SLIMM_SMOKE_PRIVATE": "1",
+        "SLIMM_SMOKE_CHANNEL": channel, "SLIMM_SMOKE_PRIVATE": "1", "SLIMM_SMOKE_BOT_ID": bot_id,
         "SLIMM_DB_PATH": str(ROOT / "smoke-transcripts" / f"{name}.db"),
     }
     (ROOT / "smoke-transcripts").mkdir(exist_ok=True)
