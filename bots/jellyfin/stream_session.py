@@ -24,6 +24,8 @@ from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
 
 AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 ms default left audio a second off the picture
+SKIP_DEBOUNCE_SECONDS = 0.4  # presses inside this window of the first one fold into a single restart of the transcode
+START_RETRIES = 2  # fresh launches of a transcode that never produced a frame, before the stream counts as dropped
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
 DECODE_THREADS = 2  # ffmpeg's one-thread-per-core default held 291 MB at 1080p for the same CPU as two threads at 173 MB
@@ -85,6 +87,10 @@ class WatchSession:
         self.ended_naturally = False
         self._last_reported_at = time.monotonic()
         self._seek_base = 0.0
+        self._pending_skip_target = None
+        self._seeking_to = None
+        self._frames_seen = False
+        self._start_retries = 0
         self._segment_started_at = time.monotonic()
         self._video_source = None
         self._audio_source = None
@@ -170,6 +176,7 @@ class WatchSession:
         self._video_process, self._audio_pipe = process, audio_pipe
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
+        self._frames_seen = False
         self._start_line = StartLine()
         self._video_task = asyncio.create_task(self._pump_video(self._video_process), name="jellyfin-video-pump")
         self._audio_task = asyncio.create_task(self._pump_audio(self._audio_pipe), name="jellyfin-audio-pump")
@@ -199,6 +206,8 @@ class WatchSession:
             if start is None:
                 await start_line.video_ready()
                 start = self._segment_started_at = time.monotonic()
+                self._frames_seen = True
+                self._start_retries = 0
             frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
             self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
             frame_index += 1
@@ -238,7 +247,23 @@ class WatchSession:
         if await self._exit_code(process) == 0 and self._near_the_end():
             await self._handle_finished()
             return
+        if not self._frames_seen and self._start_retries < START_RETRIES:
+            await self._retry_start(process)
+            return
         await self._end_after_drop()
+
+    async def _retry_start(self, failed):
+        """A transcode that died before its first frame (Jellyfin refusing or cancelling it, as a burst of seeks does) is
+        launched again from where it was meant to start; only a title that keeps failing ends the party."""
+        async with self.control_lock:
+            if self.finished or failed is not self._video_process:
+                return
+            self._start_retries += 1
+            print(f"jellyfin stream for {self.title!r} died before its first frame, retrying", file=sys.stderr)
+            try:
+                await self._start_pipeline(self._seek_base)
+            except (StreamError, OSError):
+                await self._end_after_drop()
 
     async def _exit_code(self, process):
         try:
@@ -288,13 +313,32 @@ class WatchSession:
         self._sync_changed()
         return True
 
+    def request_skip(self, step):
+        """Moves the pending skip target by `step` without waiting for the control lock, so a burst of presses folds into one seek."""
+        base = next((t for t in (self._pending_skip_target, self._seeking_to) if t is not None), self.position_seconds)
+        self._pending_skip_target = max(0.0, base + step)
+
+    async def flush_skips(self):
+        """Waits out the burst, then seeks once to where the queued skips add up to; a press whose skips an earlier press applied does nothing."""
+        if self._pending_skip_target is None:
+            return
+        await asyncio.sleep(SKIP_DEBOUNCE_SECONDS)
+        target, self._pending_skip_target = self._pending_skip_target, None
+        if target is not None:
+            await self.seek(target)
+
     async def seek(self, seconds):
         """Restarts the transcode at `seconds` clamped into the title; landing on the end finishes it."""
+        self._pending_skip_target = None
         seconds = max(0.0, seconds)
         if self.duration_seconds and seconds >= self.duration_seconds:
             await self._handle_finished()
             return
-        await self._start_pipeline(seconds)
+        self._seeking_to = seconds
+        try:
+            await self._start_pipeline(seconds)
+        finally:
+            self._seeking_to = None
         self._sync_changed(seeked=True)
 
     async def set_quality(self, quality: Quality):

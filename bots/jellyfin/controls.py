@@ -23,7 +23,31 @@ def preflight(session, action):
         return "this title has no subtitle tracks."
     if action.startswith("q:") and quality.find_preset(action[2:]) is None:
         return "that quality does not exist."
+    if action.startswith("jump:") and jump_fraction(action) is None:
+        return "that position does not exist."
+    if action.startswith("jump:") and not session.duration_seconds:
+        return "this title has no known length to jump within."
     return None
+
+
+JUMP_PERCENTS = (0, 10, 25, 40, 50, 60, 75, 90)
+JUMP_CONTROL_ID = "jf-jump"
+
+
+def jump_fraction(action):
+    """The share of the runtime a `jump:<percent>` action names, or None when it is not one of the offered stops."""
+    try:
+        percent = int(action[len("jump:"):])
+    except ValueError:
+        return None
+    return percent / 100 if percent in JUMP_PERCENTS else None
+
+
+def jump_options():
+    return [(str(percent), "Start" if percent == 0 else f"{percent}% in") for percent in JUMP_PERCENTS]
+
+
+SKIP_STEPS = {"back": -SKIP_SECONDS, "fwd": SKIP_SECONDS}
 
 
 def _default_subtitle(item):
@@ -53,8 +77,9 @@ async def apply(session, action, who="a member"):
         else:
             session.pause()
     elif action in ("back", "fwd"):
-        step = -SKIP_SECONDS if action == "back" else SKIP_SECONDS
-        await session.seek(session.position_seconds + step)
+        await session.flush_skips()
+    elif action.startswith("jump:"):
+        await session.seek(session.duration_seconds * jump_fraction(action))
     elif action == "stop":
         await session.stop(reason=f"stopped by {who}")
     elif action.startswith("q:"):
@@ -88,6 +113,8 @@ async def run_control(interaction, session, action):
         await _refuse(interaction, problem)
         return
     await interaction.ack()
+    if action in SKIP_STEPS:
+        session.request_skip(SKIP_STEPS[action])
     async with session.control_lock:
         if session.finished:
             return
@@ -144,6 +171,16 @@ def call_control_handler(action):
             await run_control(interaction, session, action)
 
     return handler
+
+
+async def on_jump_control(interaction):
+    """The dock's Jump to choice; the pick is a share of the runtime, through the panel's own seek path."""
+    if interaction.option_id is None:
+        await _refuse(interaction, "pick a position from the list.")
+        return
+    session = await _session_for(interaction)
+    if session is not None:
+        await run_control(interaction, session, f"jump:{interaction.option_id}")
 
 
 async def on_quality_control(interaction):
