@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import httpx
+from websockets.sync.client import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 TRANSCRIPT_DIR = ROOT / "smoke-transcripts"
@@ -23,6 +25,7 @@ BOT_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 MAX_STEPS = 50
 MAX_TIMEOUT = 120
 MAX_READY = 60
+MAX_PAUSE = 30
 ENV_HELP = """Needs (all from env, none printed):
   SLIMM_URL                  server root
   SLIMM_BOT_TOKEN            the bot's token
@@ -76,6 +79,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
     bounded_number(data.get("ready_seconds", 8), f"{path.name}: ready_seconds", MAX_READY)
     for i, step in enumerate(steps):
         bounded_number(step.get("timeout", 15), f"{path.name}: step {i} timeout", MAX_TIMEOUT)
+        if "pause" in step:
+            bounded_number(step["pause"], f"{path.name}: step {i} pause", MAX_PAUSE)
         if not isinstance(step.get("say"), str) or not step["say"]:
             raise ValueError(f"{path.name}: step {i} needs a 'say' string")
         if not all(isinstance(s, str) for s in step.get("expect_contains", [])):
@@ -101,17 +106,48 @@ def replies_after(messages: list[dict[str, Any]], sent_id: str, tester_id: str) 
     return []
 
 
+class PrivateReplies:
+    """The tester's own websocket, keeping the replies only it can see (they are never stored, so a fetch cannot find them)."""
+
+    def __init__(self, base: str, token: str) -> None:
+        self._items: list[dict[str, Any]] = []
+        self._lock = threading.Lock()
+        ticket = httpx.post(f"{base}/auth/ws-ticket", headers={"authorization": f"Bearer {token}"}, timeout=20).raise_for_status().json()["ticket"]
+        self._socket = connect(base.replace("http", "ws", 1) + "/ws", open_timeout=20)
+        self._socket.send(json.dumps({"type": "hello", "ticket": ticket, "protocol": 1}))
+        self._socket.recv(timeout=20)
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
+        try:
+            for raw in self._socket:
+                frame = json.loads(raw)
+                if frame.get("type") == "message.ephemeral":
+                    with self._lock:
+                        self._items.append(frame["message"])
+        except Exception:
+            return
+
+    def replies_to(self, sent_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return [m for m in self._items if m.get("in_reply_to_id") == sent_id]
+
+    def close(self) -> None:
+        self._socket.close()
+
+
 def run_step(
     step: dict[str, Any], say: Callable[[str], str], fetch: Callable[[], list[dict[str, Any]]],
-    tester_id: str, sleep: Callable[[float], None] = time.sleep,
+    tester_id: str, sleep: Callable[[float], None] = time.sleep, private: Callable[[str], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
+    sleep(step.get("pause", 0))
     sent_id = say(step["say"])
     polls = min(int(step.get("timeout", 15)), MAX_TIMEOUT)
     wanted = step.get("expect_contains", [])
     replies: list[dict[str, Any]] = []
     for _ in range(polls):
         sleep(1)
-        replies = replies_after(fetch(), sent_id, tester_id)
+        replies = replies_after(fetch(), sent_id, tester_id) + (private(sent_id) if private else [])
         text = "\n".join(r.get("content", "") for r in replies)
         if replies and all(w in text for w in wanted):
             break
@@ -157,14 +193,16 @@ def main(argv: list[str] | None = None) -> int:
     def fetch() -> list[dict[str, Any]]:
         return http.get(f"/channels/{channel}/messages", params={"limit": 50}).raise_for_status().json()
 
+    private = PrivateReplies(base, os.environ["SLIMM_SMOKE_TESTER_TOKEN"])
     env = {**os.environ, "SLIMM_CHANNELS": channel, **manifest.get("env", {})}
     proc = subprocess.Popen([sys.executable, "bot.py"], cwd=bot_dir, env=env)
     results: list[dict[str, Any]] = []
     try:
         time.sleep(manifest.get("ready_seconds", 8))
         for step in manifest["steps"]:
-            results.append(run_step(step, say, fetch, tester_id))
+            results.append(run_step(step, say, fetch, tester_id, private=private.replies_to))
     finally:
+        private.close()
         proc.terminate()
         proc.wait(timeout=15)
     TRANSCRIPT_DIR.mkdir(exist_ok=True)

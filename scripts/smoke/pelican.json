@@ -1,0 +1,53 @@
+{
+  "ready_seconds": 8,
+  "env": {
+    "PELICAN_URL": "http://127.0.0.1:1",
+    "PELICAN_ALLOW_HTTP": "true",
+    "PELICAN_API_KEY": "ptlc_smoke"
+  },
+  "steps": [
+    {
+      "say": "!servers",
+      "expect_contains": [
+        "panel"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!server",
+      "expect_contains": [
+        "name"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!server nothing",
+      "expect_contains": [
+        "panel"
+      ],
+      "timeout": 15,
+      "pause": 11
+    },
+    {
+      "say": "!start nothing",
+      "expect_contains": [
+        "PELICAN_LOG_CHANNEL"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!stop nothing",
+      "expect_contains": [
+        "PELICAN_LOG_CHANNEL"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!restart nothing",
+      "expect_contains": [
+        "PELICAN_LOG_CHANNEL"
+      ],
+      "timeout": 15
+    }
+  ]
+}

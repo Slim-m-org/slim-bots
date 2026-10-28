@@ -1,0 +1,33 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!ticket",
+      "expect_contains": [
+        "!ticket panel"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!ticket panel",
+      "expect_contains": [
+        "private ticket"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!ticket transcript 99",
+      "expect_contains": [
+        "no saved transcript"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!ticket reason x",
+      "expect_contains": [
+        "inside your ticket"
+      ],
+      "timeout": 15
+    }
+  ]
+}

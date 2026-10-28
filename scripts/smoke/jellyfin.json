@@ -1,0 +1,93 @@
+{
+  "ready_seconds": 8,
+  "env": {
+    "JELLYFIN_URL": "http://127.0.0.1:1",
+    "JELLYFIN_API_KEY": "smoke"
+  },
+  "steps": [
+    {
+      "say": "!jellyfin help",
+      "expect_contains": [
+        "commands"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!jellyfin search",
+      "expect_contains": [
+        "commands"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!jellyfin recent",
+      "expect_contains": [
+        "went wrong"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!jellyfin nonsense",
+      "expect_contains": [
+        "commands"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!np",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!pause",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!resume",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!seek abc",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!stop",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!subs",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!quality",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!watch some title",
+      "expect_contains": [
+        "voice channel"
+      ],
+      "timeout": 15
+    }
+  ]
+}

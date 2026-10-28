@@ -1,0 +1,75 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!remind",
+      "expect_contains": [
+        "!remind in"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!remind in 10m smoke",
+      "expect_contains": [
+        "will remind you"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!remind in nonsense x",
+      "expect_contains": [
+        "duration"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!remind at 25:99 x",
+      "expect_contains": [
+        "time like"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!reminders",
+      "expect_contains": [
+        "smoke"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!reminders cancel 99",
+      "expect_contains": [
+        "no reminder 99"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!reminders edit 99 x",
+      "expect_contains": [
+        "no reminder 99"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!reminders snooze 99 5m",
+      "expect_contains": [
+        "no reminder 99"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!timezone",
+      "expect_contains": [
+        "your timezone"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!timezone Not/AZone",
+      "expect_contains": [
+        "IANA"
+      ],
+      "timeout": 15
+    }
+  ]
+}

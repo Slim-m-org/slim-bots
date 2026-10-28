@@ -23,7 +23,8 @@ The release itself stays with the main session.
 ## 3. In-app test against a live deployment
 
 - Run `scripts/smoke_bot.py <bot>` (or drive it by hand) against a real server, in a private channel that holds only the tester and the bot.
-- Every documented command has a step in `scripts/smoke/<bot>.json`, including one bad-input case each.
+- Every documented command has a step in `scripts/smoke/<bot>.json`, including one bad-input case each. `scripts/tests/test_smoke_coverage.py` fails a PR when a bot has no manifest and no reason in `scripts/smoke/exempt.json`, or registers a command its manifest never types.
+- `scripts/smoke_all.py --base-url <a fresh server>` runs every manifest against a throwaway server, one new bot and channel each; the weekly `smoke` workflow does that against the published server image and fails on drift.
 - Attach the transcript file or a screenshot to the PR.
 - Clean up after: delete the channel and messages, revoke any token minted for the test.
 - Voice bots need a real LiveKit reachable from where the script runs.
@@ -67,4 +68,4 @@ Passes 1 and 3 to 6 are not machine-checked; the PR template is the only enforce
 
 A new bot can start from `bots/_template`, whose own tests prove a copy passes all of the above.
 
-The in-app smoke test (pass 3) is not in CI: it needs a real deployment, accounts and a private channel, so the contributor runs it and attaches the transcript.
+The in-app smoke test (pass 3) is not part of the PR checks: the weekly `smoke` workflow runs every manifest against a fresh server, and the contributor still runs the changed bot and attaches the transcript.

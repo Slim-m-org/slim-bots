@@ -25,7 +25,8 @@ def test_main_exits_2_and_never_boots_a_bot_without_env(monkeypatch):
 
 def test_shipped_manifests_parse():
     for path in (Path(__file__).resolve().parent.parent / "smoke").glob("*.json"):
-        s.load_manifest(path)
+        if path.name != "exempt.json":
+            s.load_manifest(path)
 
 
 @pytest.mark.parametrize("bad", [{}, {"steps": []}, {"steps": [{"say": ""}]}, {"steps": [{"say": "x", "expect_contains": [1]}]}])
@@ -121,5 +122,34 @@ def test_main_refuses_traversal_bot_name(monkeypatch):
 def test_manifest_bounds_enforced(tmp_path, manifest):
     p = tmp_path / "m.json"
     p.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError):
+        s.load_manifest(p)
+
+
+def test_a_private_reply_counts_as_the_bots_answer():
+    msgs = [{"id": "q", "author_id": "me", "content": "!deals"}]
+    private = {"q": [{"content": "only you see this"}]}
+    step = {"say": "!deals", "expect_contains": ["only you"], "timeout": 2}
+    r = s.run_step(step, lambda _t: "q", lambda: msgs, "me", sleep=lambda _d: None, private=lambda sent: private.get(sent, []))
+    assert r["ok"] and r["replies"] == ["only you see this"]
+
+
+def test_a_private_reply_to_another_message_is_not_taken():
+    msgs = [{"id": "q", "author_id": "me", "content": "!deals"}]
+    step = {"say": "!deals", "timeout": 1}
+    r = s.run_step(step, lambda _t: "q", lambda: msgs, "me", sleep=lambda _d: None, private=lambda _sent: [])
+    assert not r["ok"]
+
+
+def test_a_step_pauses_before_it_is_typed():
+    slept = []
+    msgs = [{"id": "r", "author_id": "bot", "content": "ok"}, {"id": "q", "author_id": "me", "content": "x"}]
+    s.run_step({"say": "x", "pause": 4, "timeout": 1}, lambda _t: "q", lambda: msgs, "me", sleep=slept.append)
+    assert slept[0] == 4
+
+
+def test_a_pause_over_the_cap_is_refused(tmp_path):
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps({"steps": [{"say": "x", "pause": s.MAX_PAUSE + 1}]}))
     with pytest.raises(ValueError):
         s.load_manifest(p)
