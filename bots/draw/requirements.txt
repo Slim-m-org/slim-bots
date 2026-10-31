@@ -1,0 +1,5 @@
+websockets>=12
+httpx>=0.27
+slim-m>=0.15.0
+# decodes the downloaded picture; the tracer itself is plain python
+pillow>=10
