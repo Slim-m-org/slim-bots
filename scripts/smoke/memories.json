@@ -3,6 +3,6 @@
   "steps": [
     {"say": "!onthisday", "expect_contains": ["could not find"], "timeout": 20},
     {"say": "!recap", "expect_contains": ["nothing was said"], "timeout": 20, "pause": 3},
-    {"say": "!recap banana", "expect_contains": ["past month"], "timeout": 15, "pause": 3}
+    {"say": "!recap banana", "expect_contains": ["past month"], "timeout": 15, "pause": 22}
   ]
 }

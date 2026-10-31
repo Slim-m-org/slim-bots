@@ -103,7 +103,7 @@ async def onthisday(ctx):
     await ctx.reply(memory_text(found) if found else NOTHING_TEXT)
 
 
-@bot.command(name="recap", help="A month in the public channels, with no ranking of people: defaults to last month", usage="[YYYY-MM]", cooldown=60, cooldown_bucket="deployment")
+@bot.command(name="recap", help="A month in the public channels, with no ranking of people: defaults to last month", usage="[YYYY-MM]", cooldown=20, cooldown_bucket="deployment")
 async def recap(ctx, month: str = ""):
     today = datetime.now(timezone.utc).date()
     picked = parse_month(month.strip(), today)
