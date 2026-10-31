@@ -192,6 +192,7 @@ what actually limits going past 720p; see below.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
+| `JELLYFIN_DIRECT_URL` | unset | Where a viewer's own device reaches jellyfin. Set it to offer direct play: the party then lets viewers play the title themselves, and stops encoding once everyone on the call has. Unset means the shared stream only. |
 | `JELLYFIN_USER_ID` | first enabled user | The shared jellyfin account `!watch` reads and writes for a member who has not run `!jellyfin link`. |
 | `JELLYFIN_AUTOPLAY_NEXT` | off | When an episode ends, start the next one on its own instead of waiting for Next episode. |
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |

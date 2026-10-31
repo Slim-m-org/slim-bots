@@ -19,6 +19,7 @@ from slimbots.voice import watch_empty
 import dock_state
 import jellyfin_core
 import playback_progress
+from direct_play import DirectPlayHost
 from pump_sync import AudioPipe, StartLine
 from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
@@ -77,6 +78,8 @@ class WatchSession:
         self.voice_session = voice_session
         self.panel = None
         self.sync = None
+        self.direct_host = DirectPlayHost(self)
+        self.floor_lifted = False
         self.waiting_next = None
         self.jellyfin_user_id = None
         self._next_timer = None
@@ -121,6 +124,34 @@ class WatchSession:
     def wake_monitor(self):
         """Called from an `on_voice_activity` handler to check the roster now instead of on the next poll tick."""
         self._wake_monitor.set()
+        self.direct_host.wake()
+
+    async def lift_floor(self):
+        """Stops the encode and unpublishes while every viewer plays the title themselves; the position keeps running on the clock."""
+        async with self.control_lock:
+            if self.floor_lifted or self.finished:
+                return
+            self._seek_base = self.position_seconds
+            self._segment_started_at = time.monotonic()
+            await self._teardown_pipeline()
+            await self.voice_session.unpublish_screen_share()
+            self.floor_lifted = True
+
+    async def restore_floor(self):
+        """Publishes again and resumes the transcode at the room's position; stays lifted if any step fails, so the caller retries."""
+        async with self.control_lock:
+            if not self.floor_lifted or self.finished:
+                return
+            position = self.position_seconds
+            await self.voice_session.unpublish_screen_share()
+            await self._publish()
+            self.floor_lifted = False
+            try:
+                await self._start_pipeline(position)
+            except BaseException:
+                self.floor_lifted = True
+                await self.voice_session.unpublish_screen_share()
+                raise
 
     async def _publish(self):
         width, height = self.quality.frame_size
@@ -139,6 +170,7 @@ class WatchSession:
         self._monitor_task = self.bot.background(self._monitor_loop(), name=f"jellyfin-watch-monitor-{self.voice_channel_id}")
         self.sync = WatchSync(self)
         self.sync.start()
+        self.direct_host.start()
 
     def _sync_changed(self, *, seeked=False):
         if self.sync is not None:
@@ -171,6 +203,11 @@ class WatchSession:
 
     async def _start_pipeline(self, start_seconds):
         """Replaces the running pipeline only once the new one has launched, so a failed launch leaves playback alone."""
+        if self.floor_lifted:
+            await self._teardown_pipeline()
+            self._seek_base = start_seconds
+            self._segment_started_at = time.monotonic()
+            return
         process, audio_pipe = await self._launch_pipeline(start_seconds)
         await self._teardown_pipeline()
         self._video_process, self._audio_pipe = process, audio_pipe
@@ -343,6 +380,9 @@ class WatchSession:
 
     async def set_quality(self, quality: Quality):
         """Republishes at the new size and ceilings, then resumes the transcode from the current position."""
+        if self.floor_lifted:
+            self.quality = quality
+            return
         position = self.position_seconds
         previous = self.quality
         await self._teardown_pipeline()
@@ -451,6 +491,7 @@ class WatchSession:
         self._cancel_next_timer()
         await self._teardown_pipeline()
         await self._report_progress(final_position, finished=self.ended_naturally)
+        await self.direct_host.stop()
         if self.sync is not None:
             await self.sync.end()
         await self.voice_session.leave()
