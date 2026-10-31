@@ -1,0 +1,11 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {"say": "!event soon", "expect_contains": ["title, a day and a time"], "timeout": 15},
+    {"say": "!event list", "expect_contains": ["no events"], "timeout": 15},
+    {"say": "!event \"smoke movie\" tomorrow 8pm", "expect_contains": ["smoke movie", "going"], "timeout": 15, "pause": 3},
+    {"say": "!event list", "expect_contains": ["smoke movie"], "timeout": 15, "pause": 3},
+    {"say": "!event cancel 99", "expect_contains": ["no open event"], "timeout": 15, "pause": 3},
+    {"say": "!event cancel 1", "expect_contains": ["cancelled"], "timeout": 15, "pause": 3}
+  ]
+}
