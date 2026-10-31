@@ -1,0 +1,13 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {"say": "!cs2", "expect_contains": ["cs2 link"], "timeout": 15},
+    {"say": "!cs2 link 76561198000000000", "expect_contains": ["STEAM_API_KEY"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 link", "expect_contains": ["STEAM_API_KEY"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 who", "expect_contains": ["STEAM_API_KEY"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 lfg", "expect_contains": ["STEAM_API_KEY"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 server", "expect_contains": ["CS2_SERVER"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 quiet", "expect_contains": ["not linked"], "timeout": 15, "pause": 3},
+    {"say": "!cs2 forget", "expect_contains": ["not linked"], "timeout": 15, "pause": 3}
+  ]
+}
