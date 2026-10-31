@@ -13,7 +13,7 @@ import history  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
 
 ANN = human("u-ann", "ann", "Ann")
-HEART = "❤"
+HEART = chr(0x2764)
 CHANNELS = [
     {"id": "c-gen", "name": "general", "kind": "text", "category_id": None, "created_at": 0, "restricted": False},
     {"id": "c-priv", "name": "staff", "kind": "text", "category_id": None, "created_at": 0, "restricted": True},
