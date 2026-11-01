@@ -1,9 +1,5 @@
 """Lets the encode rest while every viewer plays the title themselves (slim-m decision 0050, stages 3 and 4).
-
-The shared screen share is the floor: it is what a viewer with no link, no route to jellyfin or a stalled player
-lands on, so it is lifted only when everyone on the call has reported playing directly, and put back the moment
-anyone has not. Anything unknown (a failed read, a roster that cannot be fetched) counts as needing the floor.
-"""
+The shared screen share is the floor, so it is lifted only when everyone on the call reports direct play; anything unknown keeps it."""
 
 from __future__ import annotations
 

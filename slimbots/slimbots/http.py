@@ -302,8 +302,7 @@ class AsyncClient:
         direct_play: dict[str, Any] | None = None,
     ) -> None:
         """States the call's watch session (decision 0050); a bot-only write that needs this bot on the call's heartbeat.
-        `seeked` moves the epoch so viewers re-read; 409 means another bot holds the channel, and is not retried.
-        `direct_play` offers viewers the media server's address and who is linked to it; leaving it out withdraws the offer."""
+        `seeked` moves the epoch, a 409 (another bot holds the channel) is not retried, and no `direct_play` withdraws the offer."""
         body: dict[str, Any] = {"item_id": item_id, "title": title, "playing": playing, "position_ms": position_ms}
         if duration_ms is not None:
             body["duration_ms"] = duration_ms
