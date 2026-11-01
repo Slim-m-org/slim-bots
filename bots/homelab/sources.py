@@ -18,9 +18,9 @@ class SourceError(Exception):
     """A fetch or parse failure; the message is safe to show and never holds a credential."""
 
 
-def http_get(url, headers, verify=True):
+def http_get(url, headers, cafile=None):
     """One GET returning (status, body); a connection failure is a SourceError naming only the exception type."""
-    context = None if verify else ssl._create_unverified_context()
+    context = ssl.create_default_context(cafile=cafile) if cafile else None
     request = urllib.request.Request(url, headers={"user-agent": USER_AGENT, **headers})
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:

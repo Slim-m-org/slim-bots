@@ -29,7 +29,7 @@ A source with no settings is simply not drawn; with none set the bot says what t
 | `HOMELAB_INTERVAL` | `30` | seconds between polls, at least 10 |
 | `HOMELAB_X`, `HOMELAB_Y` | `400`, `0` | the top-left of the first tile in canvas units; tiles sit side by side from there |
 | `HOMELAB_PROXMOX_URL`, `HOMELAB_PROXMOX_TOKEN` | empty | the Proxmox API root and an API token as `user@realm!tokenid=secret`; a read-only role is enough |
-| `HOMELAB_PROXMOX_VERIFY_TLS` | `true` | set `false` for a self-signed certificate |
+| `HOMELAB_PROXMOX_CA_FILE` | unset | path to the node's `pve-root-ca.pem`, for its self-signed certificate |
 | `HOMELAB_DOCKER_SOCKET` | empty | the Docker socket path, for example `/var/run/docker.sock`, mounted read-only into the bot's container |
 | `HOMELAB_JELLYFIN_URL`, `HOMELAB_JELLYFIN_KEY` | empty | the server address and an API key |
 

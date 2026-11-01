@@ -27,7 +27,7 @@ ORIGIN_X = bot.setting("HOMELAB_X", 400.0, type=float)
 ORIGIN_Y = bot.setting("HOMELAB_Y", 0.0, type=float)
 PROXMOX_URL = bot.setting("HOMELAB_PROXMOX_URL")
 PROXMOX_TOKEN = bot.setting("HOMELAB_PROXMOX_TOKEN")
-PROXMOX_VERIFY_TLS = bot.setting("HOMELAB_PROXMOX_VERIFY_TLS", True, type=bool)
+PROXMOX_CA_FILE = bot.setting("HOMELAB_PROXMOX_CA_FILE")
 DOCKER_SOCKET = bot.setting("HOMELAB_DOCKER_SOCKET")
 JELLYFIN_URL = bot.setting("HOMELAB_JELLYFIN_URL")
 JELLYFIN_KEY = bot.setting("HOMELAB_JELLYFIN_KEY")
@@ -56,7 +56,7 @@ def tile_names():
 def reader_for(name):
     """(title, a sync reader returning the tile lines) for one tile."""
     if name == "proxmox":
-        get = functools.partial(get_url, verify=PROXMOX_VERIFY_TLS)
+        get = functools.partial(get_url, cafile=PROXMOX_CA_FILE)
         return "Proxmox", lambda: sources.proxmox_tile(sources.read_proxmox(get, PROXMOX_URL, PROXMOX_TOKEN))
     if name == "docker":
         return "Containers", lambda: sources.docker_tile(sources.read_docker(get_docker, DOCKER_SOCKET))

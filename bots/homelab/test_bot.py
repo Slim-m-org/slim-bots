@@ -65,7 +65,7 @@ class Rig:
         homelab.canvas_channel_name = "voice"
         homelab.status.clear()
 
-    def get(self, url, headers, verify=True):
+    def get(self, url, headers, cafile=None):
         self.urls.append(url)
         self.headers.append(headers)
         for key, answer in self.web.items():
