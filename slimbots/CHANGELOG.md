@@ -3,6 +3,10 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## 0.16.0
+
+- `AsyncClient.set_watch_session` takes an optional `direct_play` body, the offer that lets each viewer play the title on their own device (slim-m decision 0050). Leaving it out withdraws the offer. Needs slim-m 0.120 or later; an older server ignores the field.
+
 ## 0.15.0
 
 - `@bot.command(choices={"param": ("a", "b")})` fixes the values a parameter takes. The composer shows them as a pick list after the command, a value is matched ignoring case, and any other is a `BadArgument` naming the choices. A command with choices registers `options` with the server, which needs slim-m 0.114 or later; an older server ignores the field.
