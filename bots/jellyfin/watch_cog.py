@@ -198,6 +198,9 @@ def setup(bot):
     bot.call_control(
         controls.QUALITY_CONTROL_ID, "Quality", icon="settings", options=controls.quality_options(),
     )(controls.on_quality_control)
+    bot.call_control(
+        controls.JUMP_CONTROL_ID, "Jump to", icon="list", options=controls.jump_options(),
+    )(controls.on_jump_control)
 
     @bot.event
     async def on_voice_activity(event):

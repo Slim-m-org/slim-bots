@@ -19,11 +19,14 @@ from slimbots.voice import watch_empty
 import dock_state
 import jellyfin_core
 import playback_progress
+from direct_play import DirectPlayHost
 from pump_sync import AudioPipe, StartLine
 from quality import Quality, configured_default, playback_fps
 from watch_sync import WatchSync
 
 AUDIO_QUEUE_MS = 100  # what still plays after a seek or pause; livekit's 1000 ms default left audio a second off the picture
+SKIP_DEBOUNCE_SECONDS = 0.4  # presses inside this window of the first one fold into a single restart of the transcode
+START_RETRIES = 2  # fresh launches of a transcode that never produced a frame, before the stream counts as dropped
 END_TOLERANCE_SECONDS = 15  # how far short of the runtime a clean ffmpeg exit may land and still count as the title ending
 EXIT_WAIT_SECONDS = 5
 DECODE_THREADS = 2  # ffmpeg's one-thread-per-core default held 291 MB at 1080p for the same CPU as two threads at 173 MB
@@ -75,6 +78,8 @@ class WatchSession:
         self.voice_session = voice_session
         self.panel = None
         self.sync = None
+        self.direct_host = DirectPlayHost(self)
+        self.floor_lifted = False
         self.waiting_next = None
         self.jellyfin_user_id = None
         self._next_timer = None
@@ -85,6 +90,10 @@ class WatchSession:
         self.ended_naturally = False
         self._last_reported_at = time.monotonic()
         self._seek_base = 0.0
+        self._pending_skip_target = None
+        self._seeking_to = None
+        self._frames_seen = False
+        self._start_retries = 0
         self._segment_started_at = time.monotonic()
         self._video_source = None
         self._audio_source = None
@@ -115,6 +124,34 @@ class WatchSession:
     def wake_monitor(self):
         """Called from an `on_voice_activity` handler to check the roster now instead of on the next poll tick."""
         self._wake_monitor.set()
+        self.direct_host.wake()
+
+    async def lift_floor(self):
+        """Stops the encode and unpublishes while every viewer plays the title themselves; the position keeps running on the clock."""
+        async with self.control_lock:
+            if self.floor_lifted or self.finished:
+                return
+            self._seek_base = self.position_seconds
+            self._segment_started_at = time.monotonic()
+            await self._teardown_pipeline()
+            await self.voice_session.unpublish_screen_share()
+            self.floor_lifted = True
+
+    async def restore_floor(self):
+        """Publishes again and resumes the transcode at the room's position; stays lifted if any step fails, so the caller retries."""
+        async with self.control_lock:
+            if not self.floor_lifted or self.finished:
+                return
+            position = self.position_seconds
+            await self.voice_session.unpublish_screen_share()
+            await self._publish()
+            self.floor_lifted = False
+            try:
+                await self._start_pipeline(position)
+            except BaseException:
+                self.floor_lifted = True
+                await self.voice_session.unpublish_screen_share()
+                raise
 
     async def _publish(self):
         width, height = self.quality.frame_size
@@ -133,6 +170,7 @@ class WatchSession:
         self._monitor_task = self.bot.background(self._monitor_loop(), name=f"jellyfin-watch-monitor-{self.voice_channel_id}")
         self.sync = WatchSync(self)
         self.sync.start()
+        self.direct_host.start()
 
     def _sync_changed(self, *, seeked=False):
         if self.sync is not None:
@@ -165,11 +203,17 @@ class WatchSession:
 
     async def _start_pipeline(self, start_seconds):
         """Replaces the running pipeline only once the new one has launched, so a failed launch leaves playback alone."""
+        if self.floor_lifted:
+            await self._teardown_pipeline()
+            self._seek_base = start_seconds
+            self._segment_started_at = time.monotonic()
+            return
         process, audio_pipe = await self._launch_pipeline(start_seconds)
         await self._teardown_pipeline()
         self._video_process, self._audio_pipe = process, audio_pipe
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
+        self._frames_seen = False
         self._start_line = StartLine()
         self._video_task = asyncio.create_task(self._pump_video(self._video_process), name="jellyfin-video-pump")
         self._audio_task = asyncio.create_task(self._pump_audio(self._audio_pipe), name="jellyfin-audio-pump")
@@ -199,6 +243,8 @@ class WatchSession:
             if start is None:
                 await start_line.video_ready()
                 start = self._segment_started_at = time.monotonic()
+                self._frames_seen = True
+                self._start_retries = 0
             frame = rtc.VideoFrame(width, height, rtc.VideoBufferType.I420, chunk)
             self._video_source.capture_frame(frame, timestamp_us=int(time.monotonic() * 1_000_000))
             frame_index += 1
@@ -238,7 +284,23 @@ class WatchSession:
         if await self._exit_code(process) == 0 and self._near_the_end():
             await self._handle_finished()
             return
+        if not self._frames_seen and self._start_retries < START_RETRIES:
+            await self._retry_start(process)
+            return
         await self._end_after_drop()
+
+    async def _retry_start(self, failed):
+        """A transcode that died before its first frame (Jellyfin refusing or cancelling it, as a burst of seeks does) is
+        launched again from where it was meant to start; only a title that keeps failing ends the party."""
+        async with self.control_lock:
+            if self.finished or failed is not self._video_process:
+                return
+            self._start_retries += 1
+            print(f"jellyfin stream for {self.title!r} died before its first frame, retrying", file=sys.stderr)
+            try:
+                await self._start_pipeline(self._seek_base)
+            except (StreamError, OSError):
+                await self._end_after_drop()
 
     async def _exit_code(self, process):
         try:
@@ -288,17 +350,39 @@ class WatchSession:
         self._sync_changed()
         return True
 
+    def request_skip(self, step):
+        """Moves the pending skip target by `step` without waiting for the control lock, so a burst of presses folds into one seek."""
+        base = next((t for t in (self._pending_skip_target, self._seeking_to) if t is not None), self.position_seconds)
+        self._pending_skip_target = max(0.0, base + step)
+
+    async def flush_skips(self):
+        """Waits out the burst, then seeks once to where the queued skips add up to; a press whose skips an earlier press applied does nothing."""
+        if self._pending_skip_target is None:
+            return
+        await asyncio.sleep(SKIP_DEBOUNCE_SECONDS)
+        target, self._pending_skip_target = self._pending_skip_target, None
+        if target is not None:
+            await self.seek(target)
+
     async def seek(self, seconds):
         """Restarts the transcode at `seconds` clamped into the title; landing on the end finishes it."""
+        self._pending_skip_target = None
         seconds = max(0.0, seconds)
         if self.duration_seconds and seconds >= self.duration_seconds:
             await self._handle_finished()
             return
-        await self._start_pipeline(seconds)
+        self._seeking_to = seconds
+        try:
+            await self._start_pipeline(seconds)
+        finally:
+            self._seeking_to = None
         self._sync_changed(seeked=True)
 
     async def set_quality(self, quality: Quality):
         """Republishes at the new size and ceilings, then resumes the transcode from the current position."""
+        if self.floor_lifted:
+            self.quality = quality
+            return
         position = self.position_seconds
         previous = self.quality
         await self._teardown_pipeline()
@@ -407,6 +491,7 @@ class WatchSession:
         self._cancel_next_timer()
         await self._teardown_pipeline()
         await self._report_progress(final_position, finished=self.ended_naturally)
+        await self.direct_host.stop()
         if self.sync is not None:
             await self.sync.end()
         await self.voice_session.leave()

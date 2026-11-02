@@ -1,0 +1,50 @@
+{
+  "ready_seconds": 8,
+  "env": {
+    "SLIMM_ROLES": "member:r-member"
+  },
+  "steps": [
+    {
+      "say": "!roles",
+      "expect_contains": [
+        "Self-service roles"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!roles status",
+      "expect_contains": [
+        "I hold"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!role",
+      "expect_contains": [
+        "name"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!role mine",
+      "expect_contains": [
+        "none of the roles"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!role nosuchrole",
+      "expect_contains": [
+        "no role called"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!rolemenu",
+      "expect_contains": [
+        "usage"
+      ],
+      "timeout": 15
+    }
+  ]
+}

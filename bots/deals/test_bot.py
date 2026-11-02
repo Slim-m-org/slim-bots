@@ -10,6 +10,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as deals  # noqa: E402
+import datetime  # noqa: E402
 import db  # noqa: E402
 import fixtures  # noqa: E402
 from slimbots.authors import AuthorFilter  # noqa: E402
@@ -450,6 +451,85 @@ def test_the_help_and_usage_strings_name_pricewatch_not_watch():
     assert "!pricewatch <game name" in rig.last_private() and "!watch" not in rig.last_private()
     rig.say("!deals")
     assert "!pricewatch" in rig.last_reply() and "!watch" not in rig.last_reply()
+
+
+def at(hour, day=1):
+    return datetime.datetime(2026, 10, day, hour, 5, tzinfo=datetime.timezone.utc)
+
+
+def digest_rig():
+    rig = Rig()
+    rig.web["featuredcategories"] = (200, fixtures.raw("featuredcategories_specials"))
+    rig.setup()
+    return rig
+
+
+def digests(rig):
+    return [m for m in rig.client.sent if m.get("embeds") and "deals for" in (m["embeds"][0].get("title") or "")]
+
+
+def test_the_digest_is_off_until_an_admin_turns_it_on_and_only_an_admin_can():
+    rig = digest_rig()
+    assert not asyncio.run(deals.digest_due(at(20)))
+    rig.say("!deals digest on", user="u-ann", permissions=0)
+    assert "Manage Server" in rig.last_private() and not asyncio.run(deals.digest_due(at(20)))
+    rig.say("!deals digest on")
+    assert "is on" in rig.last_private() and asyncio.run(deals.digest_due(at(20)))
+    rig.say("!deals digest off")
+    assert "is off" in rig.last_private() and not asyncio.run(deals.digest_due(at(20)))
+
+
+def test_the_digest_waits_for_its_hour_and_posts_once_a_day():
+    rig = digest_rig()
+    rig.say("!deals digest on")
+    rig.say("!deals digest 9")
+    assert "09:00 UTC" in rig.last_private()
+    assert not asyncio.run(deals.digest_due(at(8)))
+    assert asyncio.run(deals.digest_due(at(9)))
+    posted, error = asyncio.run(deals.check_digest(at(9)))
+    assert posted == 6 and error == "" and len(digests(rig)) == 1
+    assert not asyncio.run(deals.digest_due(at(23)))
+    assert asyncio.run(deals.digest_due(at(9, day=2)))
+
+
+def test_the_digest_links_each_game_and_mentions_no_one():
+    rig = digest_rig()
+    asyncio.run(deals.check_digest(at(18)))
+    embed = digests(rig)[0]["embeds"][0]
+    assert embed["title"] == "Steam deals for 2026-10-01"
+    assert "[Moon Sweepers](https://store.steampowered.com/app/" in embed["description"]
+    assert "@" not in embed["description"]
+
+
+def test_a_game_featured_this_week_is_not_repeated_but_returns_after_it():
+    rig = digest_rig()
+    asyncio.run(deals.check_digest(at(18)))
+    posted, _ = asyncio.run(deals.check_digest(at(18, day=2)))
+    assert posted == 0 and len(digests(rig)) == 1, "the same six games were posted twice in a week"
+    posted, _ = asyncio.run(deals.check_digest(at(18, day=9)))
+    assert posted == 6 and len(digests(rig)) == 2
+
+
+def test_a_steam_failure_posts_nothing_and_tries_again_the_same_day():
+    rig = digest_rig()
+    rig.say("!deals digest on")
+    rig.web["featuredcategories"] = (503, b"")
+    assert asyncio.run(deals.check_digest(at(18))) == (0, "http 503")
+    assert digests(rig) == [] and asyncio.run(deals.digest_due(at(19)))
+
+
+def test_a_refused_digest_post_is_retried():
+    rig = digest_rig()
+    rig.say("!deals digest on")
+    rig.client.respond("POST", "/channels/c1/messages", ApiError(403, {"error": "missing SEND_MESSAGES"}))
+    assert asyncio.run(deals.check_digest(at(18)))[0] == 0
+    assert asyncio.run(deals.digest_due(at(19)))
+
+
+def test_a_bad_digest_setting_is_explained():
+    rig = digest_rig()
+    rig.say("!deals digest 30")
+    assert "0 to 23" in rig.last_private() and rig.sql(db.get_config, "digest_hour") is None
 
 
 if __name__ == "__main__":

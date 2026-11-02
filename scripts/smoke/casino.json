@@ -1,0 +1,77 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!balance",
+      "expect_contains": [
+        "chips"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!daily",
+      "expect_contains": [
+        "claimed"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!leaderboard",
+      "expect_contains": [
+        "leaderboard"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!give abc nobody",
+      "expect_contains": [
+        "whole number"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!flip abc heads",
+      "timeout": 15
+    },
+    {
+      "say": "!flip 10 heads",
+      "timeout": 15
+    },
+    {
+      "say": "!blackjack 10",
+      "expect_contains": [
+        "!hit"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!hit",
+      "timeout": 15
+    },
+    {
+      "say": "!stand",
+      "timeout": 15
+    },
+    {
+      "say": "!double",
+      "expect_contains": [
+        "hand going"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!split",
+      "expect_contains": [
+        "hand going"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!surrender",
+      "expect_contains": [
+        "hand going"
+      ],
+      "timeout": 15
+    }
+  ]
+}

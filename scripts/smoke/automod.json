@@ -1,0 +1,40 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!automod",
+      "expect_contains": [
+        "sub"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!automod rules",
+      "expect_contains": [
+        "no rules are on"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!automod stats",
+      "expect_contains": [
+        "nothing has fired"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!automod lift nobody",
+      "expect_contains": [
+        "no member called"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!automod nonsense",
+      "expect_contains": [
+        "must be one of"
+      ],
+      "timeout": 15
+    }
+  ]
+}

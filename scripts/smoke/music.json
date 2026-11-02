@@ -1,0 +1,62 @@
+{
+  "ready_seconds": 8,
+  "prefix": "~",
+  "steps": [
+    {
+      "say": "~queue",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~np",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~skip",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~pause",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~resume",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~stop",
+      "timeout": 15,
+      "expect_contains": [
+        "nothing is playing"
+      ]
+    },
+    {
+      "say": "~play",
+      "timeout": 15,
+      "expect_contains": [
+        "join a voice channel"
+      ]
+    },
+    {
+      "say": "~play some song",
+      "timeout": 15,
+      "expect_contains": [
+        "join a voice channel"
+      ]
+    }
+  ]
+}

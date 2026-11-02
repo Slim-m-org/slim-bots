@@ -120,7 +120,7 @@ posted publicly instead, so an error is never lost.
   and, for an episode, Next episode. Every button is disabled once the stream ends. Anyone who is in the call can press them;
   someone outside it gets a private "join #call to use these controls" and nothing changes. The text commands still work and
   redraw the panel too. The panel shows the position only while paused (a stopped clock in a message would be wrong within a second); `!np` has the live one.
-- Call dock: while the bot is in the call the dock shows Play or pause, Back 30s, Forward 30s and Stop (`@bot.call_control`, slimbots 0.7.0), and a Quality gear that opens Low 480p / Medium 720p / High 1080p (call control options, which need a slimbots release with `options=` and a slim-m server with migration 0100; an older server shows the gear as a plain button that asks you to pick from the list). They run the same code as the panel's buttons, for the party in the call the member used them in.
+- Call dock: while the bot is in the call the dock shows Play or pause, Back 30s, Forward 30s and Stop (`@bot.call_control`, slimbots 0.7.0), a Jump to list (Start, then 10% to 90% of the runtime) and a Quality gear that opens Low 480p / Medium 720p / High 1080p (call control options, which need a slimbots release with `options=` and a slim-m server with migration 0100; an older server shows the gear as a plain button that asks you to pick from the list). They run the same code as the panel's buttons, for the party in the call the member used them in.
 - Watch position: while a party runs the bot states it to the server (`PUT /channels/{id}/watch-session`) on start, pause, resume, seek and a new title, and ticks it every 5 seconds, paused or not, so a member who joins mid-film sees where the room is. A seek sets `seeked`, stopping ends the session, and the bot needs `slim-m>=0.9.4` and a server that has the watch-session routes (0.77.0). A conflict (another bot holds the call) is logged and the party carries on unsynced. The panel is unaffected. Call controls reach the bot whatever `SLIMM_CHANNELS` says.
 - When an episode ends and there is a next one, the bot stays in the call and the panel says
   "finished - next up: ..." with only Next episode and Stop enabled; it leaves after
@@ -131,7 +131,9 @@ posted publicly instead, so an error is never lost.
 - A title ends only when the video `ffmpeg` exits cleanly within a few seconds of its runtime.
   Any other end of the stream (Jellyfin refusing it, a cut connection, a crash) stops the party with "the stream dropped",
   reports the position it reached, and leaves the title unwatched; `!watch` resumes it.
+  A transcode that dies before its first frame is launched again from the same position up to twice first, since Jellyfin refusing one is what a burst of seeks does.
   A title with no audio stream keeps playing its video in silence.
+- Skips: Back and Forward presses within 0.4 seconds of each other fold into one seek to where they add up, so a burst costs one transcode instead of one per press.
 - `!seek <h:mm:ss>` - restarts the transcode at a new position (`mm:ss`
   and a bare second count also work).
 - `!np` - an embed with title, position, duration, and subtitle state.
@@ -190,6 +192,7 @@ what actually limits going past 720p; see below.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
+| `JELLYFIN_DIRECT_URL` | unset | Where a viewer's own device reaches jellyfin. Set it to offer direct play: the party then lets viewers play the title themselves, and stops encoding once everyone on the call has. Unset means the shared stream only. |
 | `JELLYFIN_USER_ID` | first enabled user | The shared jellyfin account `!watch` reads and writes for a member who has not run `!jellyfin link`. |
 | `JELLYFIN_AUTOPLAY_NEXT` | off | When an episode ends, start the next one on its own instead of waiting for Next episode. |
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |
