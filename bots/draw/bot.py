@@ -8,6 +8,7 @@ import time
 
 import ai
 import halftone
+import photo
 import plan
 import runlog
 import screenshot
@@ -41,7 +42,8 @@ PACE_SECONDS = max(bot.setting("DRAW_PACE", 0.15, type=float), 0.1)
 OPENVERSE_TOKEN = bot.setting("OPENVERSE_TOKEN")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
-DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 600, type=int), 50), 2000)
+DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 900, type=int), 50), 1500)
+PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 220, type=int), 20), 400)
 AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
 AI_REQUEST_TIMEOUT = max(bot.setting("DRAW_AI_REQUEST_TIMEOUT", 90, type=int), 10)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
@@ -181,11 +183,11 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
             busy.discard(owned)
 
 
-@bot.group(name="draw", help="`<prompt>` draws it in your call, `trace <word>` traces a picture, `undo` removes your latest, `clear` removes them all")
+@bot.group(name="draw", help="`<prompt>` AI drawing, `photo <subject>` line drawing from a photo, `dots <subject>` dot portrait, `trace <word>` old picture tracer, `undo`, `clear`")
 async def draw(ctx, query: str = ""):
     query = query.strip()
     if not query:
-        await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
+        await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw photo <subject>`, `{bot.prefix}draw dots <subject>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
         return
     if planner is None:
         await _trace_request(ctx, query)
@@ -355,7 +357,8 @@ async def dots_source(ctx, subject, log):
     return found if found else "no freely licensed picture matched that; try a simpler word."
 
 
-async def _dots(ctx, subject, channel_id, name, log):
+async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
+    """Draws what `build(picture bytes, free region)` makes from an attached image or the best freely licensed picture of the subject."""
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
     try:
@@ -369,35 +372,50 @@ async def _dots(ctx, subject, channel_id, name, log):
             await refuse(ctx, log, "no source", source)
             return
         data, candidate = source
-        with log.stage("halftone"):
-            dots = await asyncio.to_thread(halftone.halftone, data, free, DOTS_MAX)
+        with log.stage("trace"):
+            objects = await asyncio.to_thread(build, data, free)
     except (screenshot.ScreenshotError, sources.SourceError) as err:
         await refuse(ctx, log, f"refused: {err}", f"{err}.")
         return
-    if not dots:
-        await refuse(ctx, log, "blank picture", "that picture is too light to make dots from.")
+    if not objects:
+        await refuse(ctx, log, "nothing to draw", "I could not find anything to draw in that picture.")
         return
     drawing_id, _ = await bot.store.run(new_drawing, ctx.author.id, subject or "an attached image", channel_id, False)
     try:
         with log.stage("place"):
-            done = await place_all(canvas, drawing_id, dots)
+            done = await place_all(canvas, drawing_id, objects)
     except ApiError as err:
         await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     credit_text = f" from \"{defuse(candidate['title'])}\" by {defuse(candidate['creator'])} ({candidate['license']}) {candidate['landing']}".rstrip() if candidate else ""
     log.done(f"drew {done}")
-    await ctx.reply(f"drew a dot portrait on the canvas in {name} with {done} dots{credit_text}")
+    await ctx.reply(f"drew {noun.format(count=done)} on the canvas in {name}{credit_text}")
 
 
-@draw.command(name="dots", help="Draw a halftone dot portrait of an attached image or a subject; no model, no cost")
-async def draw_dots(ctx, subject: str = ""):
+async def _picture_command(ctx, subject, command, build, noun, ack):
     subject = subject.strip()
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
     await guarded(
-        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _dots(ctx, subject, channel_id, name, log),
-        command="dots", prompt=subject or "attachment", ack=f"making a dot portrait of {defuse(subject) or 'your image'}, this takes a couple of minutes.",
+        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _picture_job(ctx, subject, channel_id, name, log, build, noun),
+        command=command, prompt=subject or "attachment", ack=ack.format(subject=defuse(subject) or "your image"),
+    )
+
+
+@draw.command(name="dots", help="Draw a halftone dot portrait of an attached image or a subject; no model, no cost")
+async def draw_dots(ctx, subject: str = ""):
+    await _picture_command(
+        ctx, subject, "dots", lambda data, free: halftone.halftone(data, free, DOTS_MAX), "a dot portrait with {count} dots",
+        "making a dot portrait of {subject}, this takes a couple of minutes.",
+    )
+
+
+@draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")
+async def draw_photo(ctx, subject: str = ""):
+    await _picture_command(
+        ctx, subject, "photo", lambda data, free: photo.trace_photo(data, free, PHOTO_MAX), "a line drawing of the photo with {count} strokes",
+        "tracing a line drawing of {subject}, this takes a minute or two.",
     )
 
 

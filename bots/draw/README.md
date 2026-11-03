@@ -26,6 +26,7 @@ If you are in no call it asks you to join one.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
+| `!draw photo [subject]` | anyone | a line drawing traced from a photo (the attached image, else the best freely licensed picture of the subject, credited); no model, no tokens; one per member per minute |
 | `!draw dots [subject]` | anyone | a halftone dot portrait of the image attached to your message, else of the best openly licensed picture of the subject (credited); no model, no tokens, but hundreds of small objects; one per member per minute |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
@@ -93,7 +94,8 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
-| `DRAW_DOTS_MAX` | `600` | the most dots one `!draw dots` portrait may use, 50 to 2000 |
+| `DRAW_DOTS_MAX` | `900` | the most dots one `!draw dots` portrait may use, 50 to 1500 |
+| `DRAW_PHOTO_MAX` | `220` | the most strokes one `!draw photo` drawing may use, 20 to 400 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
 | `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
 | `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
@@ -101,10 +103,17 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 `DRAW_CHANNEL` is no longer used: the bot draws in the call the member is in, never a fixed channel.
 Without Pillow installed the bot starts and answers `!draw` with a sentence saying so.
 
+## Line drawings from a photo
+
+`!draw photo` needs no model.
+It blurs the picture lightly at about 560 pixels, finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments and keeps the longest, strongest and most central lines up to `DRAW_PHOTO_MAX` strokes.
+A line is split into pieces of at most 150 points that share a joint, each is a stroke in the one ink colour at width 2, and the drawing is scaled into the largest free area of your call's canvas with the photo's aspect ratio.
+A clean, close portrait or a landmark photo works best; a busy wide shot traces its background too.
+
 ## Dot portraits
 
 `!draw dots` needs no model.
-It reads the picture, averages it into a grid, skips cells that are nearly background, and places one small closed stroke per remaining cell with its radius following darkness and its colour set to the cell's `#rrggbb` hex.
+It reads the picture, averages it into a grid, treats cells close to the photo's border colour as background and skips them, and places one small closed stroke per remaining cell with its radius following how far the cell is from the background and its colour set to the cell's own `#rrggbb` hex.
 The grid is narrowed until the dots fit under `DRAW_DOTS_MAX`, the picture is fitted into the largest free area of your call's canvas, and placement uses the usual pacing and backoff, so 600 dots take a couple of minutes.
 A client without hex colour support paints the dots in the default ink, which still reads as a monochrome halftone.
 `!draw undo` and `!draw clear` remove a dot portrait like any other drawing.

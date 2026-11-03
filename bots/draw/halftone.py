@@ -1,4 +1,4 @@
-"""Turns a picture into a halftone dot portrait: a grid of tiny closed strokes whose size follows darkness; Pillow only."""
+"""Turns a picture into a halftone dot portrait: a grid of tiny closed strokes whose size follows distance from the background; Pillow only."""
 
 import io
 import math
@@ -6,10 +6,11 @@ import math
 from plan import Planned
 from sources import SourceError
 
-BLANK = 0.12  # cells lighter than this are the background and get no dot
+BACKGROUND = 38  # cells this close (RGB distance) to the photo's border colour are background and get no dot
+FULL_INK = 160  # distance from the background at which a dot reaches full size
 MIN_DOT = 1.2  # smallest dot radius in canvas units
 SIDES = 8  # a dot is a closed polygon this many sided
-MAX_SIDE = 400  # pixels on the long side the picture is read at before gridding
+MAX_SIDE = 480  # pixels on the long side the picture is read at before gridding
 
 
 def _load(data):
@@ -27,19 +28,29 @@ def _load(data):
         raise SourceError("the picture could not be read") from err
 
 
+def _border_colour(image):
+    """The median colour of the photo's outer ring: what the background is."""
+    w, h = image.size
+    ring = [image.getpixel((x, y)) for x in range(w) for y in (0, h - 1)] + [image.getpixel((x, y)) for y in range(h) for x in (0, w - 1)]
+    return tuple(sorted(p[channel] for p in ring)[len(ring) // 2] for channel in range(3))
+
+
 def _cells(image, cols):
-    """(columns, rows, [(darkness 0..1, (r, g, b))...] row by row) averaging the picture into a `cols`-wide grid."""
+    """(columns, rows, [(ink 0..1, (r, g, b))...] row by row): the picture averaged into `cols` wide, ink = distance from the background."""
     from PIL import Image
 
     rows = max(round(cols * image.height / image.width), 1)
     small = image.resize((cols, rows), Image.BOX)
-    pixels = list(small.getdata())
-    cells = [(1 - (0.299 * r + 0.587 * g + 0.114 * b) / 255, (r, g, b)) for r, g, b in pixels]
+    background = _border_colour(image)
+    cells = []
+    for rgb in small.getdata():
+        distance = math.dist(rgb, background)
+        cells.append((0.0 if distance < BACKGROUND else min(distance / FULL_INK, 1.0), rgb))
     return cols, rows, cells
 
 
 def _inked(cells):
-    return sum(1 for darkness, _ in cells if darkness >= BLANK)
+    return sum(1 for ink, _ in cells if ink > 0)
 
 
 def _grid(image, cap):
@@ -66,17 +77,17 @@ def _dot(cx, cy, radius, colour):
 
 
 def halftone(data, region, cap):
-    """Dots for the picture `data`, fitted inside `region` and centred, at most `cap` of them, darker cells with bigger dots."""
+    """Dots for the picture `data`, fitted inside `region` and centred, at most `cap` of them; a cell further from the background colour gets a bigger dot in its own colour."""
     image = _load(data)
     cols, rows, cells = _grid(image, cap)
     pitch = min(region.w / cols, region.h / rows)
     left, top = region.x + (region.w - pitch * cols) / 2, region.y + (region.h - pitch * rows) / 2
     max_radius = pitch * 0.5
     dots = []
-    for index, (darkness, rgb) in enumerate(cells):
-        if darkness < BLANK:
+    for index, (ink, rgb) in enumerate(cells):
+        if ink <= 0:
             continue
         col, row = index % cols, index // cols
-        radius = max(max_radius * math.sqrt(darkness), MIN_DOT)
+        radius = max(max_radius * math.sqrt(ink), MIN_DOT)
         dots.append(_dot(left + (col + 0.5) * pitch, top + (row + 0.5) * pitch, radius, hex_colour(rgb)))
     return dots

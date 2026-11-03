@@ -15,6 +15,7 @@ from test_bot import ANN, draw  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
 REGION = plan.Region(100, 100, 800, 600)
+DEFAULT_DOTS, DEFAULT_STROKES = draw.DOTS_MAX, draw.PHOTO_MAX
 
 
 def picture(draw_fn, size=(160, 120)):
@@ -35,16 +36,22 @@ def dark_disc(image):
 
 
 def gradient(image):
+    """A white frame round a left-dark to right-light ramp."""
     w, h = image.size
-    for x in range(w):
-        for y in range(h):
-            level = int(255 * x / (w - 1))
+    for x in range(8, w - 8):
+        for y in range(8, h - 8):
+            level = int(220 * (x - 8) / (w - 17))
             image.putpixel((x, y), (level, level, level))
+
+
+def slab(image):
+    """A black block inside a white frame, so every cell of the block is ink."""
+    image.paste((0, 0, 0), (8, 8, image.width - 8, image.height - 8))
 
 
 def rig_for_dots(source=None):
     rig = base.Rig()
-    draw.DOTS_MAX = 600
+    draw.DOTS_MAX = 900
     rig.png = source or picture(dark_disc)
     base.sources.fetch_picture = lambda get, url: rig.png
     return rig
@@ -61,10 +68,34 @@ def test_a_blank_picture_makes_no_dots_and_the_background_is_skipped():
     assert dots and min(xs) > REGION.x + 0.2 * REGION.w and max(xs) < REGION.x + 0.8 * REGION.w
 
 
+def test_the_background_is_the_border_colour_not_brightness_and_dots_keep_the_real_colour():
+    def bright_on_dark(image):
+        from PIL import ImageDraw
+
+        image.paste((10, 20, 60), (0, 0, *image.size))
+        ImageDraw.Draw(image).ellipse([50, 30, 110, 90], fill=(240, 220, 90))
+
+    dots = halftone.halftone(picture(bright_on_dark), REGION, 600)
+    assert dots and all(d.props["color"] != "#0a143c" for d in dots)
+    assert any(d.props["color"].startswith("#f") or d.props["color"].startswith("#e") for d in dots)
+    assert min(d.x for d in dots) > REGION.x + 0.25 * REGION.w
+
+
+def test_a_photo_with_a_coloured_flat_background_skips_it_entirely():
+    def flat(image):
+        image.paste((200, 60, 60), (0, 0, *image.size))
+
+    assert halftone.halftone(picture(flat), REGION, 600) == []
+
+
+def test_the_default_caps_are_900_dots_and_220_strokes():
+    assert (DEFAULT_DOTS, DEFAULT_STROKES) == (900, 220)
+
+
 def test_the_dot_count_never_passes_the_cap_and_a_small_cap_still_covers_the_picture():
-    full = halftone.halftone(picture(lambda im: im.paste((0, 0, 0), (0, 0, *im.size))), REGION, 600)
+    full = halftone.halftone(picture(slab), REGION, 600)
     assert 0 < len(full) <= 600
-    few = halftone.halftone(picture(lambda im: im.paste((0, 0, 0), (0, 0, *im.size))), REGION, 80)
+    few = halftone.halftone(picture(slab), REGION, 80)
     assert 0 < len(few) <= 80
     xs = [d.x for d in few]
     assert max(xs) - min(xs) > 0.6 * REGION.w
@@ -88,7 +119,7 @@ def test_each_dot_is_a_small_closed_stroke_with_a_hex_colour():
 
 
 def test_the_picture_is_fitted_with_its_aspect_ratio_and_centred():
-    dots = halftone.halftone(picture(lambda im: im.paste((0, 0, 0), (0, 0, *im.size)), (200, 50)), REGION, 600)
+    dots = halftone.halftone(picture(slab, (200, 50)), REGION, 600)
     top, bottom = min(d.y for d in dots), max(d.y + d.h for d in dots)
     assert (bottom - top) < 0.4 * REGION.h
     assert abs((top + bottom) / 2 - (REGION.y + REGION.h / 2)) < 0.05 * REGION.h
@@ -145,11 +176,11 @@ def test_nothing_found_a_failed_download_and_a_blank_picture_each_get_a_sentence
     blank = io.BytesIO()
     Image.new("RGB", (80, 60), (250, 250, 250)).save(blank, "PNG")
     rig.png = blank.getvalue()
-    assert "too light" in say_with(rig, "!draw dots a cat")
+    assert "could not find anything to draw" in say_with(rig, "!draw dots a cat")
 
 
 def test_the_env_cap_bounds_the_drawing_and_undo_removes_every_dot():
-    rig = rig_for_dots(picture(lambda im: im.paste((0, 0, 0), (0, 0, *im.size))))
+    rig = rig_for_dots(picture(slab))
     draw.DOTS_MAX = 120
     say_with(rig, "!draw dots a cat")
     assert 0 < len(rig.client.placed) <= 120

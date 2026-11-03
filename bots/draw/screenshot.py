@@ -114,11 +114,21 @@ def fit_view(region, longest=768):
     return View(region, max(max(region.w, region.h) / longest, 1.0))
 
 
+def _pen(key):
+    """A pen colour by palette name, or a `#rrggbb` hex string as the client reads it."""
+    if isinstance(key, str) and len(key) == 7 and key.startswith("#"):
+        try:
+            return tuple(int(key[i : i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            pass
+    return PEN.get(key, PEN["annotation"])
+
+
 def _draw_stroke(draw, view, obj):
     points = obj["props"].get("points") or []
     pairs = [view.px(obj["x"] + points[i], obj["y"] + points[i + 1]) for i in range(0, len(points) - 1, 2)]
     guide = bool(obj.get("guide"))
-    color = GUIDE if guide else PEN.get(obj["props"].get("color"), PEN["annotation"])
+    color = GUIDE if guide else _pen(obj["props"].get("color"))
     width = 1 if guide else max(1, round(float(obj["props"].get("width") or 3) / view.scale))
     if len(pairs) >= 2:
         draw.line(pairs, fill=color, width=width, joint="curve")
