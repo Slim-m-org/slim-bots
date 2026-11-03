@@ -62,7 +62,7 @@ GOOGLE = (GOOGLE_KEY, GOOGLE_ENGINE) if GOOGLE_KEY and GOOGLE_ENGINE else None
 SERPAPI_KEY = bot.setting("SERPAPI_KEY")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
-SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 600, type=int), type=int), 50), 1500)
+SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 1500, type=int), type=int), 200), 4000)
 PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 300, type=int), 20), 1500)
 COLOR_MAX = min(max(bot.setting("DRAW_COLOR_MAX", 2000, type=int), 200), 4000)
 PHOTO_SHADING = bot.setting("DRAW_PHOTO_SHADING", False, type=bool)
@@ -482,17 +482,17 @@ async def dots_source(ctx, subject, log):
     return found if found else "no picture matched that; try a simpler word."
 
 
-async def crop_picture(data, log):
-    """(cut picture, face box in it or None): around the largest face found locally, else the busiest region, else the whole picture."""
+async def crop_picture(data, log, detect_face):
+    """(picture with flat borders cut, face box in it or None): the face is located for the tracer's edge thresholds, never zoomed on."""
     try:
-        box, face_box, mode = await asyncio.to_thread(crop.choose, data)
+        box, face_box, mode = await asyncio.to_thread(crop.choose, data, detect_face)
         log.set("crop", f"{mode} {crop.describe(box)}")
         return await asyncio.to_thread(crop.crop_bytes, data, box), face_box
     except sources.SourceError:
         return data, None
 
 
-async def _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped=True):
+async def _picture_job(ctx, subject, channel_id, name, log, build, noun, focus="trim"):
     """Draws what `build(picture bytes, free region, face box)` makes from an attached image or the best freely licensed picture of the subject."""
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
@@ -508,9 +508,9 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped
             return
         data, candidate = source
         face_box = None
-        if cropped:
+        if focus != "none":
             with log.stage("crop"):
-                data, face_box = await crop_picture(data, log)
+                data, face_box = await crop_picture(data, log, focus == "face")
         with log.stage("trace"):
             if inspect.iscoroutinefunction(build):
                 objects = await build(data, free, face_box)
@@ -537,13 +537,13 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped
     await ctx.reply(f"drew {noun.format(count=done)} on the canvas in {name}{credit_text}")
 
 
-async def _picture_command(ctx, subject, command, build, noun, ack, cropped=True):
+async def _picture_command(ctx, subject, command, build, noun, ack, focus="trim"):
     subject = subject.strip()
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
     await guarded(
-        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped),
+        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _picture_job(ctx, subject, channel_id, name, log, build, noun, focus),
         command=command, prompt=subject or "attachment", ack=ack.format(subject=defuse(subject) or "your image"),
     )
 
@@ -551,7 +551,7 @@ async def _picture_command(ctx, subject, command, build, noun, ack, cropped=True
 @draw.command(name="shaded", aliases=("dots",), help="Draw a tonal squiggle portrait of an attached image or a subject; no model, no cost")
 async def draw_shaded(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, face, BOARD), "a shaded portrait with {count} strokes",
+        ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, BOARD), "a shaded portrait with {count} strokes",
         "making a shaded portrait of {subject}, this takes a minute or two.",
     )
 
@@ -560,7 +560,7 @@ async def draw_shaded(ctx, subject: str = ""):
 async def draw_color(ctx, subject: str = ""):
     await _picture_command(
         ctx, subject, "color", lambda data, free, face: colorize.color_strokes(data, free, COLOR_MAX), "the whole picture in colour with {count} strokes",
-        "painting {subject} in colour, this takes a few minutes.", cropped=False,
+        "painting {subject} in colour, this takes a few minutes.",
     )
 
 
@@ -573,14 +573,14 @@ async def paste_picture(data, free, face):
 
 @draw.command(name="paste", help="Put the picture itself on the canvas, no drawing")
 async def draw_paste(ctx, subject: str = ""):
-    await _picture_command(ctx, subject, "paste", paste_picture, "the picture as {count} image", "pasting {subject}, one moment.", cropped=False)
+    await _picture_command(ctx, subject, "paste", paste_picture, "the picture as {count} image", "pasting {subject}, one moment.", focus="none")
 
 
 @draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")
 async def draw_photo(ctx, subject: str = ""):
     await _picture_command(
         ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face, PHOTO_SHADING, BOARD), "a line drawing of the photo with {count} strokes",
-        "tracing a line drawing of {subject}, this takes a minute or two.",
+        "tracing a line drawing of {subject}, this takes a minute or two.", focus="face",
     )
 
 

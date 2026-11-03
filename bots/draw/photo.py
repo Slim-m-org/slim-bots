@@ -4,6 +4,7 @@ import io
 import math
 
 import photo_shade
+import sizing
 import photo_quality as quality
 from photo_quality import drop_isolated, hugs_border  # noqa: F401  (re-exported for callers and tests)
 from plan import Planned
@@ -217,8 +218,7 @@ def _stroke(points, scale, left, top, ink):
 
 
 def trace_photo(data, region, cap, face_box=None, shading=False, board="dark"):
-    """Stroke objects of the photo's lines, fitted inside `region` with the photo's aspect ratio and centred."""
+    """Stroke objects of the photo's lines, sized by its detail inside `region` with the photo's aspect ratio and centred."""
     lines, width, height = strokes(data, cap, face_box, shading)
-    scale = min(region.w / width, region.h / height)
-    left, top = region.x + (region.w - scale * width) / 2, region.y + (region.h - scale * height) / 2
-    return [_stroke(line, scale, left, top, INK.get(board, INK["dark"])) for line in lines]
+    left, top, box_w, _ = sizing.drawing_box(region, width / height, sizing.measure(data))
+    return [_stroke(line, box_w / width, left, top, INK.get(board, INK["dark"])) for line in lines]

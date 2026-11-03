@@ -3,6 +3,7 @@
 import io
 import math
 
+import sizing
 from plan import Planned
 from sources import SourceError
 
@@ -56,10 +57,10 @@ def _runs(grid):
     return out
 
 
-def _grid_for(image, cap):
+def _grid_for(image, cap, start_rows):
     """The finest (rows, cols, palette, runs) whose strokes fit under `cap`: the row count is stepped down until they do."""
     aspect = image.width / image.height
-    rows = MAX_ROWS
+    rows = start_rows
     while True:
         cols = max(int(rows * aspect), 1)
         palette, grid = _reduced(image, rows, cols)
@@ -86,8 +87,8 @@ def _stroke(run, palette, region_x, region_y, pitch, scale_x):
 def color_strokes(data, region, cap):
     """Stroke objects painting the whole picture inside `region` (aspect kept, centred), as many rows as fit under `cap` strokes."""
     image = _load(data)
-    rows, cols, palette, runs = _grid_for(image, cap)
-    pitch = min(region.w / cols, region.h / rows)
-    left = region.x + (region.w - pitch * cols) / 2
-    top = region.y + (region.h - pitch * rows) / 2
+    detail = sizing.measure(data)
+    rows, cols, palette, runs = _grid_for(image, cap, sizing.rows_for(detail, MIN_ROWS * 2, MAX_ROWS))
+    left, top, box_w, _ = sizing.drawing_box(region, cols / rows, detail)
+    pitch = box_w / cols
     return [_stroke(run, palette, left, top, pitch, pitch) for run in runs]

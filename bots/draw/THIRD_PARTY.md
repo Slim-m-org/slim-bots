@@ -19,7 +19,7 @@ Their algorithms were read from their published descriptions and behaviour and r
 | Tool | Licence | What was taken from it |
 | --- | --- | --- |
 | [LingDong-/linedraw](https://github.com/LingDong-/linedraw) (c) 2017 Lingdong Huang | MIT | The pairing of edge contours with tone hatching, and linking edge pixels into contours. Our edge pipeline (hysteresis, smoothing, a per-line quality bar) and the face-only optional hatching are our own. |
-| DrawingBotV3 (Squiggle and Sketch path-finding modes) | GPL-3.0 | The idea that tone becomes line density and wave amplitude along scanlines; reimplemented in `squiggle.py` with a subject mask, which the original does not have |
+| DrawingBotV3 (Squiggle and Sketch path-finding modes) | GPL-3.0 | The idea that tone becomes line density and wave amplitude along scanlines; reimplemented in `squiggle.py` |
 | potrace / potracer | GPL-2.0 | The idea of smoothing a traced outline into long curves; we use a moving average, Douglas-Peucker and one Chaikin pass instead of its Bezier fitting |
 | vpype | MIT | Line merging and simplification as plotter pre-processing; the same steps are a few lines here |
 | vtracer | MIT | Raster to vector shapes; not used, it makes filled outlines |

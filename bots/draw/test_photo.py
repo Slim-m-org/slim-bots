@@ -58,7 +58,7 @@ def test_every_stroke_is_a_small_inked_stroke_inside_the_region_with_the_photos_
         assert REGION.x - 1 <= o.x and o.x + o.w <= REGION.x + REGION.w + 1 and REGION.y - 1 <= o.y and o.y + o.h <= REGION.y + REGION.h + 1
     left, right = min(o.x for o in objects), max(o.x + o.w for o in objects)
     top, bottom = min(o.y for o in objects), max(o.y + o.h for o in objects)
-    scale = min(REGION.w / 240, REGION.h / 180)
+    scale = (right - left) / 180
     assert abs((left + right) / 2 - (REGION.x + REGION.w / 2)) < 6 * scale and abs((right - left) - 180 * scale) < 10 * scale
     assert abs((bottom - top) - 90 * scale) < 12 * scale
 
