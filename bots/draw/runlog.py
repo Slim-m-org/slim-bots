@@ -12,7 +12,7 @@ class RunLog:
     def __init__(self, command, channel_id, prompt="", emit=print, clock=time.monotonic):
         self.command, self.channel_id, self.emit, self.clock = command, channel_id, emit, clock
         self.prompt = " ".join(str(prompt).split())[:PROMPT_CHARS]
-        self.source, self.stages, self.started, self.finished = None, {}, clock(), False
+        self.source, self.stages, self.started, self.finished, self.notes = None, {}, clock(), False, []
 
     @contextmanager
     def stage(self, name):
@@ -23,6 +23,10 @@ class RunLog:
         finally:
             self.stages[name] = self.stages.get(name, 0.0) + (self.clock() - begin)
 
+    def note(self, text):
+        """A short reason worth keeping in the line, such as why a picture source was passed over."""
+        self.notes.append(" ".join(str(text).split())[:100])
+
     def done(self, outcome):
         """Emits the one line for this command; later calls do nothing."""
         if self.finished:
@@ -32,7 +36,10 @@ class RunLog:
         if self.source:
             fields.append(f"source={self.source}")
         fields += [f"{name}={seconds:.1f}s" for name, seconds in self.stages.items()]
-        fields += [f"total={self.clock() - self.started:.1f}s", f"prompt={json.dumps(self.prompt)}"]
+        fields.append(f"total={self.clock() - self.started:.1f}s")
+        if self.notes:
+            fields.append(f"notes={json.dumps('; '.join(self.notes[:6]))}")
+        fields.append(f"prompt={json.dumps(self.prompt)}")
         self.emit("draw " + " ".join(fields), flush=True)
 
     def failed(self, err):

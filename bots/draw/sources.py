@@ -115,6 +115,11 @@ def clean_subject(subject):
     return " ".join(words) or subject.strip()
 
 
+def _say(report, text):
+    if report is not None:
+        report(text[:100])
+
+
 def _json(get, base, params):
     status, body = get(f"{base}?{urllib.parse.urlencode(params)}")
     if status != 200:
@@ -129,44 +134,53 @@ def _plain(html):
     return " ".join(html_module.unescape(re.sub(r"<[^>]*>", " ", html or "")).split())[:60]
 
 
-def _free_file(get, filename):
-    """(licence, author) of a Commons file when it is freely licensed, else None; a file Commons lacks is non-free."""
+def _free_file(get, filename, report=None):
+    """(licence, author) of a Commons file when it is freely licensed, else None (and why, to `report`); a file Commons lacks is non-free."""
     data = _json(get, COMMONS_API, {
         "action": "query", "format": "json", "titles": f"File:{filename}", "prop": "imageinfo",
         "iiprop": "extmetadata", "iiextmetadatafilter": "LicenseShortName|Artist|NonFree",
     })
     for page in (data.get("query", {}).get("pages") or {}).values():
+        if "missing" in page:
+            continue
         meta = ((page.get("imageinfo") or [{}])[0]).get("extmetadata") or {}
         licence = (meta.get("LicenseShortName") or {}).get("value", "")
         nonfree = str((meta.get("NonFree") or {}).get("value", "")).lower() in ("true", "1", "yes")
         if licence and not nonfree and FREE_LICENCE.match(licence):
             return licence[:40], _plain((meta.get("Artist") or {}).get("value")) or "unknown"
+        _say(report, f"{filename}: licence {licence or 'unknown'}{' (non-free)' if nonfree else ''} rejected")
+        return None
+    _say(report, f"{filename}: not on Commons, treated as non-free")
     return None
 
 
-def wikipedia_candidate(get, subject):
-    """The lead image of the best Wikipedia article for `subject` as a candidate dict, if its file is freely licensed; else None."""
+def wikipedia_candidate(get, subject, report=None):
+    """The lead image of the best Wikipedia article for `subject` as a candidate dict if freely licensed, else None; `report` hears why a page was passed over."""
     data = _json(get, WIKI_API, {
         "action": "query", "format": "json", "generator": "search", "gsrsearch": clean_subject(subject), "gsrlimit": WIKI_PAGES,
-        "prop": "pageimages|info", "piprop": "thumbnail", "pithumbsize": 800, "inprop": "url",
+        "prop": "pageimages|info", "piprop": "thumbnail|name", "pithumbsize": 800, "inprop": "url",
     })
     pages = sorted((data.get("query", {}).get("pages") or {}).values(), key=lambda page: page.get("index", 99))
     for page in pages:
         thumbnail, filename = (page.get("thumbnail") or {}).get("source"), page.get("pageimage")
         if not thumbnail or not filename:
+            _say(report, f"{page.get('title', '?')}: no lead image")
             continue
-        free = _free_file(get, filename)
+        free = _free_file(get, filename, report)
         if free:
             return {"url": thumbnail, "title": page.get("title", "untitled")[:80], "creator": free[1], "license": free[0], "landing": page.get("fullurl", "")}
     return None
 
 
-def find_pictures(get, subject, openverse_get=None):
+def find_pictures(get, subject, openverse_get=None, report=None):
     """Candidates for `subject`: the free Wikipedia lead image, else Openverse; `get` has no credentials, `openverse_get` may, and its token never reaches Wikipedia."""
     try:
-        wiki = wikipedia_candidate(get, subject)
-    except SourceError:
+        wiki = wikipedia_candidate(get, subject, report)
+    except SourceError as err:
+        _say(report, f"wikipedia: {err}")
         wiki = None
+    if wiki is None:
+        _say(report, "no free wikipedia picture, using openverse")
     if wiki:
         return [{**wiki, "source": "wikipedia"}]
     return [{**c, "source": "openverse"} for c in search(openverse_get or get, subject)]

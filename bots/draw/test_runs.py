@@ -78,10 +78,18 @@ def test_the_source_used_is_logged():
     Image.new("RGB", (64, 64), (9, 9, 9)).save(png, "PNG")
     base.sources.fetch_picture = lambda get, url: png.getvalue()
     base.sources.reference_image = base.real_reference_image
-    base.sources.wikipedia_candidate = lambda get, subject: {"url": "https://t/w.jpg", "title": "T", "creator": "C", "license": "CC0", "landing": "https://w"}
+    base.sources.wikipedia_candidate = lambda get, subject, report=None: {"url": "https://t/w.jpg", "title": "T", "creator": "C", "license": "CC0", "landing": "https://w"}
     (line,) = lines_for(rig, "!draw barack obama")
     assert "source=wikipedia" in line and "search=" in line
-    base.sources.wikipedia_candidate = lambda get, subject: None
+    base.sources.wikipedia_candidate = lambda get, subject, report=None: None
+
+
+def test_the_reasons_a_picture_source_was_passed_over_are_in_the_log_line():
+    rig = rig_with(FakePlanner())
+    base.sources.wikipedia_candidate = lambda get, subject, report=None: report("File.jpg: licence All rights reserved rejected")
+    (line,) = lines_for(rig, "!draw barack obama")
+    assert 'notes="File.jpg: licence All rights reserved rejected; no free wikipedia picture, using openverse"' in line
+    base.sources.wikipedia_candidate = lambda get, subject, report=None: None
 
 
 def test_an_unexpected_exception_is_logged_with_a_traceback_and_the_invoker_is_told():

@@ -70,7 +70,7 @@ class Rig:
             return [CANDIDATE] if results is None else results
 
         sources.search = search
-        sources.wikipedia_candidate = lambda get, subject: None
+        sources.wikipedia_candidate = lambda get, subject, report=None: None
         sources.fetch_picture = lambda get, url: b"bytes"
         sources.decode_gray = lambda data, size: (self.grid, len(self.grid[0]), len(self.grid))
 

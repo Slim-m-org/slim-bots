@@ -5,6 +5,7 @@ import io
 import json
 import os
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -164,6 +165,57 @@ def test_the_openverse_token_never_reaches_wikipedia_and_every_call_names_the_bo
         sources.search = original
     assert verse == [carrying] and all("wikipedia" in u or "commons" in u for u in wiki_urls)
     assert "slimm-bot-draw" in sources.USER_AGENT and "github.com" in sources.USER_AGENT
+
+
+# Trimmed from live api.php answers (2026-11-03): the search only names the lead file when piprop asks for `name`.
+LIVE_SEARCH = {"batchcomplete": "", "continue": {"gsroffset": 3}, "query": {"pages": {"534366": {
+    "pageid": 534366, "ns": 0, "title": "Barack Obama", "index": 1,
+    "thumbnail": {"source": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8d/President_Barack_Obama.jpg/960px-President_Barack_Obama.jpg?utm_source=en.wikipedia.org", "width": 800, "height": 999},
+    "pageimage": "President_Barack_Obama.jpg", "fullurl": "https://en.wikipedia.org/wiki/Barack_Obama"}}}}
+LIVE_COMMONS = {"batchcomplete": "", "query": {"normalized": [{"from": "File:President_Barack_Obama.jpg", "to": "File:President Barack Obama.jpg"}], "pages": {"23956389": {
+    "pageid": 23956389, "ns": 6, "title": "File:President Barack Obama.jpg", "imagerepository": "local",
+    "imageinfo": [{"extmetadata": {
+        "Artist": {"value": "Official White House Photo by <a href=\"https://en.wikipedia.org/wiki/Pete_Souza\" class=\"extiw\" title=\"w:Pete Souza\">Pete Souza</a>", "source": "commons-desc-page"},
+        "LicenseShortName": {"value": "Public domain", "source": "commons-desc-page", "hidden": ""}}}]}}}}
+
+
+def live_get(urls):
+    def get(url):
+        urls.append(url)
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        if "en.wikipedia.org" in url:
+            page = dict(LIVE_SEARCH["query"]["pages"]["534366"])
+            if "name" not in query["piprop"][0].split("|"):
+                page.pop("pageimage")
+            return 200, json.dumps({"query": {"pages": {"534366": page}}}).encode()
+        return 200, json.dumps(LIVE_COMMONS).encode()
+
+    return get
+
+
+def test_the_live_shapes_resolve_to_the_public_domain_lead_image_regression():
+    urls = []
+    found = sources.wikipedia_candidate(live_get(urls), "barack obama")
+    assert found["title"] == "Barack Obama" and found["license"] == "Public domain" and found["creator"] == "Official White House Photo by Pete Souza"
+    assert found["url"].startswith("https://thumb.wikimedia.org/") and found["landing"] == "https://en.wikipedia.org/wiki/Barack_Obama"
+    assert "piprop=thumbnail%7Cname" in urls[0] or "piprop=thumbnail|name" in urls[0]
+
+
+def test_why_a_source_was_passed_over_is_reported():
+    said = []
+    sources.wikipedia_candidate(wiki_get([page("A", "a.jpg"), {"title": "No image", "index": 2}], {"a.jpg": meta("Fair use", nonfree="true")}), "x", said.append)
+    assert any("a.jpg" in s and "non-free" in s for s in said) and any("no lead image" in s for s in said)
+    said.clear()
+    sources.wikipedia_candidate(wiki_get([page("A", "a.jpg")], {}), "x", said.append)
+    assert any("not on Commons" in s for s in said)
+    said.clear()
+    original = sources.search
+    sources.search = lambda g, q, limit=8: []
+    try:
+        sources.find_pictures(lambda url: (500, b""), "x", None, said.append)
+    finally:
+        sources.search = original
+    assert any("wikipedia: wikipedia answered http 500" in s for s in said) and any("using openverse" in s for s in said)
 
 
 if __name__ == "__main__":

@@ -225,7 +225,7 @@ def make_review(free):
 async def search_pictures(subject, log):
     """Candidates from Wikipedia first, Openverse only when Wikipedia has nothing; the Openverse token never goes to Wikipedia."""
     with log.stage("search"):
-        return await asyncio.to_thread(sources.find_pictures, get, subject, functools.partial(get, token=OPENVERSE_TOKEN))
+        return await asyncio.to_thread(sources.find_pictures, get, subject, functools.partial(get, token=OPENVERSE_TOKEN), log.note)
 
 
 async def first_picture(candidates, log, convert=None):
