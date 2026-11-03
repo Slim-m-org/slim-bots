@@ -27,7 +27,7 @@ If you are in no call it asks you to join one.
 | --- | --- | --- |
 | `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
-| `!draw undo` | the member who drew it | remove your latest drawing, every object of it |
+| `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
 | `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
 
 A prompt is at most 200 characters (60 for a trace), the prompt goes only into the user turn of the model call, and mentions in replies are defused.
@@ -38,15 +38,17 @@ A prompt is at most 200 characters (60 for a trace), the prompt goes only into t
    A coordinate ruler runs along the top and left, and the largest empty rectangle (up to 1000 by 800) is boxed in green.
    If nothing big enough is free it says so instead of drawing over people's work.
 2. The model gets that picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
-3. Every tool call is checked before it touches the canvas: inside the free region, at most 120 points per stroke, a colour from the pen palette, an object under 4 KiB, at most `DRAW_MAX_STROKES` objects in all.
+3. Every tool call is checked before it touches the canvas: inside the free region, up to 400 points per stroke (a long contour is split into pieces that share a joint), a colour from the pen palette, every piece under 4 KiB, text boxes sized from their content, at most `DRAW_MAX_STROKES` objects in all.
    A bad call is skipped and counted in the reply.
-4. Objects are placed about 6 a second, below the canvas write limit of 10 a second, with a backoff when the server says slow down, and their ids are stored for `undo`.
+4. After each round the planned objects are drawn onto a picture of the free region (about 768 pixels on its long side, with a 100-unit grid) and sent back in the tool result, along with which calls were refused and why, so the model can see and fix its own drawing.
+5. Objects are placed about 6 a second, below the canvas write limit of 10 a second, with a backoff when the server says slow down, and their ids are stored for `undo`.
 
 A model that declines, errors or draws nothing gets a plain sentence back; the API key is never logged or echoed.
 
 ## Cost
 
-Each `!draw <prompt>` is one model call with one image and up to `DRAW_AI_MAX_TOKENS` output tokens (default 4096).
+Each `!draw <prompt>` is a short conversation of up to 12 rounds: the model plans (extended thinking, `DRAW_AI_THINKING_BUDGET` tokens), draws, and after each round gets an image of its own drawing so far to correct proportions.
+Every round carries the images, and `DRAW_AI_MAX_TOKENS` (default 16000) bounds each reply, so a drawing costs noticeably more than a single call; watch `DRAW_AI_DAILY_CAP`.
 The default model is `claude-sonnet-4-6`, so a drawing is one image in and up to a few thousand tokens out; check current pricing before opening it to a large community.
 `DRAW_AI_DAILY_CAP` (default 100) bounds the calls per day and `DRAW_AI_COOLDOWN` (default 120 seconds) bounds one member.
 
@@ -75,7 +77,8 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | empty | turns on model drawing; without it `!draw <word>` traces |
 | `DRAW_MODEL` | `claude-sonnet-4-6` | the Anthropic model id |
-| `DRAW_AI_MAX_TOKENS` | `4096` | output tokens per drawing, 512 to 16000 |
+| `DRAW_AI_MAX_TOKENS` | `16000` | output tokens per model reply (thinking included), 1536 to 32000 |
+| `DRAW_AI_THINKING_BUDGET` | `2048` | tokens the model may think before drawing, at least 1024; `0` turns thinking off |
 | `DRAW_AI_DAILY_CAP` | `100` | model calls per day |
 | `DRAW_AI_COOLDOWN` | `120` | seconds between one member's drawings |
 | `DRAW_LLM_URL`, `DRAW_LLM_MODEL`, `DRAW_LLM_KEY` | empty | an OpenAI-compatible endpoint used instead of Anthropic |

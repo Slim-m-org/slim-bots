@@ -56,13 +56,14 @@ VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
 AI_DAILY_CAP = bot.setting("DRAW_AI_DAILY_CAP", 100, type=int)
-AI_MAX_TOKENS = min(max(bot.setting("DRAW_AI_MAX_TOKENS", 4096, type=int), 512), 16000)
+AI_MAX_TOKENS = min(max(bot.setting("DRAW_AI_MAX_TOKENS", 16000, type=int), 1536), 32000)
+AI_THINKING_BUDGET = bot.setting("DRAW_AI_THINKING_BUDGET", 2048, type=int)
 GRID = 96
 
 get = sources.http_get
 planner = ai.make_planner(
     api_key=bot.setting("ANTHROPIC_API_KEY"), model=bot.setting("DRAW_MODEL", "claude-sonnet-4-6"), max_tokens=AI_MAX_TOKENS,
-    local_url=bot.setting("DRAW_LLM_URL"), local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
+    local_url=bot.setting("DRAW_LLM_URL"), thinking_budget=AI_THINKING_BUDGET, local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
 )
 COOLDOWN_SECONDS = 60
 # user id -> monotonic time of that member's last drawing, so one person cannot keep the pen busy.
@@ -91,8 +92,10 @@ def add_stroke(conn, drawing_id, object_id):
     conn.commit()
 
 
-def latest_live(conn, user_id):
-    return conn.execute("SELECT id, query, channel_id FROM drawings WHERE live = 1 AND user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+def latest_live(conn, user_id, channel_id):
+    return conn.execute(
+        "SELECT id, query, channel_id FROM drawings WHERE live = 1 AND user_id = ? AND channel_id = ? ORDER BY id DESC LIMIT 1", (user_id, channel_id)
+    ).fetchone()
 
 
 def live_drawings(conn, channel_id):
@@ -235,6 +238,29 @@ async def draw(ctx, query: str = ""):
     await guarded(ctx, AI_COOLDOWN, lambda channel_id, name: _ai_draw(ctx, query, channel_id, name))
 
 
+def make_review(free):
+    """A `review(calls)` for the planner: a verdict per call, and the free region redrawn with everything accepted so far."""
+    accepted = []
+
+    async def review(calls):
+        verdicts = []
+        for tool, args in calls:
+            try:
+                made = plan.validate_call(tool, args, free)
+            except plan.PlanError as err:
+                verdicts.append((False, f"not drawn: {err}"))
+                continue
+            if len(accepted) + len(made) > MAX_STROKES:
+                verdicts.append((False, f"not drawn: the {MAX_STROKES} object limit is reached; stop drawing"))
+                continue
+            accepted.extend(made)
+            verdicts.append((True, f"drawn ({len(made)} object{'' if len(made) == 1 else 's'})"))
+        wire = [{"kind": o.kind, "x": o.x, "y": o.y, "w": o.w, "h": o.h, "props": o.props} for o in accepted]
+        return verdicts, await screenshot.render(wire, screenshot.fit_view(free), None, ruler=100)
+
+    return review
+
+
 async def _ai_draw(ctx, prompt, channel_id, name):
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
@@ -244,7 +270,7 @@ async def _ai_draw(ctx, prompt, channel_id, name):
         if free is None:
             await ctx.reply_ephemeral(f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.", public_fallback=True)
             return
-        png = await screenshot.render(objects, window, free, fetch_tile)
+        png = await screenshot.render(objects, screenshot.View(window), free, fetch_tile)
     except screenshot.ScreenshotError as err:
         await ctx.reply_ephemeral(f"{err}.", public_fallback=True)
         return
@@ -252,7 +278,7 @@ async def _ai_draw(ctx, prompt, channel_id, name):
         await ctx.reply_ephemeral("I have used up today's drawing budget; try again tomorrow.", public_fallback=True)
         return
     try:
-        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES)
+        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES, review=make_review(free))
     except ai.Refused as err:
         await ctx.reply_ephemeral(f"{err}; try describing something else.", public_fallback=True)
         return
@@ -312,13 +338,17 @@ async def draw_trace(ctx, query: str = ""):
     await _trace_request(ctx, query)
 
 
-@draw.command(name="undo", help="Remove your latest drawing, all of it at once")
+@draw.command(name="undo", help="Remove your latest drawing in your call, all of it at once")
 async def draw_undo(ctx):
-    row = await bot.store.run(latest_live, ctx.author.id)
-    if row is None:
-        await ctx.reply_ephemeral("you have no drawing to undo.", public_fallback=True)
+    found = await where.find_call(ctx)
+    if isinstance(found, str):
+        await ctx.reply_ephemeral(found, public_fallback=True)
         return
-    await remove_strokes(bot.canvas(row[2]), await bot.store.run(stroke_ids, row[0]))
+    row = await bot.store.run(latest_live, ctx.author.id, found[0])
+    if row is None:
+        await ctx.reply_ephemeral(f"you have no drawing to undo in {found[1]}.", public_fallback=True)
+        return
+    await remove_strokes(bot.canvas(found[0]), await bot.store.run(stroke_ids, row[0]))
     await bot.store.run(retire, row[0])
     await ctx.reply_ephemeral(f"removed your drawing of \"{defuse(row[1])}\".", public_fallback=True)
 

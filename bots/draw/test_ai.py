@@ -2,7 +2,9 @@
 """The invoker's call, the model plan, its checks, pacing and undo, against a fake model; run directly: python3 test_ai.py."""
 
 import asyncio
+import base64
 import io
+import json
 import os
 import sys
 
@@ -36,7 +38,7 @@ class FakePlanner:
     def __init__(self, calls=None, error=None):
         self.calls, self.error, self.seen = calls, error, []
 
-    async def plan(self, prompt, png, free, max_calls=150):
+    async def plan(self, prompt, png, free, max_calls=150, review=None):
         self.seen.append((prompt, png, free))
         if self.error:
             raise self.error
@@ -137,7 +139,7 @@ def test_too_many_points_an_unknown_tool_and_a_bad_colour_are_refused():
     calls = [("draw_stroke", many), ("paint_sky", {}), ("draw_stroke", {"points": [[110, 110], [120, 120]], "color": "chartreuse"}), ("draw_stroke", {"points": [[110, 110]]})]
     objects, problems = plan.validate_plan(calls, FREE, 150)
     assert objects == [] and len(problems) == 4
-    assert "at most 120 points" in problems[0] and "no tool called paint_sky" in problems[1] and "color must be one of" in problems[2]
+    assert "at most 400 points" in problems[0] and "no tool called paint_sky" in problems[1] and "color must be one of" in problems[2]
 
 
 def test_the_object_cap_drops_the_rest():
@@ -216,7 +218,7 @@ def test_undo_and_clear_cover_model_drawings_in_the_callers_call():
     assert "removed 1 drawing" in rig.say("!draw clear", permissions=Permissions.MANAGE_CANVAS)
 
 
-def test_the_anthropic_request_carries_the_tools_the_image_and_a_forced_tool_choice():
+def test_the_anthropic_request_carries_the_tools_the_image_and_thinking():
     sent = {}
 
     class Block:
@@ -237,7 +239,8 @@ def test_the_anthropic_request_carries_the_tools_the_image_and_a_forced_tool_cho
     calls = asyncio.run(planner.plan("a cat", b"\x89PNG", FREE))
     assert calls == [("draw_shape", BOX[1])]
     assert sent["model"] == "claude-sonnet-4-6" and sent["max_tokens"] == 2048
-    assert sent["tool_choice"] == {"type": "any"} and {t["name"] for t in sent["tools"]} == plan.TOOL_NAMES
+    assert sent["tool_choice"] == {"type": "auto"} and sent["thinking"] == {"type": "enabled", "budget_tokens": 1024}
+    assert {t["name"] for t in sent["tools"]} == plan.TOOL_NAMES
     assert [b["type"] for b in sent["messages"][0]["content"]] == ["image", "text"]
     assert "sk-secret" not in str(sent)
 
@@ -271,6 +274,99 @@ def test_the_model_keeps_drawing_until_it_ends_its_turn():
     assert [m["role"] for m in follow_up] == ["user", "assistant", "user"]
     results = [b for b in follow_up[2]["content"] if b["type"] == "tool_result"]
     assert [r["tool_use_id"] for r in results] == ["tu0", "tu1", "tu2"]
+
+
+def test_the_first_round_is_auto_with_thinking_and_later_rounds_keep_it():
+    client, sent = _conversation([("tool_use", 1), ("end_turn", 0)])
+    asyncio.run(ai.AnthropicPlanner("k", "m", 16000, client=client).plan("a cat", b"png", FREE))
+    assert all(call["tool_choice"] == {"type": "auto"} for call in sent)
+    assert all(call["thinking"] == {"type": "enabled", "budget_tokens": 2048} for call in sent)
+    assert all(call["max_tokens"] > call["thinking"]["budget_tokens"] for call in sent)
+
+
+def test_a_zero_budget_turns_thinking_off_and_forces_a_tool_on_the_first_round():
+    client, sent = _conversation([("tool_use", 1), ("end_turn", 0)])
+    asyncio.run(ai.AnthropicPlanner("k", "m", 16000, client=client, thinking_budget=0).plan("a cat", b"png", FREE))
+    assert "thinking" not in sent[0] and sent[0]["tool_choice"] == {"type": "any"} and sent[1]["tool_choice"] == {"type": "auto"}
+
+
+def test_a_budget_the_token_limit_cannot_hold_is_dropped_not_sent():
+    assert ai.AnthropicPlanner("k", "m", 1500, thinking_budget=2048).thinking_budget == 0
+    assert ai.AnthropicPlanner("k", "m", 3000, thinking_budget=2048).thinking_budget == 1976
+
+
+def test_each_round_returns_the_picture_so_far_inside_the_tool_result():
+    client, sent = _conversation([("tool_use", 2), ("tool_use", 1), ("end_turn", 0)])
+    pictures = []
+
+    async def review(batch):
+        pictures.append(b"PNG%d" % len(pictures))
+        return [(True, "drawn")] + [(False, "not drawn: outside")] * (len(batch) - 1), pictures[-1]
+
+    asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("a cat", b"png", FREE, review=review))
+    for turn, picture in ((1, pictures[0]), (2, pictures[1])):
+        results = [b for b in sent[turn]["messages"][-1]["content"] if b["type"] == "tool_result"]
+        images = [c for c in results[-1]["content"] if c["type"] == "image"]
+        assert len(images) == 1 and base64.b64decode(images[0]["source"]["data"]) == picture
+    first = [b for b in sent[1]["messages"][-1]["content"] if b["type"] == "tool_result"]
+    assert "is_error" not in first[0] and first[1]["is_error"] is True
+
+
+def test_the_bots_review_judges_calls_and_renders_a_small_picture_of_the_free_region():
+    free = plan.Region(100, 100, 1000, 800)
+    review = draw.make_review(free)
+    verdicts, png = asyncio.run(review([("draw_stroke", {"points": [[120, 120], [400, 500], [600, 150]], "width": 6}), ("draw_stroke", {"points": [[9000, 9000], [9100, 9100]]}), ("scribble", {})]))
+    assert [ok for ok, _ in verdicts] == [True, False, False] and "outside the free region" in verdicts[1][1]
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(png))
+    assert max(image.size) <= 768 and image.size[0] > image.size[1]
+
+
+def test_text_boxes_are_sized_from_their_content_so_nothing_clips():
+    width, height = plan.text_box("OBAMA", plan.TEXT_FONT["large"])
+    assert width >= len("OBAMA") * plan.TEXT_FONT["large"] * 0.6 and height >= plan.TEXT_FONT["large"] * plan.LINE_HEIGHT
+    objects, _ = plan.validate_plan([("add_text", {"text": "OBAMA", "x": 120, "y": 120, "size": "large"})], FREE, 5)
+    assert objects[0].w >= width and objects[0].h >= height
+    long_w, long_h = plan.text_box("word " * 40, plan.TEXT_FONT["medium"])
+    assert long_w <= plan.MAX_TEXT_WIDTH and long_h > plan.TEXT_FONT["medium"] * plan.LINE_HEIGHT * 3
+
+
+def test_stroke_width_must_be_a_number_between_1_and_24():
+    points = [[110, 110], [200, 200]]
+    for bad in (0, 0.5, 25, "3", float("nan"), True):
+        assert plan.validate_plan([("draw_stroke", {"points": points, "width": bad})], FREE, 5)[0] == [], bad
+    objects, _ = plan.validate_plan([("draw_stroke", {"points": points, "width": 12})], FREE, 5)
+    assert objects[0].props["width"] == 12.0
+
+
+def test_a_long_contour_is_split_into_pieces_that_share_a_joint_and_stay_under_4_kib():
+    points = [[110 + i, 110 + (i * 7) % 300] for i in range(plan.MAX_POINTS)]
+    objects, problems = plan.validate_plan([("draw_stroke", {"points": points})], FREE, 150)
+    assert problems == [] and len(objects) == 3
+    assert all(len(json.dumps(o.props)) < plan.PROPS_LIMIT and len(o.props["points"]) // 2 <= plan.CHUNK_POINTS for o in objects)
+    end = (objects[0].x + objects[0].props["points"][-2], objects[0].y + objects[0].props["points"][-1])
+    start = (objects[1].x + objects[1].props["points"][0], objects[1].y + objects[1].props["points"][1])
+    assert end == start
+
+
+def test_undo_only_touches_the_drawing_in_the_invokers_current_call():
+    rig = rig_with(FakePlanner())
+    rig.say("!draw a cat")
+    first = [p["id"] for p in rig.client.placed]
+    rig.in_call(ANN, "c-other")
+    assert "no drawing to undo in" in rig.say("!draw undo")
+    assert rig.client.ops == []
+    rig.in_call(ANN, "c-voice")
+    assert "removed your drawing" in rig.say("!draw undo")
+    assert [i for op in rig.client.ops for i in op["object_ids"]] == first
+
+
+def test_undo_outside_a_call_asks_to_join_one():
+    rig = rig_with(FakePlanner())
+    rig.say("!draw a cat")
+    draw.bot.voice._member_channel.clear()
+    assert "join a voice channel first" in rig.say("!draw undo")
 
 
 def test_the_conversation_stops_at_the_object_cap_and_the_round_limit():
@@ -358,8 +454,8 @@ def test_the_screenshot_draws_each_object_kind_and_a_fetched_tile():
 
     png = asyncio.run(screenshot.render(objects, window, plan.Region(300, 350, 450, 220), fetch))
     image = Image.open(io.BytesIO(png)).convert("RGB")
-    assert image.size == (200, 150)
-    assert image.getpixel((125, 50)) == (255, 0, 0)  # the shrunk tile sits where the image object is
+    assert image.size == (400, 300)
+    assert image.getpixel((250, 100)) == (255, 0, 0)  # the shrunk tile sits where the image object is
     assert image.getpixel((5, 5)) != screenshot.PAPER or image.getpixel((20, 20)) != screenshot.PAPER
 
 

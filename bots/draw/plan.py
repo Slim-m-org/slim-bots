@@ -7,11 +7,27 @@ from dataclasses import dataclass
 PALETTE = ("annotation", "amber", "green", "blue", "purple", "pink")
 SHAPES = ("rectangle", "ellipse", "line", "arrow")
 TEXT_SIZES = ("small", "medium", "large")
-MAX_POINTS = 120
+MAX_POINTS = 400
+CHUNK_POINTS = 150  # a longer stroke is split into pieces that share a joint, each far under the 4 KiB props limit
 MAX_TEXT = 200
 MAX_STROKE_WIDTH = 24.0
 PROPS_LIMIT = 4096
-NOTE_SIZE = (180.0, 120.0)
+TEXT_FONT = {"small": 14.0, "medium": 20.0, "large": 24.0}  # the client's world-unit font sizes
+LINE_HEIGHT = 1.3
+TEXT_PAD = 4.0
+GLYPH_WIDTH = 0.62  # average glyph width in ems, a little wide on purpose so a box never clips
+NOTE_FONT = 16.0
+NOTE_WIDTH = 180.0
+MAX_TEXT_WIDTH = 360.0
+
+
+def text_box(text, font, max_width=MAX_TEXT_WIDTH):
+    """(width, height) of a box that holds `text` at `font` units without the client clipping it."""
+    one_line = len(text) * font * GLYPH_WIDTH + 2 * TEXT_PAD
+    width = min(max(one_line, font + 2 * TEXT_PAD), max_width)
+    per_line = max(int((width - 2 * TEXT_PAD) // (font * GLYPH_WIDTH)), 1)
+    lines = max(-(-len(text) // per_line), 1) + text.count("\n")
+    return width, lines * font * LINE_HEIGHT + 2 * TEXT_PAD
 
 
 class PlanError(ValueError):
@@ -51,8 +67,8 @@ _NUMBER = {"type": "number"}
 TOOLS = [
     _tool(
         "draw_stroke",
-        f"A freehand line through at most {MAX_POINTS} points in canvas units; close the path by repeating the first point. Build pictures from many strokes.",
-        {"points": {"type": "array", "items": {"type": "array", "items": _NUMBER, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": MAX_POINTS}, "color": _COLOR, "width": {"type": "number", "description": "line width, 1 to 24"}},
+        f"A freehand line through up to {MAX_POINTS} points in canvas units (use many points for smooth curves; longer lines are split for you); repeat the first point to close a contour. width 1 to {int(MAX_STROKE_WIDTH)}: thin for hatching and detail, thick for bold outlines.",
+        {"points": {"type": "array", "items": {"type": "array", "items": _NUMBER, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": MAX_POINTS}, "color": _COLOR, "width": {"type": "number", "description": "line width, 1 to 24; default 3"}},
         ["points"],
     ),
     _tool(
@@ -105,25 +121,44 @@ def _color(args):
     return color
 
 
-def _stroke(args, region):
+def _points(args):
     points = args.get("points")
     if not isinstance(points, list) or len(points) < 2:
         raise PlanError("a stroke needs at least 2 points")
     if len(points) > MAX_POINTS:
-        raise PlanError(f"a stroke may have at most {MAX_POINTS} points")
+        raise PlanError(f"a stroke may have at most {MAX_POINTS} points; split it into several")
     pairs = []
     for point in points:
         if not isinstance(point, (list, tuple)) or len(point) != 2:
             raise PlanError("every point is a pair [x, y]")
         pairs.append((_number({"v": point[0]}, "v"), _number({"v": point[1]}, "v")))
+    return pairs
+
+
+def _width(args):
     width = args.get("width", 3.0)
-    if isinstance(width, bool) or not isinstance(width, (int, float)) or not 1 <= width <= MAX_STROKE_WIDTH:
+    if isinstance(width, bool) or not isinstance(width, (int, float)) or not math.isfinite(width) or not 1 <= width <= MAX_STROKE_WIDTH:
         raise PlanError(f"width must be between 1 and {int(MAX_STROKE_WIDTH)}")
+    return float(width)
+
+
+def _one_stroke(pairs, width, color, region):
     low_x, low_y = min(p[0] for p in pairs), min(p[1] for p in pairs)
     high_x, high_y = max(p[0] for p in pairs), max(p[1] for p in pairs)
     _inside(region, low_x, low_y, high_x - low_x, high_y - low_y)
     flat = [round(v, 1) for p in pairs for v in (p[0] - low_x, p[1] - low_y)]
-    return Planned("stroke", low_x, low_y, max(high_x - low_x, 0.5), max(high_y - low_y, 0.5), {"points": flat, "width": float(width), "color": _color(args)})
+    return Planned("stroke", low_x, low_y, max(high_x - low_x, 0.5), max(high_y - low_y, 0.5), {"points": flat, "width": width, "color": color})
+
+
+def _stroke(args, region):
+    """One or more stroke objects: a long contour is cut into pieces that share an end point."""
+    pairs, width, color = _points(args), _width(args), _color(args)
+    pieces, start = [], 0
+    while True:
+        pieces.append(pairs[start : start + CHUNK_POINTS])
+        start += CHUNK_POINTS - 1
+        if start >= len(pairs) - 1:
+            return [_one_stroke(piece, width, color, region) for piece in pieces]
 
 
 def _shape(args, region):
@@ -138,28 +173,28 @@ def _shape(args, region):
     for flip in ("flip_x", "flip_y"):
         if args.get(flip) is True:
             props[flip] = True
-    return Planned("shape", x, y, w, h, props)
+    return [Planned("shape", x, y, w, h, props)]
 
 
 def _label(args, region, kind):
     text = _text(args)
     x, y = _number(args, "x"), _number(args, "y")
     if kind == "note":
-        w, h = NOTE_SIZE
+        w, h = text_box(text, NOTE_FONT, NOTE_WIDTH)
         props = {"text": text}
+        h = max(h, 120.0)
     else:
         size = args.get("size", "medium")
         if size not in TEXT_SIZES:
             raise PlanError(f"size must be one of {', '.join(TEXT_SIZES)}")
-        scale = {"small": 14, "medium": 20, "large": 28}[size]
-        w, h = max(len(text), 1) * scale * 0.6, scale * 1.5
+        w, h = text_box(text, TEXT_FONT[size])
         props = {"text": text, "size": size, "color": _color(args)}
     _inside(region, x, y, w, h)
-    return Planned(kind, x, y, w, h, props)
+    return [Planned(kind, x, y, w, h, props)]
 
 
 def validate_call(name, args, region):
-    """The canvas object for one tool call, or a `PlanError` saying what to fix."""
+    """The canvas objects for one tool call (a long stroke is several), or a `PlanError` saying what to fix."""
     if name not in TOOL_NAMES:
         raise PlanError(f"there is no tool called {name}")
     if not isinstance(args, dict):
@@ -170,20 +205,22 @@ def validate_call(name, args, region):
         planned = _shape(args, region)
     else:
         planned = _label(args, region, "note" if name == "add_note" else "text")
-    if len(json.dumps(planned.props)) >= PROPS_LIMIT:
+    if any(len(json.dumps(p.props)) >= PROPS_LIMIT for p in planned):
         raise PlanError("the object is larger than 4 KiB")
     return planned
 
 
 def validate_plan(calls, region, cap):
-    """(objects to place, problems) for a model's calls; a bad call is skipped, calls past `cap` dropped."""
+    """(objects to place, problems) for a model's calls; a bad call is skipped, objects past `cap` dropped."""
     objects, problems = [], []
     for name, args in calls:
-        if len(objects) >= cap:
-            problems.append(f"more than {cap} objects; the rest were dropped")
-            break
         try:
-            objects.append(validate_call(name, args, region))
+            made = validate_call(name, args, region)
         except PlanError as err:
             problems.append(f"{name}: {err}")
+            continue
+        if len(objects) + len(made) > cap:
+            problems.append(f"more than {cap} objects; the rest were dropped")
+            break
+        objects.extend(made)
     return objects, problems
