@@ -7,6 +7,7 @@ import functools
 import time
 
 import ai
+import crop
 import halftone
 import photo
 import plan
@@ -357,6 +358,22 @@ async def dots_source(ctx, subject, log):
     return found if found else "no freely licensed picture matched that; try a simpler word."
 
 
+async def crop_picture(data, subject, log):
+    """`data` cut to the subject: by one model call when a key is configured, else (or on any failure) by the heuristic box."""
+    try:
+        width, height = await asyncio.to_thread(crop.size_of, data)
+        box, mode = None, "heuristic"
+        if hasattr(planner, "locate") and await bot.store.run(take_ai_call, time.strftime("%Y-%m-%d", time.gmtime()), AI_DAILY_CAP):
+            preview, media_type = await asyncio.to_thread(crop.preview, data)
+            box = crop.clamp_box(await planner.locate(defuse(subject), preview, media_type) or {})
+            mode = "model" if box else "heuristic"
+        box = box or crop.heuristic_box(width, height)
+        log.set("crop", f"{mode} {crop.describe(box)}")
+        return await asyncio.to_thread(crop.crop_bytes, data, box)
+    except sources.SourceError:
+        return data
+
+
 async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
     """Draws what `build(picture bytes, free region)` makes from an attached image or the best freely licensed picture of the subject."""
     canvas = bot.canvas(channel_id)
@@ -372,6 +389,8 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
             await refuse(ctx, log, "no source", source)
             return
         data, candidate = source
+        with log.stage("crop"):
+            data = await crop_picture(data, subject, log)
         with log.stage("trace"):
             objects = await asyncio.to_thread(build, data, free)
     except (screenshot.ScreenshotError, sources.SourceError) as err:

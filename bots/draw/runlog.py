@@ -12,7 +12,7 @@ class RunLog:
     def __init__(self, command, channel_id, prompt="", emit=print, clock=time.monotonic):
         self.command, self.channel_id, self.emit, self.clock = command, channel_id, emit, clock
         self.prompt = " ".join(str(prompt).split())[:PROMPT_CHARS]
-        self.source, self.stages, self.started, self.finished, self.notes = None, {}, clock(), False, []
+        self.source, self.stages, self.started, self.finished, self.notes, self.extra = None, {}, clock(), False, [], {}
 
     @contextmanager
     def stage(self, name):
@@ -22,6 +22,10 @@ class RunLog:
             yield
         finally:
             self.stages[name] = self.stages.get(name, 0.0) + (self.clock() - begin)
+
+    def set(self, key, value):
+        """A named fact for the line, such as how the picture was cropped."""
+        self.extra[key] = " ".join(str(value).split())[:60]
 
     def note(self, text):
         """A short reason worth keeping in the line, such as why a picture source was passed over."""
@@ -35,6 +39,7 @@ class RunLog:
         fields = [f"command={self.command}", f"channel={self.channel_id}", f"outcome={json.dumps(str(outcome)[:120])}"]
         if self.source:
             fields.append(f"source={self.source}")
+        fields += [f"{key}={json.dumps(value)}" if " " in value else f"{key}={value}" for key, value in self.extra.items()]
         fields += [f"{name}={seconds:.1f}s" for name, seconds in self.stages.items()]
         fields.append(f"total={self.clock() - self.started:.1f}s")
         if self.notes:

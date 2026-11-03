@@ -103,10 +103,18 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 `DRAW_CHANNEL` is no longer used: the bot draws in the call the member is in, never a fixed channel.
 Without Pillow installed the bot starts and answers `!draw` with a sentence saying so.
 
+## Cropping to the subject
+
+Before tracing, `photo` and `dots` cut the picture down to its subject so the face is not a small part of a wide shot.
+With an Anthropic key, one small model call looks at a 512 pixel copy and the subject text and answers with a bounding box through a single `crop` tool (the head and shoulders for a person); the box is validated, clamped, padded 8 percent and kept at least a fifth of the picture on each side.
+The call is capped at 300 output tokens, uses the same request timeout, happens at most once per command, and counts against `DRAW_AI_DAILY_CAP`.
+Without a key, with a local model, with the cap spent or on any failure, a heuristic crop is used: the centre-top 70 percent of a portrait-shaped picture, the whole picture otherwise.
+The log line carries `crop="model x,y,w,h"` or `crop="heuristic x,y,w,h"`.
+
 ## Line drawings from a photo
 
 `!draw photo` needs no model.
-It blurs the picture lightly at about 560 pixels, finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments and keeps the longest, strongest and most central lines up to `DRAW_PHOTO_MAX` strokes.
+It blurs the picture lightly at about 560 pixels, finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments and keeps the longest and strongest lines (leaning only slightly towards the centre, since the crop has already focused the subject) up to `DRAW_PHOTO_MAX` strokes.
 A line is split into pieces of at most 150 points that share a joint, each is a stroke in the one ink colour at width 2, and the drawing is scaled into the largest free area of your call's canvas with the photo's aspect ratio.
 A clean, close portrait or a landmark photo works best; a busy wide shot traces its background too.
 

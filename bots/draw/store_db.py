@@ -63,8 +63,8 @@ def retire(conn, drawing_id):
 
 def take_ai_call(conn, day, cap):
     """Counts one model call against today's cap; False when the cap is spent."""
-    used = conn.execute("SELECT calls FROM ai_usage WHERE day = ?", (day,)).fetchone()
-    if used is not None and used[0] >= cap:
+    row = conn.execute("SELECT calls FROM ai_usage WHERE day = ?", (day,)).fetchone()
+    if (row[0] if row else 0) >= cap:
         return False
     conn.execute("INSERT INTO ai_usage (day, calls) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET calls = calls + 1", (day,))
     conn.commit()

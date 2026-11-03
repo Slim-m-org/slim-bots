@@ -15,6 +15,7 @@ MIN_LENGTH = 10  # pixels; shorter fragments are noise
 SIMPLIFY = 0.9  # Douglas-Peucker tolerance in pixels
 SMOOTH = 2  # moving-average half window over a traced path
 CHUNK_POINTS = 150
+CENTRE_WEIGHT = 0.15
 STROKE_WIDTH = 2.0
 INK = "annotation"
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1))
@@ -169,10 +170,10 @@ def strokes(data, cap):
 
 
 def _centre_bias(line, width, height):
-    """1.0 for a line at the middle of the photo falling to 0.55 at a corner: the subject is usually central."""
+    """1.0 for a line at the middle of the photo, a little less towards a corner; the crop already centres the subject."""
     mx, my = sum(p[0] for p in line) / len(line), sum(p[1] for p in line) / len(line)
     off = math.hypot((mx - width / 2) / (width / 2), (my - height / 2) / (height / 2)) / math.sqrt(2)
-    return 1.0 - 0.45 * off
+    return 1.0 - CENTRE_WEIGHT * off
 
 
 def _split(line):
