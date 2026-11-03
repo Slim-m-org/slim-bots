@@ -133,7 +133,7 @@ def test_a_non_image_attachment_is_ignored_and_with_nothing_to_go_on_the_reply_s
 def test_nothing_found_a_failed_download_and_a_blank_picture_each_get_a_sentence():
     rig = rig_for_dots()
     base.sources.search = lambda get, query, limit=8: []
-    assert "no openly licensed picture" in say_with(rig, "!draw dots zzzz")
+    assert "no freely licensed picture" in say_with(rig, "!draw dots zzzz")
     rig = rig_for_dots()
     from slimbots.http import ApiError
 

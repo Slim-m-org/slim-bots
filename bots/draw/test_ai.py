@@ -39,7 +39,7 @@ class FakePlanner:
     def __init__(self, calls=None, error=None):
         self.calls, self.error, self.seen, self.reference = calls, error, [], None
 
-    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None):
+    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None, deadline=None):
         self.reference = reference
         self.seen.append((prompt, png, free))
         if self.error:
@@ -394,7 +394,7 @@ def test_a_guide_is_never_sent_to_the_canvas_by_a_drawing():
     planner = FakePlanner(calls=None)
     rig = rig_with(planner)
 
-    async def with_guides(prompt, png, free, max_calls=150, review=None, reference=None):
+    async def with_guides(prompt, png, free, max_calls=150, review=None, reference=None, deadline=None):
         guide = ("draw_stroke", {"points": [[free.x + 10, free.y + 50], [free.x + 300, free.y + 50]], "guide": True})
         real = ("draw_stroke", {"points": [[free.x + 10, free.y + 10], [free.x + 300, free.y + 100]]})
         return [guide, real]

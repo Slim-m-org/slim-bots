@@ -38,7 +38,7 @@ A prompt is at most 200 characters (60 for a trace), the prompt goes only into t
 1. The bot reads the live objects in a 1600 by 1000 area of the canvas and renders them as a picture: strokes in their colours, shapes as outlines, text and notes as labelled boxes, image tiles shrunk (the first bytes of each, at most 12).
    A coordinate ruler runs along the top and left, and the largest empty rectangle (up to 1000 by 800) is boxed in green.
    If nothing big enough is free it says so instead of drawing over people's work.
-2. The bot also searches Openverse for the subject (openly licensed, mature results excluded) and sends the best thumbnail along as a reference photo for proportions and likeness; if nothing is found it carries on without one, and the reply credits the source (title, creator, licence) when one was used.
+2. The bot also looks for a reference picture: the lead image of the best matching Wikipedia article when its file is freely licensed on Wikimedia Commons (CC or public domain; fair-use files are skipped), else the best Openverse result (openly licensed, mature results excluded). It sends the best thumbnail along as a reference photo for proportions and likeness; if nothing is found it carries on without one, and the reply credits the source (title, creator, licence) when one was used.
    The model gets the board picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
 3. Every tool call is checked before it touches the canvas: inside the free region, up to 400 points per stroke (a long contour is split into pieces that share a joint), a colour from the pen palette, every piece under 4 KiB, text boxes sized from their content, at most `DRAW_MAX_STROKES` objects in all.
    A bad call is skipped and counted in the reply.
@@ -85,6 +85,8 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_AI_MAX_TOKENS` | `16000` | output tokens per model reply (thinking included), 1536 to 32000 |
 | `DRAW_AI_THINKING_BUDGET` | `2048` | tokens the model may think before drawing, at least 1024; `0` turns thinking off |
 | `DRAW_AI_DAILY_CAP` | `100` | model calls per day |
+| `DRAW_AI_TIME_CAP` | `180` | seconds before an AI drawing stops asking the model and places what it has, at least 30 |
+| `DRAW_AI_REQUEST_TIMEOUT` | `90` | seconds one model request may take, at least 10 |
 | `DRAW_AI_COOLDOWN` | `120` | seconds between one member's drawings |
 | `DRAW_LLM_URL`, `DRAW_LLM_MODEL`, `DRAW_LLM_KEY` | empty | an OpenAI-compatible endpoint used instead of Anthropic |
 | `DRAW_VIEW_X`, `DRAW_VIEW_Y` | `0`, `0` | the middle of the canvas area the model looks at |
@@ -106,3 +108,10 @@ It reads the picture, averages it into a grid, skips cells that are nearly backg
 The grid is narrowed until the dots fit under `DRAW_DOTS_MAX`, the picture is fitted into the largest free area of your call's canvas, and placement uses the usual pacing and backoff, so 600 dots take a couple of minutes.
 A client without hex colour support paints the dots in the default ink, which still reads as a monochrome halftone.
 `!draw undo` and `!draw clear` remove a dot portrait like any other drawing.
+
+## Replies and the log
+
+A drawing is acknowledged straight away in the channel ("drawing ..., this takes a minute or two") and the result is posted there too, so the call sees what happened; pure errors (no call, missing rights, cooldown, a refusal) stay private to whoever asked.
+Every command writes one line to stdout when it ends, for example `draw command=draw channel=<call id> outcome="drew 41" source=wikipedia search=0.9s download=0.4s model=52.3s place=7.2s total=61.0s prompt="barack obama"`.
+It has the outcome (drew N, refused with the reason, no call, cooldown, busy, no source, error and its class), the source used and the time per stage, and never a key or more than 60 characters of the prompt.
+An unexpected exception is logged with its traceback on a `draw traceback` line, because the framework otherwise swallows a handler's exception.

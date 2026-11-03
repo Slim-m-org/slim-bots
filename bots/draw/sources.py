@@ -1,7 +1,9 @@
 """Openly licensed pictures from Openverse and the decode step; both are injectable so tests need no network."""
 
+import html as html_module
 import io
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -10,7 +12,7 @@ SEARCH_URL = "https://api.openverse.org/v1/images/"
 TIMEOUT = 15
 MAX_PICTURE_BYTES = 3 * 1024 * 1024
 MAX_PIXELS = 25_000_000
-USER_AGENT = "slimm-bot-draw/1.0"
+USER_AGENT = "slimm-bot-draw/1.0 (https://github.com/Slim-m-org/slim-bots; a slim-m community drawing bot)"
 
 
 class SourceError(Exception):
@@ -98,3 +100,73 @@ def reference_image(data, side=768):
     except Exception as err:
         raise SourceError("the picture could not be read") from err
     return out.getvalue(), "image/jpeg"
+
+
+WIKI_API = "https://en.wikipedia.org/w/api.php"
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+WIKI_PAGES = 3
+FILLER = {"a", "an", "the", "of", "portrait", "picture", "photo", "photograph", "drawing", "image", "realistic", "hyperrealistic", "me", "please", "draw"}
+FREE_LICENCE = re.compile(r"^(cc[ -]|public domain|pd[ -]|pd$|cc0)", re.I)
+
+
+def clean_subject(subject):
+    """The subject without drawing words ("portrait", "hyperrealistic"), which only confuse an encyclopedia search."""
+    words = [w for w in re.split(r"\s+", subject.strip()) if w.lower() not in FILLER]
+    return " ".join(words) or subject.strip()
+
+
+def _json(get, base, params):
+    status, body = get(f"{base}?{urllib.parse.urlencode(params)}")
+    if status != 200:
+        raise SourceError(f"wikipedia answered http {status}")
+    try:
+        return json.loads(body)
+    except (ValueError, AttributeError) as err:
+        raise SourceError("wikipedia gave an answer I could not read") from err
+
+
+def _plain(html):
+    return " ".join(html_module.unescape(re.sub(r"<[^>]*>", " ", html or "")).split())[:60]
+
+
+def _free_file(get, filename):
+    """(licence, author) of a Commons file when it is freely licensed, else None; a file Commons lacks is non-free."""
+    data = _json(get, COMMONS_API, {
+        "action": "query", "format": "json", "titles": f"File:{filename}", "prop": "imageinfo",
+        "iiprop": "extmetadata", "iiextmetadatafilter": "LicenseShortName|Artist|NonFree",
+    })
+    for page in (data.get("query", {}).get("pages") or {}).values():
+        meta = ((page.get("imageinfo") or [{}])[0]).get("extmetadata") or {}
+        licence = (meta.get("LicenseShortName") or {}).get("value", "")
+        nonfree = str((meta.get("NonFree") or {}).get("value", "")).lower() in ("true", "1", "yes")
+        if licence and not nonfree and FREE_LICENCE.match(licence):
+            return licence[:40], _plain((meta.get("Artist") or {}).get("value")) or "unknown"
+    return None
+
+
+def wikipedia_candidate(get, subject):
+    """The lead image of the best Wikipedia article for `subject` as a candidate dict, if its file is freely licensed; else None."""
+    data = _json(get, WIKI_API, {
+        "action": "query", "format": "json", "generator": "search", "gsrsearch": clean_subject(subject), "gsrlimit": WIKI_PAGES,
+        "prop": "pageimages|info", "piprop": "thumbnail", "pithumbsize": 800, "inprop": "url",
+    })
+    pages = sorted((data.get("query", {}).get("pages") or {}).values(), key=lambda page: page.get("index", 99))
+    for page in pages:
+        thumbnail, filename = (page.get("thumbnail") or {}).get("source"), page.get("pageimage")
+        if not thumbnail or not filename:
+            continue
+        free = _free_file(get, filename)
+        if free:
+            return {"url": thumbnail, "title": page.get("title", "untitled")[:80], "creator": free[1], "license": free[0], "landing": page.get("fullurl", "")}
+    return None
+
+
+def find_pictures(get, subject, openverse_get=None):
+    """Candidates for `subject`: the free Wikipedia lead image, else Openverse; `get` has no credentials, `openverse_get` may, and its token never reaches Wikipedia."""
+    try:
+        wiki = wikipedia_candidate(get, subject)
+    except SourceError:
+        wiki = None
+    if wiki:
+        return [{**wiki, "source": "wikipedia"}]
+    return [{**c, "source": "openverse"} for c in search(openverse_get or get, subject)]

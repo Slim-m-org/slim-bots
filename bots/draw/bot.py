@@ -2,21 +2,24 @@
 """bot-draw: `!draw <prompt>` has a model draw on the canvas of the call you are in; `!draw trace <query>` traces a picture; see README.md."""
 
 import asyncio
+import contextlib
 import functools
 import time
 
 import ai
 import halftone
 import plan
+import runlog
 import screenshot
 import sources
+import store_db
 import tracer
 import where
 from slimbots import ApiError, Bot, Permissions
 from slimbots.http import is_rate_limited
+from store_db import SLOTS, add_stroke, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
 REMOVE_BATCH = 64  # the server's most object ids in one remove op
-SLOTS = 6
 PER_ROW = 3
 STROKE_WIDTH = 3.0
 MAX_QUERY = 60
@@ -28,24 +31,7 @@ RATE_RETRIES = 4
 RATE_BACKOFF = 1.5
 
 
-def init_db(conn):
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS drawings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, query TEXT NOT NULL, slot INTEGER NOT NULL,
-            created_at INTEGER NOT NULL, live INTEGER NOT NULL DEFAULT 1
-        );
-        CREATE TABLE IF NOT EXISTS strokes (drawing_id INTEGER NOT NULL, object_id TEXT NOT NULL);
-        CREATE INDEX IF NOT EXISTS strokes_by_drawing ON strokes (drawing_id);
-        CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL);
-        """
-    )
-    if "channel_id" not in {row[1] for row in conn.execute("PRAGMA table_info(drawings)")}:
-        conn.execute("ALTER TABLE drawings ADD COLUMN channel_id TEXT NOT NULL DEFAULT ''")
-    conn.commit()
-
-
-bot = Bot(prefix="!", default_data_path="draw.db", store_migrate=init_db, listen_voice_chats=True)
+bot = Bot(prefix="!", default_data_path="draw.db", store_migrate=store_db.init_db, listen_voice_chats=True)
 
 ORIGIN_X = bot.setting("DRAW_X", 900.0, type=float)
 ORIGIN_Y = bot.setting("DRAW_Y", 600.0, type=float)
@@ -56,6 +42,8 @@ OPENVERSE_TOKEN = bot.setting("OPENVERSE_TOKEN")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
 DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 600, type=int), 50), 2000)
+AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
+AI_REQUEST_TIMEOUT = max(bot.setting("DRAW_AI_REQUEST_TIMEOUT", 90, type=int), 10)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
 AI_DAILY_CAP = bot.setting("DRAW_AI_DAILY_CAP", 100, type=int)
 AI_MAX_TOKENS = min(max(bot.setting("DRAW_AI_MAX_TOKENS", 16000, type=int), 1536), 32000)
@@ -65,62 +53,13 @@ GRID = 96
 get = sources.http_get
 planner = ai.make_planner(
     api_key=bot.setting("ANTHROPIC_API_KEY"), model=bot.setting("DRAW_MODEL", "claude-sonnet-4-6"), max_tokens=AI_MAX_TOKENS,
-    local_url=bot.setting("DRAW_LLM_URL"), thinking_budget=AI_THINKING_BUDGET, local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
+    local_url=bot.setting("DRAW_LLM_URL"), thinking_budget=AI_THINKING_BUDGET, request_timeout=AI_REQUEST_TIMEOUT, local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
 )
 COOLDOWN_SECONDS = 60
 # user id -> monotonic time of that member's last drawing, so one person cannot keep the pen busy.
 last_draw = {}
 # Channels with a drawing in progress: one at a time per canvas.
 busy = set()
-
-
-def new_drawing(conn, user_id, query, channel_id, traced):
-    """(drawing id, slot) or None when a traced drawing finds the channel's grid full; a model drawing takes no slot."""
-    slot = -1
-    if traced:
-        taken = {r[0] for r in conn.execute("SELECT slot FROM drawings WHERE live = 1 AND channel_id = ?", (channel_id,))}
-        slot = next((s for s in range(SLOTS) if s not in taken), None)
-        if slot is None:
-            return None
-    cur = conn.execute(
-        "INSERT INTO drawings (user_id, query, slot, created_at, channel_id) VALUES (?, ?, ?, ?, ?)", (user_id, query, slot, int(time.time()), channel_id)
-    )
-    conn.commit()
-    return cur.lastrowid, slot
-
-
-def add_stroke(conn, drawing_id, object_id):
-    conn.execute("INSERT INTO strokes (drawing_id, object_id) VALUES (?, ?)", (drawing_id, object_id))
-    conn.commit()
-
-
-def latest_live(conn, user_id, channel_id):
-    return conn.execute(
-        "SELECT id, query, channel_id FROM drawings WHERE live = 1 AND user_id = ? AND channel_id = ? ORDER BY id DESC LIMIT 1", (user_id, channel_id)
-    ).fetchone()
-
-
-def live_drawings(conn, channel_id):
-    return [r[0] for r in conn.execute("SELECT id FROM drawings WHERE live = 1 AND channel_id = ? ORDER BY id", (channel_id,))]
-
-
-def stroke_ids(conn, drawing_id):
-    return [r[0] for r in conn.execute("SELECT object_id FROM strokes WHERE drawing_id = ? ORDER BY rowid", (drawing_id,))]
-
-
-def retire(conn, drawing_id):
-    conn.execute("UPDATE drawings SET live = 0 WHERE id = ?", (drawing_id,))
-    conn.commit()
-
-
-def take_ai_call(conn, day, cap):
-    """Counts one model call against today's cap; False when the cap is spent."""
-    used = conn.execute("SELECT calls FROM ai_usage WHERE day = ?", (day,)).fetchone()
-    if used is not None and used[0] >= cap:
-        return False
-    conn.execute("INSERT INTO ai_usage (day, calls) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET calls = calls + 1", (day,))
-    conn.commit()
-    return True
 
 
 def corner(slot):
@@ -202,27 +141,44 @@ async def fetch_tile(attachment_id):
         return None
 
 
-async def guarded(ctx, cooldown, run):
-    """Resolves the invoker's call, applies the cooldown and the one-at-a-time rule, then runs `run(channel_id, name)`."""
-    found = await where.resolve(ctx)
-    if isinstance(found, str):
-        await ctx.reply_ephemeral(found, public_fallback=True)
-        return
-    channel_id, name = found
-    if channel_id in busy:
-        await ctx.reply_ephemeral("I am still drawing in your call; try again in a moment.", public_fallback=True)
-        return
-    wait = cooldown - (time.monotonic() - last_draw.get(ctx.author.id, -cooldown))
-    if wait > 0:
-        await ctx.reply_ephemeral(f"you can draw again in {int(wait) + 1}s.", public_fallback=True)
-        return
-    last_draw[ctx.author.id] = time.monotonic()
-    busy.add(channel_id)
+async def refuse(ctx, log, outcome, text):
+    """A pure error: logged with its outcome and shown only to the invoker."""
+    log.done(outcome)
+    await ctx.reply_ephemeral(text, public_fallback=True)
+
+
+async def guarded(ctx, cooldown, run, *, command, prompt, ack):
+    """Resolves the invoker's call, applies the cooldown and one-at-a-time rule, acks publicly, runs `run(channel_id, name, log)`; every path logs one line."""
+    log = runlog.RunLog(command, ctx.channel_id, prompt)
+    owned = None
     try:
+        found = await where.resolve(ctx)
+        if isinstance(found, str):
+            await refuse(ctx, log, "no call" if "join a voice channel" in found else "refused: missing rights", found)
+            return
+        channel_id, name = found
+        log.channel_id = channel_id
+        if channel_id in busy:
+            await refuse(ctx, log, "busy", "I am still drawing in your call; try again in a moment.")
+            return
+        wait = cooldown - (time.monotonic() - last_draw.get(ctx.author.id, -cooldown))
+        if wait > 0:
+            await refuse(ctx, log, "cooldown", f"you can draw again in {int(wait) + 1}s.")
+            return
+        last_draw[ctx.author.id] = time.monotonic()
+        busy.add(channel_id)
+        owned = channel_id
+        await ctx.reply(ack)
         async with ctx.typing():
-            await run(channel_id, name)
+            await run(channel_id, name, log)
+        log.done("finished")
+    except Exception as err:  # a handler's own exception is swallowed by the framework, so it is logged here
+        log.failed(err)
+        with contextlib.suppress(Exception):
+            await ctx.reply_ephemeral(f"something went wrong drawing that ({type(err).__name__}); it is in the bot's log.", public_fallback=True)
     finally:
-        busy.discard(channel_id)
+        if owned is not None:
+            busy.discard(owned)
 
 
 @bot.group(name="draw", help="`<prompt>` draws it in your call, `trace <word>` traces a picture, `undo` removes your latest, `clear` removes them all")
@@ -237,7 +193,10 @@ async def draw(ctx, query: str = ""):
     if len(query) > MAX_PROMPT:
         await ctx.reply_ephemeral(f"keep it under {MAX_PROMPT} characters.", public_fallback=True)
         return
-    await guarded(ctx, AI_COOLDOWN, lambda channel_id, name: _ai_draw(ctx, query, channel_id, name))
+    await guarded(
+        ctx, AI_COOLDOWN, lambda channel_id, name, log: _ai_draw(ctx, query, channel_id, name, log),
+        command="draw", prompt=query, ack=f"drawing {defuse(query)}, this takes a minute or two.",
+    )
 
 
 def make_review(free):
@@ -263,59 +222,79 @@ def make_review(free):
     return review
 
 
-async def find_reference(prompt):
-    """(picture for the model, candidate) of the best openly licensed match for the subject, or None; never raises."""
-    try:
-        found = await asyncio.to_thread(sources.search, functools.partial(get, token=OPENVERSE_TOKEN), prompt[:100])
-        for candidate in found[:ATTEMPTS]:
-            try:
+async def search_pictures(subject, log):
+    """Candidates from Wikipedia first, Openverse only when Wikipedia has nothing; the Openverse token never goes to Wikipedia."""
+    with log.stage("search"):
+        return await asyncio.to_thread(sources.find_pictures, get, subject, functools.partial(get, token=OPENVERSE_TOKEN))
+
+
+async def first_picture(candidates, log, convert=None):
+    """(bytes, candidate) for the first candidate that downloads (and converts); None when none do."""
+    for candidate in candidates[:ATTEMPTS]:
+        try:
+            with log.stage("download"):
                 data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
-                return await asyncio.to_thread(sources.reference_image, data), candidate
-            except sources.SourceError:
-                continue
-    except sources.SourceError:
-        pass
+                if convert:
+                    data = await asyncio.to_thread(convert, data)
+        except sources.SourceError:
+            continue
+        log.source = candidate.get("source", "openverse")
+        return data, candidate
     return None
 
 
-async def _ai_draw(ctx, prompt, channel_id, name):
+async def find_reference(prompt, log):
+    """(reference for the model, candidate) of the best freely licensed picture of the subject, or None; never raises."""
+    try:
+        found = await search_pictures(prompt[:100], log)
+        return await first_picture(found, log, sources.reference_image)
+    except sources.SourceError:
+        return None
+
+
+async def _ai_draw(ctx, prompt, channel_id, name, log):
+    deadline = time.monotonic() + AI_TIME_CAP
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
     try:
-        objects = await screenshot.read_objects(canvas, window)
-        free = screenshot.largest_free(objects, window)
-        if free is None:
-            await ctx.reply_ephemeral(f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.", public_fallback=True)
-            return
-        png = await screenshot.render(objects, screenshot.View(window), free, fetch_tile)
+        with log.stage("canvas"):
+            objects = await screenshot.read_objects(canvas, window)
+            free = screenshot.largest_free(objects, window)
+            if free is None:
+                await refuse(ctx, log, "no free space", f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.")
+                return
+            png = await screenshot.render(objects, screenshot.View(window), free, fetch_tile)
     except screenshot.ScreenshotError as err:
-        await ctx.reply_ephemeral(f"{err}.", public_fallback=True)
+        await refuse(ctx, log, "refused: no pillow", f"{err}.")
         return
     if not await bot.store.run(take_ai_call, time.strftime("%Y-%m-%d", time.gmtime()), AI_DAILY_CAP):
-        await ctx.reply_ephemeral("I have used up today's drawing budget; try again tomorrow.", public_fallback=True)
+        await refuse(ctx, log, "daily cap", "I have used up today's drawing budget; try again tomorrow.")
         return
-    found = await find_reference(prompt)
+    found = await find_reference(prompt, log)
     reference, source = found if found else (None, None)
     try:
-        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES, review=make_review(free), reference=reference)
+        with log.stage("model"):
+            calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES, review=make_review(free), reference=reference, deadline=deadline)
     except ai.Refused as err:
-        await ctx.reply_ephemeral(f"{err}; try describing something else.", public_fallback=True)
+        await refuse(ctx, log, f"refused: {err}", f"{err}; try describing something else.")
         return
     except ai.PlannerError as err:
-        await ctx.reply_ephemeral(f"I could not get a drawing: {err}.", public_fallback=True)
+        await refuse(ctx, log, f"model error: {err}", f"I could not get a drawing: {err}.")
         return
     drawn, problems = plan.validate_plan(calls, free, MAX_STROKES)
     if not drawn:
-        await ctx.reply_ephemeral("the model's plan had nothing I could place" + (f" ({problems[0]})" if problems else "") + "; try again.", public_fallback=True)
+        await refuse(ctx, log, "nothing placeable", "the model's plan had nothing I could place" + (f" ({problems[0]})" if problems else "") + "; try again.")
         return
     drawing_id, _ = await bot.store.run(new_drawing, ctx.author.id, prompt, channel_id, False)
     try:
-        done = await place_all(canvas, drawing_id, drawn)
+        with log.stage("place"):
+            done = await place_all(canvas, drawing_id, drawn)
     except ApiError as err:
-        await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
+        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     skipped = f" ({len(problems)} parts of the plan were skipped)" if problems else ""
     credited = f" Reference: \"{defuse(source['title'])}\" by {defuse(source['creator'])} ({source['license']}) {source['landing']}".rstrip() if source else ""
+    log.done(f"drew {done}")
     await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} object{'' if done == 1 else 's'}{skipped}.{credited}")
 
 
@@ -323,81 +302,90 @@ async def _trace_request(ctx, query):
     if len(query) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
-    await guarded(ctx, COOLDOWN_SECONDS, lambda channel_id, name: _trace(ctx, query, channel_id))
+    await guarded(
+        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _trace(ctx, query, channel_id, log),
+        command="trace", prompt=query, ack=f"tracing {defuse(query)}, one moment.",
+    )
 
 
-async def _trace(ctx, query, channel_id):
+async def _trace(ctx, query, channel_id, log):
     try:
-        outcome = await find_drawable(query)
+        with log.stage("search"):
+            outcome = await find_drawable(query)
     except sources.SourceError as err:
-        await ctx.reply_ephemeral(f"{err}.", public_fallback=True)
+        await refuse(ctx, log, f"no source: {err}", f"{err}.")
         return
     if isinstance(outcome, str):
-        await ctx.reply_ephemeral(outcome, public_fallback=True)
+        await refuse(ctx, log, "no source", outcome)
         return
     candidate, pieces, width, height = outcome
+    log.source = "openverse"
     started = await bot.store.run(new_drawing, ctx.author.id, query, channel_id, True)
     if started is None:
-        await ctx.reply_ephemeral(f"the drawing area holds {SLOTS} drawings; `{bot.prefix}draw undo` or `clear` makes room.", public_fallback=True)
+        await refuse(ctx, log, "grid full", f"the drawing area holds {SLOTS} drawings; `{bot.prefix}draw undo` or `clear` makes room.")
         return
     drawing_id, slot = started
     try:
-        done = await place_all(bot.canvas(channel_id), drawing_id, pieces_to_objects(slot, pieces, width, height))
+        with log.stage("place"):
+            done = await place_all(bot.canvas(channel_id), drawing_id, pieces_to_objects(slot, pieces, width, height))
     except ApiError as err:
-        await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
+        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
+    log.done(f"drew {done}")
     await ctx.reply(credit(candidate, defuse(query), done))
 
 
-async def dots_source(ctx, subject):
-    """(picture bytes, candidate or None) from an image attached to the command, else the best Openverse match; a sentence when neither works."""
+async def dots_source(ctx, subject, log):
+    """(picture bytes, candidate or None) from an image attached to the command, else the best freely licensed picture of the subject; a sentence when neither works."""
     for attached in ctx.message.get("attachments") or []:
         if str(attached.get("content_type") or "").startswith("image/"):
             try:
-                return await bot.client.download(f"/attachments/{attached['id']}", max_bytes=sources.MAX_PICTURE_BYTES), None
+                with log.stage("download"):
+                    data = await bot.client.download(f"/attachments/{attached['id']}", max_bytes=sources.MAX_PICTURE_BYTES)
             except ApiError:
                 return "I could not read the image you attached."
+            log.source = "attachment"
+            return data, None
     if not subject:
         return f"attach an image or say what to draw: `{bot.prefix}draw dots <subject>`."
     try:
-        found = await asyncio.to_thread(sources.search, functools.partial(get, token=OPENVERSE_TOKEN), subject)
-        for candidate in found[:ATTEMPTS]:
-            try:
-                return await asyncio.to_thread(sources.fetch_picture, get, candidate["url"]), candidate
-            except sources.SourceError:
-                continue
+        found = await first_picture(await search_pictures(subject, log), log)
     except sources.SourceError as err:
         return f"{err}."
-    return "no openly licensed picture matched that; try a simpler word."
+    return found if found else "no freely licensed picture matched that; try a simpler word."
 
 
-async def _dots(ctx, subject, channel_id, name):
+async def _dots(ctx, subject, channel_id, name, log):
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
     try:
-        free = screenshot.largest_free(await screenshot.read_objects(canvas, window), window)
+        with log.stage("canvas"):
+            free = screenshot.largest_free(await screenshot.read_objects(canvas, window), window)
         if free is None:
-            await ctx.reply_ephemeral(f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.", public_fallback=True)
+            await refuse(ctx, log, "no free space", f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.")
             return
-        source = await dots_source(ctx, subject)
+        source = await dots_source(ctx, subject, log)
         if isinstance(source, str):
-            await ctx.reply_ephemeral(source, public_fallback=True)
+            await refuse(ctx, log, "no source", source)
             return
         data, candidate = source
-        dots = await asyncio.to_thread(halftone.halftone, data, free, DOTS_MAX)
+        with log.stage("halftone"):
+            dots = await asyncio.to_thread(halftone.halftone, data, free, DOTS_MAX)
     except (screenshot.ScreenshotError, sources.SourceError) as err:
-        await ctx.reply_ephemeral(f"{err}.", public_fallback=True)
+        await refuse(ctx, log, f"refused: {err}", f"{err}.")
         return
     if not dots:
-        await ctx.reply_ephemeral("that picture is too light to make dots from.", public_fallback=True)
+        await refuse(ctx, log, "blank picture", "that picture is too light to make dots from.")
         return
     drawing_id, _ = await bot.store.run(new_drawing, ctx.author.id, subject or "an attached image", channel_id, False)
     try:
-        done = await place_all(canvas, drawing_id, dots)
+        with log.stage("place"):
+            done = await place_all(canvas, drawing_id, dots)
     except ApiError as err:
-        await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
+        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     credit_text = f" from \"{defuse(candidate['title'])}\" by {defuse(candidate['creator'])} ({candidate['license']}) {candidate['landing']}".rstrip() if candidate else ""
+    log.done(f"drew {done}")
     await ctx.reply(f"drew a dot portrait on the canvas in {name} with {done} dots{credit_text}")
 
 
@@ -407,7 +395,10 @@ async def draw_dots(ctx, subject: str = ""):
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
-    await guarded(ctx, COOLDOWN_SECONDS, lambda channel_id, name: _dots(ctx, subject, channel_id, name))
+    await guarded(
+        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _dots(ctx, subject, channel_id, name, log),
+        command="dots", prompt=subject or "attachment", ack=f"making a dot portrait of {defuse(subject) or 'your image'}, this takes a couple of minutes.",
+    )
 
 
 @draw.command(name="trace", help="Trace an openly licensed picture of a word")

@@ -1,7 +1,9 @@
 """The model side of `!draw <prompt>`: a short tool-use conversation that returns drawing calls; the API key is read here and never logged."""
 
+import asyncio
 import base64
 import json
+import time
 
 from plan import TOOLS
 
@@ -72,8 +74,8 @@ def request_text(prompt, free):
 class AnthropicPlanner:
     label = "Anthropic"
 
-    def __init__(self, api_key, model, max_tokens, client=None, thinking_budget=2048):
-        self._key, self.model, self.max_tokens, self._client = api_key, model, max_tokens, client
+    def __init__(self, api_key, model, max_tokens, client=None, thinking_budget=2048, request_timeout=90):
+        self._key, self.model, self.max_tokens, self._client, self.request_timeout = api_key, model, max_tokens, client, request_timeout
         room = max_tokens - OUTPUT_FLOOR  # thinking counts against max_tokens, so leave room to draw
         self.thinking_budget = min(thinking_budget, room) if thinking_budget >= THINKING_FLOOR and room >= THINKING_FLOOR else 0
 
@@ -83,7 +85,7 @@ class AnthropicPlanner:
                 import anthropic
             except ImportError as err:
                 raise PlannerError("the anthropic package is not installed") from err
-            self._client = anthropic.AsyncAnthropic(api_key=self._key)
+            self._client = anthropic.AsyncAnthropic(api_key=self._key, timeout=self.request_timeout, max_retries=1)
         return self._client
 
     def _options(self, first):
@@ -102,12 +104,29 @@ class AnthropicPlanner:
         except Exception as err:
             raise PlannerError(f"the model service failed ({type(err).__name__})") from None
 
-    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None):
-        """The model's tool calls over up to MAX_ROUNDS rounds; `review(calls)` returns a verdict per call and the picture so far."""
+    async def _bounded(self, messages, first, deadline, have_calls):
+        """One round, cut off at `deadline`; None when time ran out after some drawing, `PlannerError` when before any."""
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            if have_calls:
+                return None
+            raise PlannerError("the time limit passed before the model drew anything")
+        try:
+            async with asyncio.timeout(remaining):
+                return await self._create(messages, first)
+        except TimeoutError:
+            if have_calls:
+                return None
+            raise PlannerError("the model took too long") from None
+
+    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None, deadline=None):
+        """The model's tool calls over up to MAX_ROUNDS rounds, stopping at `deadline` (monotonic) with what it has; `review(calls)` returns a verdict per call and the picture so far."""
         content = [_image_block(png), {"type": "text", "text": request_text(prompt, free)}, *_reference_blocks(reference)]
         messages, calls = [{"role": "user", "content": content}], []
         for round_ in range(MAX_ROUNDS):
-            message = await self._create(messages, first=round_ == 0)
+            message = await self._bounded(messages, round_ == 0, deadline, bool(calls))
+            if message is None:
+                break
             if getattr(message, "stop_reason", None) == "refusal":
                 if calls:
                     break
@@ -150,7 +169,7 @@ class OpenAICompatPlanner:
             response.raise_for_status()
             return response.json()
 
-    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None):
+    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None, deadline=None):
         data_uri = "data:image/png;base64," + base64.b64encode(png).decode()
         body = {
             "model": self.model, "max_tokens": self.max_tokens, "tool_choice": "required",
@@ -171,10 +190,10 @@ class OpenAICompatPlanner:
         return calls[:max_calls]
 
 
-def make_planner(*, api_key, model, max_tokens, local_url, local_model, local_key, thinking_budget=2048):
+def make_planner(*, api_key, model, max_tokens, local_url, local_model, local_key, thinking_budget=2048, request_timeout=90):
     """The local endpoint when one is configured, else Anthropic when a key is, else None (the tracer answers)."""
     if local_url:
         return OpenAICompatPlanner(local_url, local_model or "llava", max_tokens, local_key)
     if api_key:
-        return AnthropicPlanner(api_key, model, max_tokens, thinking_budget=thinking_budget)
+        return AnthropicPlanner(api_key, model, max_tokens, thinking_budget=thinking_budget, request_timeout=request_timeout)
     return None

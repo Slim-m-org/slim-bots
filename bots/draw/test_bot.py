@@ -56,7 +56,7 @@ class Rig:
         self.client.respond("GET", "/users/u-ann", {**ANN, "role_ids": []})
         self.client.respond("GET", "/users/u-bob", {**BOB, "role_ids": []})
         wire_bot(draw.bot, self.client, db_name="draw.db")
-        asyncio.run(draw.bot.open_store(migrate=draw.init_db))
+        asyncio.run(draw.bot.open_store(migrate=draw.store_db.init_db))
         draw.planner, draw.busy = None, set()
         draw.bot.me_id = "bot-1"
         self.client.respond("GET", "/members/bot-1/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
@@ -70,6 +70,7 @@ class Rig:
             return [CANDIDATE] if results is None else results
 
         sources.search = search
+        sources.wikipedia_candidate = lambda get, subject: None
         sources.fetch_picture = lambda get, url: b"bytes"
         sources.decode_gray = lambda data, size: (self.grid, len(self.grid[0]), len(self.grid))
 
