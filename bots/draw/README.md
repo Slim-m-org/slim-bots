@@ -95,7 +95,7 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
 | `DRAW_DOTS_MAX` | `1500` | the most dots one `!draw dots` portrait may use, 50 to 3000 |
-| `DRAW_PHOTO_MAX` | `600` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
+| `DRAW_PHOTO_MAX` | `300` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
 | `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
 | `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
@@ -113,10 +113,13 @@ The log line carries `crop="model x,y,w,h"` or `crop="heuristic x,y,w,h"`.
 
 ## Line drawings from a photo
 
-`!draw photo` needs no model.
-It blurs the picture lightly at about 900 pixels (a trace takes well under a second), finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments, isolated tiny ones and long straight lines that run along the crop's border (frame and curtain edges), and keeps the longest and strongest lines (leaning only slightly towards the centre, since the crop has already focused the subject) up to `DRAW_PHOTO_MAX` strokes.
-A line is split into pieces of at most 150 points that share a joint, each is a stroke in the one ink colour at width 2, and the drawing is scaled into the largest free area of your call's canvas with the photo's aspect ratio.
-A clean, close portrait or a landmark photo works best; a busy wide shot traces its background too.
+`!draw photo` needs no model, and it favours a few clean contours over many rough ones.
+It analyses the picture at about 560 pixels with a fairly strong blur, so structure shows and texture (hair strands, skin, fabric) does not, and finds edges with a Sobel filter judged against each neighbourhood's own strength.
+Edges are kept by hysteresis, so only weak pixels touching a strong edge survive; inside the ellipse where a portrait's face sits the thresholds are lower, so eyes, nose and lips come through.
+Edges are thinned, linked into long lines, smoothed with a moving average, simplified (Douglas-Peucker) and rounded (one Chaikin pass).
+A line must pass a quality bar: at least 4 percent of the image diagonal long (2 percent on the face), not jagged (a short line that doubles back on itself is dropped), not along the crop's border, not a long straight near-vertical or near-horizontal line outside the middle 60 percent (curtain, flag and frame edges), and on the subject ellipse.
+Lines are ranked by length times strength times a soft subject weight, so long clean contours win, up to `DRAW_PHOTO_MAX` strokes (default 300); a larger budget is only filled with lines that pass the same bar.
+A line is split into pieces of at most 150 points sharing a joint, each a stroke in the one ink colour at width 2, scaled into the largest free area of your call's canvas with the photo's aspect ratio.
 
 ## Dot portraits
 

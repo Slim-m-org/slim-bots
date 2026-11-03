@@ -1,28 +1,28 @@
-"""A line drawing traced from a photograph: edges, linked into polylines, simplified and ranked; Pillow only."""
+"""A line drawing traced from a photograph: strong connected edges, linked, smoothed, filtered and ranked; Pillow only."""
 
 import io
 import math
 
+import photo_quality as quality
+from photo_quality import drop_isolated, hugs_border  # noqa: F401  (re-exported for callers and tests)
 from plan import Planned
 from sources import SourceError
 
-WORK_SIDE = 900  # pixels on the long side the photo is analysed at
-KEEP_FRACTION = 0.26  # share of pixels that may be edges before thinning
-MIN_STRENGTH = 14
-LOCAL_RADIUS = 22  # blur radius of the neighbourhood an edge is judged against
+WORK_SIDE = 560  # pixels on the long side the photo is analysed at: enough for structure, too little for texture
+BLUR = 1.5
+HIGH_PERCENT = 0.85  # an edge pixel is strong when its gradient is above this share of the picture's
+LOW_RATIO = 0.3  # weaker edge pixels survive only when they touch a strong one, at this fraction of the strong cut-off
+LOCAL_RADIUS = 20  # blur radius of the neighbourhood an edge is judged against
 LOCAL_GAIN = 1.1  # an edge must beat its neighbourhood's average strength by this factor
-MIN_LENGTH = 14  # pixels; shorter fragments are noise
-SIMPLIFY = 1.0  # Douglas-Peucker tolerance in pixels
-SMOOTH = 3  # moving-average half window over a traced path
+MIN_STRENGTH = 14
+SIMPLIFY = 1.3  # Douglas-Peucker tolerance in pixels
+SMOOTH = 4  # moving-average half window over a traced path, before simplifying
 CHUNK_POINTS = 150
 CENTRE_WEIGHT = 0.15
-BORDER_BAND = 0.05  # of a side: a straight line this close to the edge is the crop's border, not the subject
-BORDER_LENGTH = 0.2  # of that side
-STRAIGHT = 3.0  # pixels of bend a line may have and still count as straight
-ISOLATED_LENGTH = 40  # pixels: a fragment shorter than this with no neighbour is noise
-NEIGHBOUR_REACH = 14  # pixels
 STROKE_WIDTH = 2.0
 INK = "annotation"
+FACE_SENSITIVITY = 0.55  # inside the face ellipse an edge needs only this share of the usual strength: eyes, nose and lips are faint
+FACE_MIN_FRACTION = 0.02  # of the diagonal: the shortest line worth keeping there
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1))
 
 
@@ -36,7 +36,7 @@ def _gray(data):
             picture.draft("L", (WORK_SIDE * 2, WORK_SIDE * 2))
             gray = ImageOps.autocontrast(picture.convert("L"), cutoff=1)
             gray.thumbnail((WORK_SIDE, WORK_SIDE))
-            return gray.filter(ImageFilter.GaussianBlur(0.9))
+            return gray.filter(ImageFilter.GaussianBlur(BLUR))
     except Exception as err:
         raise SourceError("the picture could not be read") from err
 
@@ -47,13 +47,11 @@ def _gradients(gray):
 
     sobel_x = ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=4, offset=128)
     sobel_y = ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=4, offset=128)
-    gx = [v - 128 for v in gray.filter(sobel_x).getdata()]
-    gy = [v - 128 for v in gray.filter(sobel_y).getdata()]
-    return gx, gy
+    return [v - 128 for v in gray.filter(sobel_x).getdata()], [v - 128 for v in gray.filter(sobel_y).getdata()]
 
 
 def _local_mean(strength, width, height):
-    """Each pixel's neighbourhood average of `strength`, so a faint edge in a quiet area still counts."""
+    """Each pixel's neighbourhood average of `strength`, so texture (busy everywhere) does not count as an edge."""
     from PIL import Image, ImageFilter
 
     clipped = Image.new("L", (width, height))
@@ -62,22 +60,38 @@ def _local_mean(strength, width, height):
 
 
 def thin_edges(gx, gy, width, height):
-    """{(x, y): strength} of edge pixels one pixel thick: gradients well above their neighbourhood that are maxima across the edge."""
+    """({(x, y): strength}, strong cut-off): edge pixels one pixel thick, kept by hysteresis so every survivor is connected to a strong one."""
     strength = [abs(a) + abs(b) for a, b in zip(gx, gy)]
     around = _local_mean(strength, width, height)
-    ordered = sorted(strength)
-    floor = max(ordered[int(len(ordered) * (1 - KEEP_FRACTION))] * 0.3, MIN_STRENGTH)
-    edges = {}
+    high = max(sorted(strength)[int(len(strength) * HIGH_PERCENT)], MIN_STRENGTH)
+    low = high * LOW_RATIO
+    weak = {}
     for y in range(1, height - 1):
         for x in range(1, width - 1):
             index = y * width + x
             here = strength[index]
-            if here < floor or here < around[index] * LOCAL_GAIN:
+            ease = FACE_SENSITIVITY if quality.on_face((x, y), width, height) else 1.0
+            if here < low * ease or here < around[index] * LOCAL_GAIN * ease:
                 continue
             step = 1 if abs(gx[index]) >= abs(gy[index]) else width
             if here >= strength[index - step] and here > strength[index + step]:
-                edges[(x, y)] = here
-    return edges
+                weak[(x, y)] = here
+    return _hysteresis(weak, high, width, height), high
+
+
+def _hysteresis(weak, high, width, height):
+    """The weak edge pixels connected (8 ways) to at least one pixel at or above `high`."""
+    kept = {p for p, v in weak.items() if v >= high}
+    kept |= {p for p, v in weak.items() if v >= high * FACE_SENSITIVITY and quality.on_face(p, width, height)}
+    stack = list(kept)
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in NEIGHBOURS:
+            q = (x + dx, y + dy)
+            if q in weak and q not in kept:
+                kept.add(q)
+                stack.append(q)
+    return {p: weak[p] for p in kept}
 
 
 def _degree(point, free):
@@ -120,13 +134,6 @@ def _smooth(path):
     return out + [path[-1]]
 
 
-def _distance(point, start, end):
-    dx, dy = end[0] - start[0], end[1] - start[1]
-    if dx == dy == 0:
-        return math.dist(point, start)
-    return abs(dy * point[0] - dx * point[1] + end[0] * start[1] - end[1] * start[0]) / math.hypot(dx, dy)
-
-
 def simplify(path, tolerance=SIMPLIFY):
     """Douglas-Peucker, iterative so a long path cannot overflow the stack."""
     keep = {0, len(path) - 1}
@@ -135,7 +142,7 @@ def simplify(path, tolerance=SIMPLIFY):
         first, last = todo.pop()
         far, at = 0.0, None
         for i in range(first + 1, last):
-            d = _distance(path[i], path[first], path[last])
+            d = quality.distance(path[i], path[first], path[last])
             if d > far:
                 far, at = d, i
         if at is not None and far > tolerance:
@@ -144,90 +151,43 @@ def simplify(path, tolerance=SIMPLIFY):
     return [path[i] for i in sorted(keep)]
 
 
-def _length(path):
-    return sum(math.dist(a, b) for a, b in zip(path, path[1:]))
+def _worth_drawing(path, line, width, height):
+    """The quality bar every line must pass: long enough, not jagged, not a border, curtain or frame, and on the subject."""
+    diagonal = math.hypot(width, height)
+    return (
+        len(line) >= 2
+        and quality.length(line) >= (FACE_MIN_FRACTION if quality.on_face(line[len(line) // 2], width, height) else quality.MIN_FRACTION) * diagonal
+        and not quality.wiggly(path, diagonal)
+        and not hugs_border(line, width, height)
+        and not quality.background_straight(line, width, height)
+        and quality.subject_distance(line, width, height) <= quality.SUBJECT_REACH
+    )
 
 
 def strokes(data, cap):
-    """(polylines in photo pixels, width, height): the most salient edge lines, longest and strongest first, at most `cap` after splitting."""
+    """(polylines in photo pixels, width, height): the longest, strongest lines on the subject, at most `cap` after splitting."""
     gray = _gray(data)
     width, height = gray.size
     gx, gy = _gradients(gray)
-    edges = thin_edges(gx, gy, width, height)
+    edges, _ = thin_edges(gx, gy, width, height)
     traced = []
     for path in link(edges):
-        if len(path) < MIN_LENGTH:
-            continue
-        line = simplify(_smooth(path))
-        if len(line) >= 2 and _length(line) >= MIN_LENGTH and not hugs_border(line, width, height):
-            traced.append((line, sum(edges.get(p, 0) for p in path) / len(path)))
+        smooth = _smooth(path)
+        line = simplify(smooth)
+        if _worth_drawing(smooth, line, width, height):
+            traced.append((quality.chaikin(line), sum(edges.get(p, 0) for p in path) / len(path)))
     survivors = {id(line) for line in drop_isolated([line for line, _ in traced])}
-    ranked = [
-        (_length(line) * (0.5 + strength / 255) * _centre_bias(line, width, height), line) for line, strength in traced if id(line) in survivors
-    ]
-    ranked.sort(key=lambda item: -item[0])
+    ranked = sorted(
+        ((quality.length(line) * (0.5 + strength / 255) * quality.subject_weight(line, width, height), line) for line, strength in traced if id(line) in survivors),
+        key=lambda item: -item[0],
+    )
     chosen, used = [], 0
     for _, line in ranked:
         pieces = _split(line)
-        if used + len(pieces) > cap:
-            continue
-        chosen.extend(pieces)
-        used += len(pieces)
+        if used + len(pieces) <= cap:
+            chosen.extend(pieces)
+            used += len(pieces)
     return chosen, width, height
-
-
-def _centre_bias(line, width, height):
-    """1.0 for a line at the middle of the photo, a little less towards a corner; the crop already centres the subject."""
-    mx, my = sum(p[0] for p in line) / len(line), sum(p[1] for p in line) / len(line)
-    off = math.hypot((mx - width / 2) / (width / 2), (my - height / 2) / (height / 2)) / math.sqrt(2)
-    return 1.0 - CENTRE_WEIGHT * off
-
-
-def _straight(line):
-    return max((_distance(p, line[0], line[-1]) for p in line), default=0.0) <= STRAIGHT
-
-
-def hugs_border(line, width, height):
-    """True for a long, nearly straight line that runs along one edge of the picture (a frame or curtain edge cut by the crop)."""
-    if not _straight(line):
-        return False
-    xs, ys = [p[0] for p in line], [p[1] for p in line]
-    along_x = max(ys) - min(ys) < STRAIGHT and (max(ys) < height * BORDER_BAND or min(ys) > height * (1 - BORDER_BAND)) and max(xs) - min(xs) >= width * BORDER_LENGTH
-    along_y = max(xs) - min(xs) < STRAIGHT and (max(xs) < width * BORDER_BAND or min(xs) > width * (1 - BORDER_BAND)) and max(ys) - min(ys) >= height * BORDER_LENGTH
-    return along_x or along_y
-
-
-def _along(line):
-    """Points every few pixels along a polyline, so a fragment beside a long straight segment still finds it."""
-    step = NEIGHBOUR_REACH / 2
-    for a, b in zip(line, line[1:]):
-        for i in range(max(int(math.dist(a, b) // step), 1)):
-            t = i * step / max(math.dist(a, b), 1e-9)
-            yield a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
-    yield line[-1]
-
-
-def drop_isolated(lines):
-    """The lines without short fragments that have no other line within NEIGHBOUR_REACH pixels."""
-    cell = NEIGHBOUR_REACH
-    owners = {}
-    for index, line in enumerate(lines):
-        for x, y in _along(line):
-            owners.setdefault((int(x // cell), int(y // cell)), set()).add(index)
-    kept = []
-    for index, line in enumerate(lines):
-        if _length(line) >= ISOLATED_LENGTH:
-            kept.append(line)
-            continue
-        near = set()
-        for x, y in _along(line):
-            cx, cy = int(x // cell), int(y // cell)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    near |= owners.get((cx + dx, cy + dy), set())
-        if near - {index}:
-            kept.append(line)
-    return kept
 
 
 def _split(line):

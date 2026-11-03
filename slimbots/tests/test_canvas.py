@@ -124,3 +124,17 @@ async def test_a_missing_batch_route_is_batch_unavailable_and_other_errors_pass_
         await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1}])
     except ApiError as err:
         assert err.status == 429 and not isinstance(err, BatchUnavailable)
+
+
+async def test_place_many_returns_the_ids_the_server_answers_with_in_request_order():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/canvas/objects/batch", {"objects": [{"id": "srv-1", "seq": 1}, {"id": "srv-2", "seq": 2}]})
+    ids = await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1}, {"kind": "shape", "x": 1, "y": 1, "w": 1, "h": 1}])
+    assert ids == ["srv-1", "srv-2"]
+
+
+async def test_place_many_keeps_its_own_ids_when_the_answer_does_not_list_them():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/canvas/objects/batch", None)
+    ids = await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1, "id": "mine"}])
+    assert ids == ["mine"]

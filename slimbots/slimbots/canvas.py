@@ -33,7 +33,7 @@ class Canvas:
         return await self._client.call("POST", f"/channels/{self.channel_id}/canvas/objects", body)
 
     async def place_many(self, objects: Iterable[dict[str, Any]]) -> list[str]:
-        """Places up to MAX_BATCH objects (`{kind, x, y, w, h, props?, id?}`) in one request and returns their ids; `BatchUnavailable` on a 404 or 405."""
+        """Places up to MAX_BATCH objects (`{kind, x, y, w, h, props?, id?}`) in one request, returns the ids the server answers with; `BatchUnavailable` on 404/405."""
         from .http import ApiError
 
         bodies = [
@@ -45,11 +45,14 @@ class Canvas:
         if len(bodies) > MAX_BATCH:
             raise ValueError(f"place_many takes at most {MAX_BATCH} objects, got {len(bodies)}")
         try:
-            await self._client.call("POST", f"/channels/{self.channel_id}/canvas/objects/batch", {"objects": bodies})
+            response = await self._client.call("POST", f"/channels/{self.channel_id}/canvas/objects/batch", {"objects": bodies})
         except ApiError as err:
             if err.status in (404, 405):
                 raise BatchUnavailable(f"HTTP {err.status}") from err
             raise
+        placed = response.get("objects") if isinstance(response, dict) else None
+        if isinstance(placed, list) and len(placed) == len(bodies) and all(isinstance(o, dict) and "id" in o for o in placed):
+            return [o["id"] for o in placed]
         return [body["id"] for body in bodies]
 
     async def move(

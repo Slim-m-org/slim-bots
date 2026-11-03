@@ -4,6 +4,7 @@
 import asyncio
 import io
 import json
+import math
 import os
 import sys
 
@@ -119,15 +120,70 @@ def test_a_frame_along_the_picture_border_is_not_traced_but_the_subject_inside_i
     assert any(60 < sum(p[0] for p in line) / len(line) < width - 60 for line in lines)
 
 
-def test_photos_are_analysed_at_900_pixels_and_large_ones_trace_in_under_a_few_seconds():
+def test_structure_is_found_at_a_modest_size_and_a_large_photo_traces_in_well_under_a_second_or_two():
     import time
 
-    assert photo.WORK_SIDE == 900
-    big = shot(box_and_circle, (2400, 1800))
+    assert photo.WORK_SIDE == 560
+    def thick(image):
+        from PIL import ImageDraw
+
+        pen = ImageDraw.Draw(image)
+        pen.rectangle([300, 300, 1100, 1200], outline=(0, 0, 0), width=40)
+        pen.ellipse([1300, 500, 2100, 1300], outline=(0, 0, 0), width=40)
+
+    big = shot(thick, (2400, 1800))
     started = time.time()
-    lines, width, height = photo.strokes(big, 600)
-    assert max(width, height) == 900 and lines
-    assert time.time() - started < 5
+    lines, width, height = photo.strokes(big, 300)
+    assert max(width, height) == 560 and lines
+    assert time.time() - started < 3
+
+
+def test_jagged_short_fragments_are_dropped_but_a_smooth_arc_of_the_same_length_is_kept():
+    from photo_quality import wiggly
+
+    diagonal = 700
+    zigzag = [(i * 4, 12 * (i % 2)) for i in range(12)]
+    arc = [(40 * math.cos(t / 10), 40 * math.sin(t / 10)) for t in range(0, 16)]
+    assert wiggly(zigzag, diagonal) and not wiggly(arc, diagonal)
+    long_wander = [(i * 20, 30 * (i % 2)) for i in range(40)]
+    assert not wiggly(long_wander, diagonal)
+
+
+def test_long_straight_vertical_lines_outside_the_middle_are_background_but_inside_they_stay():
+    from photo_quality import background_straight
+
+    curtain = [(60, 20), (62, 150), (60, 300)]
+    assert background_straight(curtain, 560, 420)
+    assert not background_straight([(280, 20), (282, 150), (280, 300)], 560, 420)
+    assert not background_straight([(60, 20), (200, 150), (60, 300)], 560, 420)
+    assert not background_straight([(60, 20), (62, 40)], 560, 420)
+
+
+def test_the_subject_ellipse_ranks_central_lines_over_outer_ones_and_marks_far_ones_as_background():
+    from photo_quality import SUBJECT_REACH, subject_distance, subject_weight
+
+    centre, corner = [(270, 150), (290, 190)], [(5, 400), (20, 410)]
+    assert subject_weight(centre, 560, 420) == 1.0 and subject_weight(corner, 560, 420) < 0.5
+    assert subject_distance(corner, 560, 420) > SUBJECT_REACH
+
+
+def test_hysteresis_keeps_weak_pixels_only_when_they_touch_a_strong_one():
+    weak = {(1, 1): 5.0, (2, 1): 5.0, (3, 1): 5.0, (10, 10): 5.0, (11, 10): 5.0, (4, 1): 50.0}
+    kept = photo._hysteresis(weak, 40.0, 100, 100)
+    assert set(kept) == {(1, 1), (2, 1), (3, 1), (4, 1)}
+
+
+def test_chaikin_rounds_corners_and_keeps_the_end_points():
+    from photo_quality import chaikin
+
+    line = [(0, 0), (10, 0), (10, 10)]
+    rounded = chaikin(line)
+    assert rounded[0] == (0, 0) and rounded[-1] == (10, 10) and (10, 0) not in rounded and len(rounded) == 6
+
+
+def test_a_huge_budget_is_not_padded_with_junk_lines():
+    lines, _, _ = photo.strokes(shot(box_and_circle), 1500)
+    assert len(lines) < 60
 
 
 def say_with(rig, text, attachments=None, user=ANN):

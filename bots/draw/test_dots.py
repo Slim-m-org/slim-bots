@@ -88,8 +88,8 @@ def test_a_photo_with_a_coloured_flat_background_skips_it_entirely():
     assert halftone.halftone(picture(flat), REGION, 600) == []
 
 
-def test_the_default_caps_are_1500_dots_and_600_strokes():
-    assert (DEFAULT_DOTS, DEFAULT_STROKES) == (1500, 600)
+def test_the_default_caps_are_1500_dots_and_300_strokes():
+    assert (DEFAULT_DOTS, DEFAULT_STROKES) == (1500, 300)
 
 
 def test_the_dot_count_never_passes_the_cap_and_a_small_cap_still_covers_the_picture():
