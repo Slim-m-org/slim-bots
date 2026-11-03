@@ -252,7 +252,7 @@ async def _ai_draw(ctx, prompt, channel_id, name):
         await ctx.reply_ephemeral("I have used up today's drawing budget; try again tomorrow.", public_fallback=True)
         return
     try:
-        calls = await planner.plan(defuse(prompt), png, free)
+        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES)
     except ai.Refused as err:
         await ctx.reply_ephemeral(f"{err}; try describing something else.", public_fallback=True)
         return
@@ -270,7 +270,7 @@ async def _ai_draw(ctx, prompt, channel_id, name):
         await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
         return
     skipped = f" ({len(problems)} parts of the plan were skipped)" if problems else ""
-    await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} objects{skipped}.")
+    await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} object{'' if done == 1 else 's'}{skipped}.")
 
 
 async def _trace_request(ctx, query):

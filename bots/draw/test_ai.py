@@ -36,7 +36,7 @@ class FakePlanner:
     def __init__(self, calls=None, error=None):
         self.calls, self.error, self.seen = calls, error, []
 
-    async def plan(self, prompt, png, free):
+    async def plan(self, prompt, png, free, max_calls=150):
         self.seen.append((prompt, png, free))
         if self.error:
             raise self.error
@@ -223,7 +223,7 @@ def test_the_anthropic_request_carries_the_tools_the_image_and_a_forced_tool_cho
         type, name, input = "tool_use", "draw_shape", BOX[1]
 
     class Message:
-        stop_reason, content = "tool_use", [Block()]
+        stop_reason, content = "end_turn", [Block()]
 
     class Messages:
         async def create(self, **kwargs):
@@ -240,6 +240,46 @@ def test_the_anthropic_request_carries_the_tools_the_image_and_a_forced_tool_cho
     assert sent["tool_choice"] == {"type": "any"} and {t["name"] for t in sent["tools"]} == plan.TOOL_NAMES
     assert [b["type"] for b in sent["messages"][0]["content"]] == ["image", "text"]
     assert "sk-secret" not in str(sent)
+
+
+def _conversation(rounds):
+    """A fake client answering each create() with the next round's (stop_reason, block count)."""
+    sent = []
+
+    class Block:
+        def __init__(self, n):
+            self.type, self.name, self.input, self.id = "tool_use", "draw_shape", BOX[1], f"tu{n}"
+
+    class Messages:
+        async def create(self, **kwargs):
+            sent.append(dict(kwargs, messages=list(kwargs["messages"])))
+            stop, count = rounds[len(sent) - 1]
+            message = type("M", (), {})()
+            message.stop_reason, message.content = stop, [Block(i) for i in range(count)]
+            return message
+
+    client = type("C", (), {"messages": Messages()})()
+    return client, sent
+
+
+def test_the_model_keeps_drawing_until_it_ends_its_turn():
+    client, sent = _conversation([("tool_use", 3), ("tool_use", 2), ("end_turn", 0)])
+    calls = asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("a cat", b"png", FREE))
+    assert len(calls) == 5 and len(sent) == 3
+    assert sent[0]["tool_choice"] == {"type": "any"} and sent[1]["tool_choice"] == {"type": "auto"}
+    follow_up = sent[1]["messages"]
+    assert [m["role"] for m in follow_up] == ["user", "assistant", "user"]
+    results = [b for b in follow_up[2]["content"] if b["type"] == "tool_result"]
+    assert [r["tool_use_id"] for r in results] == ["tu0", "tu1", "tu2"]
+
+
+def test_the_conversation_stops_at_the_object_cap_and_the_round_limit():
+    client, sent = _conversation([("tool_use", 4)] * 20)
+    calls = asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("x", b"png", FREE, max_calls=10))
+    assert len(calls) == 10 and len(sent) == 3
+    client, sent = _conversation([("tool_use", 1)] * 20)
+    calls = asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("x", b"png", FREE))
+    assert len(sent) == ai.MAX_ROUNDS and len(calls) == ai.MAX_ROUNDS
 
 
 def test_an_anthropic_failure_never_leaks_the_key_and_a_refusal_is_reported():
