@@ -16,6 +16,7 @@ from .components import to_wire as components_to_wire
 from .models import Attachment, DmConversation, Message
 
 DEFAULT_TIMEOUT = 15.0
+DEFAULT_DOWNLOAD_BYTES = 10 * 1024 * 1024
 log = logging.getLogger(__name__)
 
 
@@ -31,6 +32,14 @@ class ApiError(Exception):
     def reason(self) -> str | None:
         """The server's short `error` string, when the body is the usual `{"error": ...}` shape."""
         return self.body.get("error") if isinstance(self.body, dict) else None
+
+
+class ResponseTooLarge(ApiError):
+    """A download that would pass the caller's `max_bytes`; `status` is None because no HTTP error came back."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(None, f"the response is larger than {limit} bytes")
+        self.limit = limit
 
 
 def is_token_revoked(err: BaseException) -> bool:
@@ -129,6 +138,27 @@ class AsyncClient:
                 attempt += 1
                 continue
             return response.json() if response.content else None
+
+    async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES, timeout: float = DEFAULT_TIMEOUT) -> bytes:
+        """The raw body of `GET path` with `call`'s auth and base URL; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
+        chunks: list[bytes] = []
+        size = 0
+        try:
+            async with self._http.stream("GET", path, timeout=timeout) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise _error_from_response(response)
+                declared = response.headers.get("content-length")
+                if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                    raise ResponseTooLarge(max_bytes)
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ResponseTooLarge(max_bytes)
+                    chunks.append(chunk)
+        except httpx.HTTPError as err:
+            raise ApiError(None, str(err)) from err
+        return b"".join(chunks)
 
     async def me(self) -> Any:
         return await self.call("GET", "/me")

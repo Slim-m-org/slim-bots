@@ -20,6 +20,7 @@ PER_ROW = 3
 STROKE_WIDTH = 3.0
 MAX_QUERY = 60
 MAX_PROMPT = 200
+TILE_BYTES = 2 * 1024 * 1024
 ATTEMPTS = 3
 RATE_RETRIES = 4
 RATE_BACKOFF = 1.5
@@ -187,11 +188,10 @@ def defuse(text):
 
 
 async def fetch_tile(attachment_id):
-    """A small copy of an image tile's first bytes for the screenshot; None when it cannot be read."""
+    """An image tile's bytes for the screenshot (at most 2 MiB); None when it cannot be read."""
     try:
-        response = await bot.client._http.get(f"/attachments/{attachment_id}", headers={"range": "bytes=0-262143"})
-        return response.content if response.status_code < 400 else None
-    except Exception:
+        return await bot.client.download(f"/attachments/{attachment_id}", max_bytes=TILE_BYTES, timeout=10)
+    except ApiError:
         return None
 
 
