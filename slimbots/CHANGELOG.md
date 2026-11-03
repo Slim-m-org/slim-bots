@@ -5,6 +5,8 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.18.0
+
 - `@bot.command`, `@bot.group` and `@group.command` take `suggest={"param": ("a", "b")}`: the composer shows the values as a pick list after the keyword, exactly like `choices=`, but a value outside the list is delivered and runs, so a free-text first argument still works. Needs the server's command options (slim-m 0.135 or later); an older server ignores them.
 - `Canvas.place_many(objects)` places up to 200 objects in one request to `canvas/objects/batch` and returns their ids; `BatchUnavailable` is raised when the server lacks the route. Needs a server with the batch route.
 
