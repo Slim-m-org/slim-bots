@@ -107,14 +107,14 @@ Without Pillow installed the bot starts and answers `!draw` with a sentence sayi
 
 ## Picture sources
 
-`photo`, `shaded` and the AI reference photo find pictures with no key, in this order, reading only as far as needed and trying the next candidate when one fails to download or decode (up to six tries):
+`photo`, `shaded` and the AI reference photo find pictures with no key, in this order, reading only as far as needed and trying the next candidate when one fails to download or decode (up to eight tries):
 
 1. Google Programmable Search image results, only when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_ID` are set.
-2. DuckDuckGo image search, the first result first, through its unofficial `i.js` endpoint and `vqd` token. It sometimes answers with a bot check, which is skipped quietly.
+2. Bing image search, the first result first (its async results page, read for each result's full-size picture and the page it was on). It is asked with the bot's own honest User-Agent; no attempt is made to look like a browser.
 3. The lead image of the best Wikipedia article.
 4. Wikimedia Commons picture files (a file search in namespace 6).
 
-There is no licence filter; the reply credits the page the picture came from.
+There is no licence filter; the reply credits the page the picture came from (Bing's `purl`, the Wikipedia article or the Commons file page).
 Every request has a timeout, an honest User-Agent naming the bot, and a 3 MB size cap, and a source that fails is skipped and noted in the command's log line.
 `!draw trace` uses the same sources.
 

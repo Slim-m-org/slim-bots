@@ -85,7 +85,7 @@ def test_the_source_used_is_logged():
 
 def test_a_download_that_fails_moves_to_the_next_candidate_and_says_why():
     rig = base.Rig()
-    good = [{"url": "https://bad/1", "title": "Bad", "creator": "", "license": "", "landing": "", "source": "duckduckgo"}, {"url": "https://ok/2", "title": "Ok", "creator": "", "license": "", "landing": "https://ok", "source": "wikipedia"}]
+    good = [{"url": "https://bad/1", "title": "Bad", "creator": "", "license": "", "landing": "", "source": "bing"}, {"url": "https://ok/2", "title": "Ok", "creator": "", "license": "", "landing": "https://ok", "source": "wikipedia"}]
     base.sources.find_pictures = lambda get, subject, google=None, report=None: iter(good)
 
     def fetch(get, url):
@@ -99,7 +99,7 @@ def test_a_download_that_fails_moves_to_the_next_candidate_and_says_why():
 
     base.sources.fetch_picture = fetch
     (line,) = lines_for(rig, "!draw photo a cat")
-    assert "source=wikipedia" in line and "duckduckgo: the picture could not be downloaded (http 403)" in line
+    assert "source=wikipedia" in line and "bing: the picture could not be downloaded (http 403)" in line
 
 
 def test_an_unexpected_exception_is_logged_with_a_traceback_and_the_invoker_is_told():
