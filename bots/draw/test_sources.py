@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Picture sources (DuckDuckGo, Wikipedia, Commons, Google), their order and the decode steps with scripted answers; run directly: python3 test_sources.py."""
+"""Picture sources (Bing, Wikipedia, Commons, Google), their order and the decode steps with scripted answers; run directly: python3 test_sources.py."""
 
 import io
 import json
@@ -27,12 +27,16 @@ def web(routes, calls=None):
     return get
 
 
-DDG_PAGE = (200, b'<script>vqd="4-1234567890";</script>')
-DDG_RESULTS = (200, json.dumps({"results": [
-    {"image": "https://img/1.jpg", "title": "Obama one", "url": "https://site/1"},
-    {"image": "https://img/2.jpg", "title": "Obama two", "url": "https://site/2"},
-    {"title": "no image"},
-]}).encode())
+# Shape recorded from www.bing.com/images/async (2026-11-03): each result is a `m="{...}"` attribute of HTML-escaped JSON.
+BING_PAGE = (200, (
+    '<style type="text/css">.mc_fh{height:100%}</style><ul class="dgControl_list">'
+    '<li data-idx="0"><a class="iusc" m="{&quot;cid&quot;:&quot;x1&quot;,&quot;purl&quot;:&quot;https://news.example/obama-story&quot;,'
+    '&quot;murl&quot;:&quot;https://news.example/uploads/Barack-Obama-1.jpg&quot;,&quot;turl&quot;:&quot;https://ts4.mm.bing.net/th?id=OIF.a&amp;pid=15.1&quot;,'
+    '&quot;md5&quot;:&quot;5086&quot;,&quot;t&quot;:&quot;Barack Obama Just Handed the World A Big Clue &amp; More&quot;,&quot;desc&quot;:&quot;d&quot;}" href="/images/search?q=x"></a></li>'
+    '<li data-idx="1"><a class="iusc" m="{&quot;purl&quot;:&quot;https://other.example/p&quot;,&quot;murl&quot;:&quot;https://other.example/img/2.png&quot;,&quot;t&quot;:&quot;Second&quot;}"></a></li>'
+    '<li data-idx="2"><a class="iusc" m="{&quot;purl&quot;:&quot;https://bad.example/p&quot;,&quot;murl&quot;:&quot;data:image/gif;base64,AAAA&quot;,&quot;t&quot;:&quot;not http&quot;}"></a></li>'
+    '<li data-idx="3"><a class="iusc" m="{not json}"></a></li></ul>'
+).encode())
 WIKI = (200, json.dumps({"query": {"pages": {"1": {"title": "Barack Obama", "index": 1, "thumbnail": {"source": "https://thumb/o.jpg"}, "fullurl": "https://en.wikipedia.org/wiki/Barack_Obama"}}}}).encode())
 COMMONS = (200, json.dumps({"query": {"pages": {
     "1": {"title": "File:Obama.jpg", "index": 2, "imageinfo": [{"mime": "image/jpeg", "width": 4000, "thumburl": "https://thumb/c2.jpg", "descriptionurl": "https://commons/File:Obama.jpg"}]},
@@ -41,18 +45,25 @@ COMMONS = (200, json.dumps({"query": {"pages": {
 }}}).encode())
 
 
-def test_duckduckgo_results_come_with_the_page_they_were_found_on():
-    found = sources.duckduckgo_candidates(web({"duckduckgo.com/?": DDG_PAGE, "i.js": DDG_RESULTS}), "barack obama")
-    assert [c["url"] for c in found] == ["https://img/1.jpg", "https://img/2.jpg"]
-    assert found[0]["title"] == "Obama one" and found[0]["landing"] == "https://site/1" and found[0]["source"] == "duckduckgo"
+def test_bing_results_carry_the_full_size_picture_its_title_and_the_page_it_was_on():
+    found = sources.bing_candidates(web({"bing.com/images/async": BING_PAGE}), "barack obama")
+    assert [c["url"] for c in found] == ["https://news.example/uploads/Barack-Obama-1.jpg", "https://other.example/img/2.png"]
+    assert found[0]["title"] == "Barack Obama Just Handed the World A Big Clue & More" and found[0]["landing"] == "https://news.example/obama-story"
+    assert found[0]["source"] == "bing" and found[0]["license"] == "" and found[0]["creator"] == ""
 
 
-def test_duckduckgo_sends_its_token_and_the_subject_and_a_bot_check_is_a_quiet_empty_result():
+def test_bing_is_asked_for_the_subject_with_the_async_parameters_and_failures_are_quiet():
     calls, said = [], []
-    sources.duckduckgo_candidates(web({"duckduckgo.com/?": DDG_PAGE, "i.js": DDG_RESULTS}, calls), "barack obama")
-    assert "vqd=4-1234567890" in calls[1] and "q=barack+obama" in calls[1]
-    assert sources.duckduckgo_candidates(web({"duckduckgo.com/?": (200, b"<html>no token</html>")}), "x", said.append) == [] and any("no token" in s for s in said)
-    assert sources.duckduckgo_candidates(web({"duckduckgo.com/?": DDG_PAGE, "i.js": (202, b'{"challenge":{}}')}), "x", said.append) == [] and any("no results" in s for s in said)
+    sources.bing_candidates(web({"bing.com/images/async": BING_PAGE}, calls), "barack obama")
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(calls[0]).query)
+    assert query["q"] == ["barack obama"] and query["mmasync"] == ["1"] and query["first"] == ["0"]
+    assert sources.bing_candidates(web({"bing.com/images/async": (503, b"")}), "x", said.append) == [] and any("bing: http 503" in s for s in said)
+    assert sources.bing_candidates(web({"bing.com/images/async": (200, b"<html>nothing</html>")}), "x", said.append) == [] and any("no results" in s for s in said)
+
+
+def test_the_picture_request_uses_the_bots_own_user_agent_and_nothing_pretends_to_be_a_browser():
+    assert "slimm-bot-draw" in sources.USER_AGENT and "Mozilla" not in sources.USER_AGENT
+    assert "duckduckgo" not in open(sources.__file__).read().lower()
 
 
 def test_the_wikipedia_lead_image_is_a_candidate_with_its_page_and_no_licence_filter():
@@ -89,28 +100,27 @@ def test_google_results_use_the_key_in_the_request_only():
         raise AssertionError("expected SourceError")
 
 
-ALL = {"duckduckgo.com/?": DDG_PAGE, "i.js": DDG_RESULTS, "en.wikipedia.org": WIKI, "commons.wikimedia.org": COMMONS}
+ALL = {"bing.com/images/async": BING_PAGE, "en.wikipedia.org": WIKI, "commons.wikimedia.org": COMMONS}
 
 
-def test_duckduckgo_comes_first_then_wikipedia_then_commons_and_reading_stops_early():
+def test_bing_comes_first_then_wikipedia_then_commons_and_reading_stops_early():
     calls = []
     found = list(sources.find_pictures(web(ALL, calls), "barack obama"))
-    assert [c["source"] for c in found] == ["duckduckgo", "duckduckgo", "wikipedia", "commons"]
+    assert [c["source"] for c in found] == ["bing", "bing", "wikipedia", "commons"]
     calls.clear()
     first = next(sources.find_pictures(web(ALL, calls), "barack obama"))
-    assert first["source"] == "duckduckgo" and not any("wikipedia" in u or "commons" in u for u in calls)
+    assert first["source"] == "bing" and not any("wikipedia" in u or "commons" in u for u in calls)
 
 
 def test_a_failing_source_is_skipped_quietly_and_google_leads_only_when_configured():
     said = []
-    broken = dict(ALL, **{"duckduckgo.com/?": (500, b"")})
+    broken = dict(ALL, **{"bing.com/images/async": (500, b"")})
     found = list(sources.find_pictures(web(broken), "x", None, said.append))
-    assert [c["source"] for c in found] == ["wikipedia", "commons"] and any("duckduckgo" in s for s in said)
-    nothing = list(sources.find_pictures(web({}), "x"))
-    assert nothing == []
+    assert [c["source"] for c in found] == ["wikipedia", "commons"] and any("bing" in s for s in said)
+    assert list(sources.find_pictures(web({}), "x")) == []
     google = (200, json.dumps({"items": [{"link": "https://g/1.jpg", "title": "G"}]}).encode())
     found = list(sources.find_pictures(web(dict(ALL, **{"googleapis.com": google})), "x", ("k", "e")))
-    assert found[0]["source"] == "google" and found[1]["source"] == "duckduckgo"
+    assert found[0]["source"] == "google" and found[1]["source"] == "bing"
 
 
 def test_the_credit_line_leaves_out_what_the_source_did_not_say():

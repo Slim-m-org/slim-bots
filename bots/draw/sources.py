@@ -1,5 +1,6 @@
-"""Openly licensed pictures from Openverse and the decode step; both are injectable so tests need no network."""
+"""Picture sources (Google, Bing, Wikipedia, Commons) and the decode step; the fetch is injectable so tests need no network."""
 
+import html as html_module
 import io
 import json
 import re
@@ -79,15 +80,14 @@ def reference_image(data, side=768):
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
-DDG_PAGE = "https://duckduckgo.com/"
-DDG_IMAGES = "https://duckduckgo.com/i.js"
+BING_IMAGES = "https://www.bing.com/images/async"
 GOOGLE_CSE = "https://www.googleapis.com/customsearch/v1"
 WIKI_PAGES = 3
 COMMONS_FILES = 6
-WEB_RESULTS = 6
+WEB_RESULTS = 5
 PICTURE_TYPES = ("image/jpeg", "image/png", "image/webp")
 FILLER = {"a", "an", "the", "of", "portrait", "picture", "photo", "photograph", "drawing", "image", "realistic", "hyperrealistic", "me", "please", "draw"}
-VQD = re.compile(rb"vqd=[\"']?([\d-]+)")
+BING_ENTRY = re.compile(r'\bm="(\{.*?\})"', re.S)
 
 
 def clean_subject(subject):
@@ -147,23 +147,25 @@ def commons_candidates(get, subject, report=None):
     return found
 
 
-def duckduckgo_candidates(get, subject, report=None):
-    """DuckDuckGo image results through its unofficial endpoint and `vqd` token; it often answers with a bot check, which is a quiet empty result."""
-    query = {"q": subject, "iax": "images", "ia": "images"}
-    status, page = get(f"{DDG_PAGE}?{urllib.parse.urlencode(query)}")
-    token = VQD.search(page) if status == 200 else None
-    if not token:
-        _say(report, f"duckduckgo: no token (http {status})")
+def bing_candidates(get, subject, report=None):
+    """Bing image results, best first: the full-size picture URL (`murl`), its title and the page it was on (`purl`), read from the async results HTML."""
+    params = {"q": subject, "first": 0, "count": WEB_RESULTS * 2, "mmasync": 1}
+    status, page = get(f"{BING_IMAGES}?{urllib.parse.urlencode(params)}")
+    if status != 200:
+        _say(report, f"bing: http {status}")
         return []
-    params = {"l": "us-en", "o": "json", "q": subject, "vqd": token.group(1).decode(), "f": ",,,,,", "p": "1"}
-    status, body = get(f"{DDG_IMAGES}?{urllib.parse.urlencode(params)}")
-    try:
-        results = json.loads(body).get("results", []) if status == 200 else []
-    except (ValueError, AttributeError):
-        results = []
-    found = [_candidate(r["image"], r.get("title"), r.get("url"), "duckduckgo") for r in results[:WEB_RESULTS] if r.get("image")]
+    found = []
+    for raw in BING_ENTRY.findall(page.decode("utf-8", "replace")):
+        try:
+            entry = json.loads(html_module.unescape(raw))
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and str(entry.get("murl", "")).startswith("http"):
+            found.append(_candidate(entry["murl"], html_module.unescape(str(entry.get("t", ""))), entry.get("purl"), "bing"))
+        if len(found) >= WEB_RESULTS:
+            break
     if not found:
-        _say(report, f"duckduckgo: no results (http {status})")
+        _say(report, "bing: no results in the answer")
     return found
 
 
@@ -177,10 +179,10 @@ def google_candidates(get, subject, key, engine, report=None):
 
 
 def find_pictures(get, subject, google=None, report=None):
-    """Candidates for `subject`, read lazily one source at a time: Google (if `google` is a (key, engine) pair), DuckDuckGo, the Wikipedia lead image, Commons; a failing source is skipped and reported."""
+    """Candidates for `subject`, read lazily one source at a time: Google (if `google` is a (key, engine) pair), Bing, the Wikipedia lead image, Commons; a failing source is skipped and reported."""
     steps = [("google", lambda: google_candidates(get, subject, *google, report=report))] if google else []
     steps += [
-        ("duckduckgo", lambda: duckduckgo_candidates(get, subject, report)),
+        ("bing", lambda: bing_candidates(get, subject, report)),
         ("wikipedia", lambda: [c] if (c := wikipedia_candidate(get, subject, report)) else []),
         ("commons", lambda: commons_candidates(get, subject, report)),
     ]
