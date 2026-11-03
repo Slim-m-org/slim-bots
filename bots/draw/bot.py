@@ -11,7 +11,9 @@ import time
 import uuid
 
 import ai
+import colorize
 import crop
+import paste
 import photo
 import plan
 import runlog
@@ -62,6 +64,7 @@ VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
 SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 600, type=int), type=int), 50), 1500)
 PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 300, type=int), 20), 1500)
+COLOR_MAX = min(max(bot.setting("DRAW_COLOR_MAX", 2000, type=int), 200), 4000)
 PHOTO_SHADING = bot.setting("DRAW_PHOTO_SHADING", False, type=bool)
 BOARD = "light" if str(bot.setting("DRAW_BOARD", "dark")).lower() == "light" else "dark"
 AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
@@ -257,19 +260,20 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
             busy.discard(owned)
 
 
-MODES = ("photo", "shaded", "trace", "undo", "clear")
+MODES = ("photo", "shaded", "color", "paste", "trace", "undo", "clear")
 # slimbots before 0.18 has no `suggest`, so the composer then just lacks the pick list
 _PICKER = {"suggest": {"mode": MODES}} if "suggest" in inspect.signature(bot.group).parameters else {}
 
 
-@bot.group(name="draw", help="Draw in your call: <idea>, photo <subject>, shaded <subject>, trace <word>, undo, clear", **_PICKER)
+@bot.group(name="draw", help="Draw in your call: <idea>, photo, shaded, color, paste <subject>, trace <word>, undo, clear", **_PICKER)
 async def draw(ctx, mode: str = ""):
     """The composer labels the first word `mode`; anything that is not a mode is the idea to draw."""
     query = mode.strip()
     if not query:
         await ctx.reply_ephemeral(
             f"`{bot.prefix}draw <idea>` an AI drawing, `{bot.prefix}draw photo <subject>` a line sketch of a photo, "
-            f"`{bot.prefix}draw shaded <subject>` a tonal portrait, `{bot.prefix}draw trace <word>` the old tracer, "
+            f"`{bot.prefix}draw shaded <subject>` a tonal portrait, `{bot.prefix}draw color <subject>` the whole picture in colour, "
+            f"`{bot.prefix}draw paste <subject>` the picture itself, `{bot.prefix}draw trace <word>` the old tracer, "
             f"`{bot.prefix}draw undo`, `{bot.prefix}draw clear`.",
             public_fallback=True,
         )
@@ -488,7 +492,7 @@ async def crop_picture(data, log):
         return data, None
 
 
-async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
+async def _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped=True):
     """Draws what `build(picture bytes, free region, face box)` makes from an attached image or the best freely licensed picture of the subject."""
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
@@ -503,12 +507,20 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
             await refuse(ctx, log, "no source", source)
             return
         data, candidate = source
-        with log.stage("crop"):
-            data, face_box = await crop_picture(data, log)
+        face_box = None
+        if cropped:
+            with log.stage("crop"):
+                data, face_box = await crop_picture(data, log)
         with log.stage("trace"):
-            objects = await asyncio.to_thread(build, data, free, face_box)
+            if inspect.iscoroutinefunction(build):
+                objects = await build(data, free, face_box)
+            else:
+                objects = await asyncio.to_thread(build, data, free, face_box)
     except (screenshot.ScreenshotError, sources.SourceError) as err:
         await refuse(ctx, log, f"refused: {err}", f"{err}.")
+        return
+    except ApiError as err:
+        await refuse(ctx, log, f"upload failed: http {err.status}", f"I could not upload the picture (http {err.status}).")
         return
     if not objects:
         await refuse(ctx, log, "nothing to draw", "I could not find anything to draw in that picture.")
@@ -525,13 +537,13 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
     await ctx.reply(f"drew {noun.format(count=done)} on the canvas in {name}{credit_text}")
 
 
-async def _picture_command(ctx, subject, command, build, noun, ack):
+async def _picture_command(ctx, subject, command, build, noun, ack, cropped=True):
     subject = subject.strip()
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
     await guarded(
-        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _picture_job(ctx, subject, channel_id, name, log, build, noun),
+        ctx, COOLDOWN_SECONDS, lambda channel_id, name, log: _picture_job(ctx, subject, channel_id, name, log, build, noun, cropped),
         command=command, prompt=subject or "attachment", ack=ack.format(subject=defuse(subject) or "your image"),
     )
 
@@ -542,6 +554,26 @@ async def draw_shaded(ctx, subject: str = ""):
         ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, face, BOARD), "a shaded portrait with {count} strokes",
         "making a shaded portrait of {subject}, this takes a minute or two.",
     )
+
+
+@draw.command(name="color", help="Paint the whole picture in colour, as brushstrokes")
+async def draw_color(ctx, subject: str = ""):
+    await _picture_command(
+        ctx, subject, "color", lambda data, free, face: colorize.color_strokes(data, free, COLOR_MAX), "the whole picture in colour with {count} strokes",
+        "painting {subject} in colour, this takes a few minutes.", cropped=False,
+    )
+
+
+async def paste_picture(data, free, face):
+    """One canvas image object: the picture uploaded as an attachment and sized into the free region."""
+    jpeg, width, height = await asyncio.to_thread(paste.prepare, data)
+    attachment = await bot.client.upload_attachment(jpeg, filename="draw.jpg")
+    return [paste.image_object(attachment.id, width, height, free)]
+
+
+@draw.command(name="paste", help="Put the picture itself on the canvas, no drawing")
+async def draw_paste(ctx, subject: str = ""):
+    await _picture_command(ctx, subject, "paste", paste_picture, "the picture as {count} image", "pasting {subject}, one moment.", cropped=False)
 
 
 @draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")

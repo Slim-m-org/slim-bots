@@ -132,6 +132,10 @@ def _draw_stroke(draw, view, obj):
     width = 1 if guide else max(1, round(float(obj["props"].get("width") or 3) / view.scale))
     if len(pairs) >= 2:
         draw.line(pairs, fill=color, width=width, joint="curve")
+        if width >= 3:
+            r = width / 2  # the client paints round caps
+            for cx, cy in (pairs[0], pairs[-1]):
+                draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
 
 
 def _draw_box(draw, view, obj, outline, fill=None):

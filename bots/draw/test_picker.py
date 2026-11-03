@@ -20,7 +20,7 @@ def entry():
 
 def test_draw_is_registered_with_a_pick_list_of_its_modes():
     assert entry()["options"] == [{"name": "mode", "required": False, "choices": list(draw.MODES)}]
-    assert draw.MODES == ("photo", "shaded", "trace", "undo", "clear")
+    assert draw.MODES == ("photo", "shaded", "color", "paste", "trace", "undo", "clear")
 
 
 def test_the_registered_description_names_every_mode_within_the_servers_limit():
@@ -54,8 +54,8 @@ def test_a_mode_picked_from_the_list_arrives_with_a_trailing_space_and_still_run
 def test_a_mode_word_still_reaches_its_command_and_the_bare_command_explains_every_mode():
     rig = base.Rig()
     reply = rig.say("!draw")
-    for mode in ("photo", "shaded", "trace", "undo", "clear"):
-        assert f"draw {mode}" in reply or mode in reply
+    for mode in ("photo", "shaded", "color", "paste", "trace", "undo", "clear"):
+        assert f"draw {mode}" in reply
     assert "AI drawing" in reply
 
 
