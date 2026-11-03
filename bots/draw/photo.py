@@ -3,6 +3,7 @@
 import io
 import math
 
+import photo_shade
 import photo_quality as quality
 from photo_quality import drop_isolated, hugs_border  # noqa: F401  (re-exported for callers and tests)
 from plan import Planned
@@ -22,6 +23,7 @@ CENTRE_WEIGHT = 0.15
 STROKE_WIDTH = 2.0
 INK = "annotation"
 FACE_SENSITIVITY = 0.55  # inside the face ellipse an edge needs only this share of the usual strength: eyes, nose and lips are faint
+FACE_STRENGTH = 150  # the strength tone contours rank at, between a faint and a strong edge
 FACE_MIN_FRACTION = 0.02  # of the diagonal: the shortest line worth keeping there
 NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1))
 
@@ -59,8 +61,9 @@ def _local_mean(strength, width, height):
     return list(clipped.filter(ImageFilter.GaussianBlur(LOCAL_RADIUS)).getdata())
 
 
-def thin_edges(gx, gy, width, height):
+def thin_edges(gx, gy, width, height, face=None):
     """({(x, y): strength}, strong cut-off): edge pixels one pixel thick, kept by hysteresis so every survivor is connected to a strong one."""
+    face = face or quality.default_face(width, height)
     strength = [abs(a) + abs(b) for a, b in zip(gx, gy)]
     around = _local_mean(strength, width, height)
     high = max(sorted(strength)[int(len(strength) * HIGH_PERCENT)], MIN_STRENGTH)
@@ -70,19 +73,19 @@ def thin_edges(gx, gy, width, height):
         for x in range(1, width - 1):
             index = y * width + x
             here = strength[index]
-            ease = FACE_SENSITIVITY if quality.on_face((x, y), width, height) else 1.0
+            ease = FACE_SENSITIVITY if face.contains((x, y)) else 1.0
             if here < low * ease or here < around[index] * LOCAL_GAIN * ease:
                 continue
             step = 1 if abs(gx[index]) >= abs(gy[index]) else width
             if here >= strength[index - step] and here > strength[index + step]:
                 weak[(x, y)] = here
-    return _hysteresis(weak, high, width, height), high
+    return _hysteresis(weak, high, face), high
 
 
-def _hysteresis(weak, high, width, height):
+def _hysteresis(weak, high, face):
     """The weak edge pixels connected (8 ways) to at least one pixel at or above `high`."""
     kept = {p for p, v in weak.items() if v >= high}
-    kept |= {p for p, v in weak.items() if v >= high * FACE_SENSITIVITY and quality.on_face(p, width, height)}
+    kept |= {p for p, v in weak.items() if v >= high * FACE_SENSITIVITY and face.contains(p)}
     stack = list(kept)
     while stack:
         x, y = stack.pop()
@@ -151,12 +154,12 @@ def simplify(path, tolerance=SIMPLIFY):
     return [path[i] for i in sorted(keep)]
 
 
-def _worth_drawing(path, line, width, height):
+def _worth_drawing(path, line, width, height, face):
     """The quality bar every line must pass: long enough, not jagged, not a border, curtain or frame, and on the subject."""
     diagonal = math.hypot(width, height)
     return (
         len(line) >= 2
-        and quality.length(line) >= (FACE_MIN_FRACTION if quality.on_face(line[len(line) // 2], width, height) else quality.MIN_FRACTION) * diagonal
+        and quality.length(line) >= (FACE_MIN_FRACTION if face.contains(line[len(line) // 2]) else quality.MIN_FRACTION) * diagonal
         and not quality.wiggly(path, diagonal)
         and not hugs_border(line, width, height)
         and not quality.background_straight(line, width, height)
@@ -164,18 +167,21 @@ def _worth_drawing(path, line, width, height):
     )
 
 
-def strokes(data, cap):
-    """(polylines in photo pixels, width, height): the longest, strongest lines on the subject, at most `cap` after splitting."""
+def strokes(data, cap, face_box=None):
+    """(polylines in pixels, width, height): the best lines, at most `cap` after splitting; with `face_box` (x, y, w, h fractions) the face is also shaded."""
     gray = _gray(data)
     width, height = gray.size
+    face = quality.face_from_box(face_box, width, height) if face_box else quality.default_face(width, height)
     gx, gy = _gradients(gray)
-    edges, _ = thin_edges(gx, gy, width, height)
+    edges, _ = thin_edges(gx, gy, width, height, face)
     traced = []
     for path in link(edges):
         smooth = _smooth(path)
         line = simplify(smooth)
-        if _worth_drawing(smooth, line, width, height):
+        if _worth_drawing(smooth, line, width, height, face):
             traced.append((quality.chaikin(line), sum(edges.get(p, 0) for p in path) / len(path)))
+    if face_box:
+        traced += [(line, FACE_STRENGTH) for line in photo_shade.shade_lines(gray, face)]
     survivors = {id(line) for line in drop_isolated([line for line, _ in traced])}
     ranked = sorted(
         ((quality.length(line) * (0.5 + strength / 255) * quality.subject_weight(line, width, height), line) for line, strength in traced if id(line) in survivors),
@@ -210,9 +216,9 @@ def _stroke(points, scale, left, top):
     )
 
 
-def trace_photo(data, region, cap):
-    """Stroke objects of the photo's edge lines, fitted inside `region` with the photo's aspect ratio and centred."""
-    lines, width, height = strokes(data, cap)
+def trace_photo(data, region, cap, face_box=None):
+    """Stroke objects of the photo's lines, fitted inside `region` with the photo's aspect ratio and centred."""
+    lines, width, height = strokes(data, cap, face_box)
     scale = min(region.w / width, region.h / height)
     left, top = region.x + (region.w - scale * width) / 2, region.y + (region.h - scale * height) / 2
     return [_stroke(line, scale, left, top) for line in lines]

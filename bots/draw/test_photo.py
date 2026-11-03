@@ -169,7 +169,7 @@ def test_the_subject_ellipse_ranks_central_lines_over_outer_ones_and_marks_far_o
 
 def test_hysteresis_keeps_weak_pixels_only_when_they_touch_a_strong_one():
     weak = {(1, 1): 5.0, (2, 1): 5.0, (3, 1): 5.0, (10, 10): 5.0, (11, 10): 5.0, (4, 1): 50.0}
-    kept = photo._hysteresis(weak, 40.0, 100, 100)
+    kept = photo._hysteresis(weak, 40.0, photo.quality.default_face(100, 100))
     assert set(kept) == {(1, 1), (2, 1), (3, 1), (4, 1)}
 
 

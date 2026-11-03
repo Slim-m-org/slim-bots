@@ -120,7 +120,7 @@ def rig_for_crop(planner):
     base.sources.fetch_picture = lambda get, url: rig.png
     seen = []
     original = draw.photo.trace_photo
-    draw.photo.trace_photo = lambda data, free, cap: seen.append(crop.size_of(data)) or original(data, free, cap)
+    draw.photo.trace_photo = lambda data, free, cap, face=None: seen.append(crop.size_of(data)) or original(data, free, cap, face)
     rig.seen = seen
     return rig
 

@@ -73,3 +73,47 @@ def crop_bytes(data, box):
 
 def describe(box):
     return ",".join(f"{v:.2f}" for v in box)
+
+
+KINDS = ("person", "animal", "object", "place", "other")
+
+
+def _fractions(raw):
+    try:
+        values = [float(raw[key]) for key in ("x", "y", "w", "h")]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in values) or values[2] <= 0 or values[3] <= 0:
+        return None
+    return values
+
+
+def face_in_crop(face, box):
+    """The face box (fractions of the whole picture) re-expressed as fractions of the cropped picture, clamped, or None when unusable or outside."""
+    values = _fractions(face) if isinstance(face, dict) else None
+    if values is None:
+        return None
+    fx, fy, fw, fh = values
+    bx, by, bw, bh = box
+    x, y = (fx - bx) / bw, (fy - by) / bh
+    w, h = fw / bw, fh / bh
+    left, top, right, bottom = max(x, 0.0), max(y, 0.0), min(x + w, 1.0), min(y + h, 1.0)
+    if right - left < 0.05 or bottom - top < 0.05:
+        return None
+    return left, top, right - left, bottom - top
+
+
+class Answer:
+    """What one crop call said: the padded subject box, a face box in the crop, what kind of subject, and whether the picture is explicit."""
+
+    def __init__(self, box, face, kind, explicit):
+        self.box, self.face, self.kind, self.explicit = box, face, kind, explicit
+
+
+def parse_answer(raw):
+    """An `Answer` from a model's raw crop dict; `box` is None when it gave no usable box, `explicit` is True only when it said so."""
+    raw = raw if isinstance(raw, dict) else {}
+    box = clamp_box(raw)
+    kind = raw.get("kind") if raw.get("kind") in KINDS else "other"
+    face = face_in_crop(raw.get("face"), box) if box and kind == "person" else None
+    return Answer(box, face, kind, raw.get("explicit") is True)

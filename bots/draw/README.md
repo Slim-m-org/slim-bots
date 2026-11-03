@@ -121,6 +121,22 @@ A line must pass a quality bar: at least 4 percent of the image diagonal long (2
 Lines are ranked by length times strength times a soft subject weight, so long clean contours win, up to `DRAW_PHOTO_MAX` strokes (default 300); a larger budget is only filled with lines that pass the same bar.
 A line is split into pieces of at most 150 points sharing a joint, each a stroke in the one ink colour at width 2, scaled into the largest free area of your call's canvas with the photo's aspect ratio.
 
+### Why this tracer
+
+Several ways of turning a photo into 150 to 600 strokes were rendered side by side for an official portrait of Barack Obama, a Taylor Swift photo, the Eiffel Tower and a golden retriever: scanline squiggles, stippling joined by a nearest-neighbour path, tone hatching, marching-squares tone contours, plain strong edges, and strong edges plus pen shading of the face.
+Tone methods (squiggle, stipple, hatch) need the subject cut out from its background, which the bot does not have, so a dark curtain or suit beats a light face; contour lines of tone inside the face read as a mask.
+Strong clean edges plus hatching of only the dark features inside the face box (hair, eye sockets, lips, nostrils, shadows) read as a pen drawing: it keeps the likeness of the contours and gives the face volume.
+Without a key the face box is unknown, so the trace is edges only.
+`THIRD_PARTY.md` lists the tools that were considered, their licences, and why none is vendored.
+
+When a crop call finds a face, the face ellipse also lowers the edge thresholds there so brows, nose and lips come through, and `photo_shade.py` hatches whatever is darker than the face's own tones: one direction for mid darks, a cross direction for the darkest, joined into zigzags to keep the stroke count down.
+
+## Safety
+
+Every mode refuses a request that names something sexual, naked or graphic (a whole-word list in `safety.py`) with a plain private reply, and logs `refused: explicit prompt`.
+In `photo` and `dots`, the crop call is also asked whether the picture shows nudity, sexual content or graphic violence; a flagged picture is refused before anything is drawn and logged as `refused: explicit picture`.
+Without a key, Openverse's mature filter and Wikipedia's lead image are the only guard on the picture.
+
 ## Dot portraits
 
 `!draw dots` needs no model.

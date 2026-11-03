@@ -14,6 +14,7 @@ import halftone
 import photo
 import plan
 import runlog
+import safety
 import screenshot
 import sources
 import store_db
@@ -255,6 +256,8 @@ async def draw(ctx, query: str = ""):
     if not query:
         await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw photo <subject>`, `{bot.prefix}draw dots <subject>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
         return
+    if await deny_explicit(ctx, "draw", query):
+        return
     if planner is None:
         await _trace_request(ctx, query)
         return
@@ -424,23 +427,25 @@ async def dots_source(ctx, subject, log):
 
 
 async def crop_picture(data, subject, log):
-    """`data` cut to the subject: by one model call when a key is configured, else (or on any failure) by the heuristic box."""
+    """(cut picture, face box in it or None, explicit): one model call when a key is configured, else (or on failure) the heuristic box."""
     try:
         width, height = await asyncio.to_thread(crop.size_of, data)
-        box, mode = None, "heuristic"
+        answer = crop.Answer(None, None, "other", False)
         if hasattr(planner, "locate") and await bot.store.run(take_ai_call, time.strftime("%Y-%m-%d", time.gmtime()), AI_DAILY_CAP):
             preview, media_type = await asyncio.to_thread(crop.preview, data)
-            box = crop.clamp_box(await planner.locate(defuse(subject), preview, media_type) or {})
-            mode = "model" if box else "heuristic"
-        box = box or crop.heuristic_box(width, height)
+            answer = crop.parse_answer(await planner.locate(defuse(subject), preview, media_type))
+        mode = "model" if answer.box else "heuristic"
+        box = answer.box or crop.heuristic_box(width, height)
         log.set("crop", f"{mode} {crop.describe(box)}")
-        return await asyncio.to_thread(crop.crop_bytes, data, box)
+        if answer.face:
+            log.set("face", crop.describe(answer.face))
+        return await asyncio.to_thread(crop.crop_bytes, data, box), answer.face, answer.explicit
     except sources.SourceError:
-        return data
+        return data, None, False
 
 
 async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
-    """Draws what `build(picture bytes, free region)` makes from an attached image or the best freely licensed picture of the subject."""
+    """Draws what `build(picture bytes, free region, face box)` makes from an attached image or the best freely licensed picture of the subject."""
     canvas = bot.canvas(channel_id)
     window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
     try:
@@ -455,9 +460,12 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
             return
         data, candidate = source
         with log.stage("crop"):
-            data = await crop_picture(data, subject, log)
+            data, face, explicit = await crop_picture(data, subject, log)
+        if explicit:
+            await refuse(ctx, log, "refused: explicit picture", "that picture looks explicit, so I won't draw it.")
+            return
         with log.stage("trace"):
-            objects = await asyncio.to_thread(build, data, free)
+            objects = await asyncio.to_thread(build, data, free, face)
     except (screenshot.ScreenshotError, sources.SourceError) as err:
         await refuse(ctx, log, f"refused: {err}", f"{err}.")
         return
@@ -476,8 +484,19 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
     await ctx.reply(f"drew {noun.format(count=done)} on the canvas in {name}{credit_text}")
 
 
+async def deny_explicit(ctx, command, text):
+    """True after refusing (privately, and in the log) a request that names something sexual, naked or graphic."""
+    if not safety.is_explicit(text):
+        return False
+    runlog.RunLog(command, ctx.channel_id, text).done("refused: explicit prompt")
+    await ctx.reply_ephemeral(safety.REFUSAL, public_fallback=True)
+    return True
+
+
 async def _picture_command(ctx, subject, command, build, noun, ack):
     subject = subject.strip()
+    if await deny_explicit(ctx, command, subject):
+        return
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
@@ -490,7 +509,7 @@ async def _picture_command(ctx, subject, command, build, noun, ack):
 @draw.command(name="dots", help="Draw a halftone dot portrait of an attached image or a subject; no model, no cost")
 async def draw_dots(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "dots", lambda data, free: halftone.halftone(data, free, DOTS_MAX), "a dot portrait with {count} dots",
+        ctx, subject, "dots", lambda data, free, face: halftone.halftone(data, free, DOTS_MAX), "a dot portrait with {count} dots",
         "making a dot portrait of {subject}, this takes a couple of minutes.",
     )
 
@@ -498,7 +517,7 @@ async def draw_dots(ctx, subject: str = ""):
 @draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")
 async def draw_photo(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "photo", lambda data, free: photo.trace_photo(data, free, PHOTO_MAX), "a line drawing of the photo with {count} strokes",
+        ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face), "a line drawing of the photo with {count} strokes",
         "tracing a line drawing of {subject}, this takes a minute or two.",
     )
 
@@ -508,6 +527,8 @@ async def draw_trace(ctx, query: str = ""):
     query = query.strip()
     if not query:
         await ctx.reply_ephemeral(f"`{bot.prefix}draw trace <word>`", public_fallback=True)
+        return
+    if await deny_explicit(ctx, "trace", query):
         return
     await _trace_request(ctx, query)
 

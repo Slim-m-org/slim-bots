@@ -64,9 +64,29 @@ def background_straight(line, width, height):
     return not (CENTRAL[0] * width <= mx <= CENTRAL[1] * width and CENTRAL[0] * height <= my <= CENTRAL[1] * height)
 
 
-def on_face(point, width, height):
-    """True inside the ellipse where a portrait's face usually sits: the middle of the picture, a little above centre."""
-    return ((point[0] - width / 2) / (0.3 * width)) ** 2 + ((point[1] - 0.42 * height) / (0.38 * height)) ** 2 <= 1.0
+class Face:
+    """An ellipse where a portrait's face is: centre and radii in pixels."""
+
+    def __init__(self, cx, cy, rx, ry):
+        self.cx, self.cy, self.rx, self.ry = cx, cy, rx, ry
+
+    def contains(self, point, grow=1.0):
+        return ((point[0] - self.cx) / (self.rx * grow)) ** 2 + ((point[1] - self.cy) / (self.ry * grow)) ** 2 <= 1.0
+
+    def share(self, line, grow=1.0):
+        """The fraction of the line's points inside this ellipse."""
+        return sum(1 for p in line if self.contains(p, grow)) / len(line)
+
+
+def default_face(width, height):
+    """Where a face usually sits in a head-and-shoulders crop when nothing says: the middle, a little above centre."""
+    return Face(width / 2, 0.42 * height, 0.3 * width, 0.38 * height)
+
+
+def face_from_box(box, width, height):
+    """The ellipse inscribed in a face box given as fractions (x, y, w, h) of the picture, a little generous."""
+    x, y, w, h = box
+    return Face((x + w / 2) * width, (y + h / 2) * height, 0.62 * w * width, 0.62 * h * height)
 
 
 def subject_distance(line, width, height):
