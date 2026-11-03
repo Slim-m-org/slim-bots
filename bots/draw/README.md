@@ -27,6 +27,8 @@ If you are in no call it asks you to join one.
 | --- | --- | --- |
 | `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
 | `!draw photo [subject]` | anyone | a line drawing traced from a photo (the attached image, else the best freely licensed picture of the subject, credited); no model, no tokens; one per member per minute |
+| `!draw color [subject]` | anyone | the whole picture (attached, else the first picture found, credited) as coloured brushwork: rows of touching strokes, each a run of one colour from a 48-colour palette; no crop, no model, no tokens; one per member per minute |
+| `!draw paste [subject]` | anyone | the picture itself as one image object on the canvas (uploaded as an attachment, sized into the free area), credited; no drawing |
 | `!draw shaded [subject]` (alias `dots`) | anyone | a tonal squiggle portrait of the image attached to your message, else of the first picture found for the subject (credited), cropped to the face and drawn only on the subject; no model, no tokens; one per member per minute |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
@@ -94,6 +96,7 @@ There is no content scanning, as everywhere in slim-m: the bot is rate limited, 
 | `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
+| `DRAW_COLOR_MAX` | `2000` | the most strokes one `!draw color` painting may use, 200 to 4000 |
 | `DRAW_SHADED_MAX` | `600` | the most strokes one `!draw shaded` portrait may use, 50 to 1500 (`DRAW_DOTS_MAX` is still read if this is unset) |
 | `DRAW_BOARD` | `dark` | `dark` or `light`: which board `photo` and `shaded` draw for (see below) |
 | `DRAW_PHOTO_SHADING` | off | `1` adds pen hatching inside the face to `!draw photo` |
@@ -154,6 +157,18 @@ The canvas has no background colour a bot can read, so `photo` and `shaded` draw
 On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive (the darkest quarter of the subject stays bare, an S-curve and gamma separate the mid tones, and bright wall above and beside the head is dropped so only hair-dark pixels count there); on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
 The subject mask works the same either way: whatever is not the subject gets no ink, so the board shows through.
 A viewer on the opposite theme sees the drawing inverted, a light-ink drawing on a light board for example, and a client that does not render `#rrggbb` ink paints the theme's default ink, which still reads as a drawing.
+
+## Colour paintings
+
+`!draw color` paints the whole picture, with no subject mask and no face crop.
+The picture is shrunk to a grid, its colours are reduced to 48 by median cut (after a light median filter so speckle does not split runs), and neighbouring cells of one colour along a row are merged into one stroke, so a flat sky is a few long strokes and a face is many short ones.
+Each stroke is a horizontal line with the row's pitch as its width (a little wider, 1.3 times, so rows overlap and the round caps leave no board showing), coloured with its palette colour as `#rrggbb`.
+The grid is made as fine as fits under `DRAW_COLOR_MAX` strokes (up to 220 rows), and the strokes go down in batches of 200, so 2000 strokes take seconds when the server has the batch route; a client without hex colour support paints the default ink.
+
+## Pasting a picture
+
+`!draw paste` shrinks the picture to at most 1600 pixels, uploads it as an attachment and places one canvas `image` object (`props.attachment`) sized into the free area with its aspect ratio kept.
+It is undone like any drawing, though the uploaded file stays on the server.
 
 ## Shaded portraits
 
