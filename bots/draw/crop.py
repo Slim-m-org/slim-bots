@@ -1,19 +1,15 @@
-"""Choosing and applying a crop box (fractions of the picture) so a trace focuses on the subject: around a detected face, else on the busiest region."""
+"""Cutting flat white or black borders off a picture (fractions of it) and locating the largest face without cropping to it."""
 
 import io
 
 import face
 from sources import SourceError
 
-BELOW = 2.0  # face heights kept below the face top: neck and shoulders
-ABOVE = 0.55  # face heights kept above the face top: hair
-WIDE = 2.3  # face widths across the crop
-SALIENCY_GRID = 24
-SALIENCY_LEVEL = 0.5  # of the busiest cell's weighted edge strength
-CONCENTRATION = 0.6  # share of all edge strength the busiest region must hold, else the subject is not clearly localised
-CENTRE_PRIOR = 0.5  # how much less a corner cell counts than the middle one
-SALIENCY_PAD = 0.12
-MIN_SIDE = 0.55  # a busiest-region crop is never narrower than this: a subject is rarely tiny, a texture patch is
+TRIM_SIDE = 160
+EMPTY_RANGE = 10  # grey levels a line may vary by and still be flat
+EMPTY_LIGHT, EMPTY_DARK = 238, 18  # only an almost white or black flat line is a border, a flat sky is picture
+MIN_BORDER = 0.12  # of a side: smaller borders are left alone
+TRIM_PAD = 0.02
 WHOLE = (0.0, 0.0, 1.0, 1.0)
 
 
@@ -49,17 +45,6 @@ def describe(box):
     return ",".join(f"{v:.2f}" for v in box)
 
 
-def box_around_face(box):
-    """The head-and-shoulders crop (x, y, w, h fractions) for a face box, more below the face than above, kept inside the picture."""
-    x, y, w, h = box
-    cx = x + w / 2
-    left, right = cx - WIDE * w / 2, cx + WIDE * w / 2
-    top, bottom = y - ABOVE * h, y + BELOW * h
-    left, top = max(left, 0.0), max(top, 0.0)
-    right, bottom = min(right, 1.0), min(bottom, 1.0)
-    return left, top, right - left, bottom - top
-
-
 def face_in_crop(face_box, crop):
     """The face box (fractions of the picture) re-expressed as fractions of the crop, clamped inside it."""
     fx, fy, fw, fh = face_box
@@ -70,68 +55,43 @@ def face_in_crop(face_box, crop):
     return left, top, max(right - left, 0.01), max(bottom - top, 0.01)
 
 
-def saliency_box(data):
-    """The padded box (fractions) around the busiest region of the picture by edge strength, or None when that is nearly all of it."""
-    from PIL import ImageFilter
+def _margin(profile):
+    """How many leading entries of `profile` (per-line (min, max, mean) of the grey picture) are a flat white or black border."""
+    count = 0
+    for low, high, mean in profile:
+        if high - low >= EMPTY_RANGE or EMPTY_DARK < mean < EMPTY_LIGHT:
+            break
+        count += 1
+    return count
 
+
+def trim_box(data):
+    """The box (fractions) left after cutting flat white or black borders that are at least MIN_BORDER of a side, or None when nothing is that empty."""
     with _open(data) as picture:
         gray = picture.convert("L")
-        gray.thumbnail((192, 192))
-        edges = gray.filter(ImageFilter.GaussianBlur(1.0)).filter(ImageFilter.FIND_EDGES)
-        edges = edges.crop((2, 2, edges.width - 2, edges.height - 2))  # the filter writes a bright frame at the border
-    w, h = edges.size
-    px = edges.load()
-    n = SALIENCY_GRID
-    cells = [[0.0] * n for _ in range(n)]
-    for y in range(h):
-        for x in range(w):
-            cells[y * n // h][x * n // w] += px[x, y]
-    cells = [
-        [cells[r][c] * (1 - CENTRE_PRIOR * min(((r + 0.5) / n - 0.5) ** 2 + ((c + 0.5) / n - 0.5) ** 2, 0.5) * 2) for c in range(n)] for r in range(n)
-    ]
-    peak = max(max(row) for row in cells)
-    if peak <= 0:
+        gray.thumbnail((TRIM_SIDE, TRIM_SIDE))
+    w, h = gray.size
+    px = gray.load()
+    rows = [(min(v), max(v), sum(v) / w) for v in ([px[x, y] for x in range(w)] for y in range(h))]
+    cols = [(min(v), max(v), sum(v) / h) for v in ([px[x, y] for y in range(h)] for x in range(w))]
+    top, bottom = _margin(rows), _margin(rows[::-1])
+    left, right = _margin(cols), _margin(cols[::-1])
+    if top + bottom >= h or left + right >= w or max(top / h, bottom / h, left / w, right / w) < MIN_BORDER:
         return None
-    start = max(((r, c) for r in range(n) for c in range(n)), key=lambda rc: cells[rc[0]][rc[1]])
-    seen, stack = {start}, [start]
-    while stack:
-        r, c = stack.pop()
-        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
-            q = (r + dr, c + dc)
-            if 0 <= q[0] < n and 0 <= q[1] < n and q not in seen and cells[q[0]][q[1]] >= SALIENCY_LEVEL * peak:
-                seen.add(q)
-                stack.append(q)
-    total = sum(sum(row) for row in cells)
-    if sum(cells[r][c] for r, c in seen) < CONCENTRATION * total:
+    x0, x1 = max(left / w - TRIM_PAD, 0.0), min(1.0 - right / w + TRIM_PAD, 1.0)
+    y0, y1 = max(top / h - TRIM_PAD, 0.0), min(1.0 - bottom / h + TRIM_PAD, 1.0)
+    if x1 - x0 < 0.2 or y1 - y0 < 0.2:
         return None
-    rows, cols = [r for r, _ in seen], [c for _, c in seen]
-    x0, x1, y0, y1 = min(cols) / n, (max(cols) + 1) / n, min(rows) / n, (max(rows) + 1) / n
-    padx, pady = (x1 - x0) * SALIENCY_PAD, (y1 - y0) * SALIENCY_PAD
-    x0, x1, y0, y1 = max(x0 - padx, 0.0), min(x1 + padx, 1.0), max(y0 - pady, 0.0), min(y1 + pady, 1.0)
-    x0, x1 = _at_least(x0, x1)
-    y0, y1 = _at_least(y0, y1)
-    box = (x0, y0, x1 - x0, y1 - y0)
-    return None if box[2] * box[3] > 0.7 else box
+    return x0, y0, x1 - x0, y1 - y0
 
 
-def _at_least(low, high):
-    """The interval widened about its middle to MIN_SIDE and kept inside 0..1."""
-    if high - low >= MIN_SIDE:
-        return low, high
-    mid = (low + high) / 2
-    low, high = mid - MIN_SIDE / 2, mid + MIN_SIDE / 2
-    shift = max(0.0, -low) - max(0.0, high - 1.0)
-    return low + shift, high + shift
-
-
-def choose(data):
-    """(crop box, face box in the crop or None, mode) for a picture: around its largest face, else its busiest region, else all of it."""
-    found = face.largest_face(data)
-    if found:
-        box = box_around_face(found[0])
-        return box, face_in_crop(found[0], box), "face"
+def choose(data, detect_face=True):
+    """(crop box, face box in the crop or None, mode): only flat borders are cut, the face (when asked for) is located and never zoomed on."""
     try:
-        busy = saliency_box(data)
+        box = trim_box(data)
     except SourceError:
-        busy = None
-    return (busy, None, "saliency") if busy else (WHOLE, None, "whole")
+        box = None
+    box = box or WHOLE
+    found = face.largest_face(data) if detect_face else None
+    face_box = face_in_crop(found[0], box) if found else None
+    return box, face_box, "trim" if box != WHOLE else "whole"

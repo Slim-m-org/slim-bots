@@ -117,15 +117,15 @@ def test_the_color_command_paints_the_whole_picture_in_batches_and_credits_the_s
     assert f"the whole picture in colour with {len(rig.client.placed)} strokes" in reply and '"A cat" by Sam (CC BY 2.0) https://page/1' in reply
 
 
-def test_color_uses_the_attachment_and_does_not_crop_to_a_face():
+def test_color_uses_the_attachment_and_does_not_look_for_a_face():
     rig = rig_for()
     rig.client.respond("GET", "/attachments/a1", picture(three_bands))
-    original = draw.crop.choose
-    draw.crop.choose = lambda data: (_ for _ in ()).throw(AssertionError("color must not crop"))
+    original = draw.crop.face.largest_face
+    draw.crop.face.largest_face = lambda data: (_ for _ in ()).throw(AssertionError("color must not look for a face"))
     try:
         say_with(rig, "!draw color", attachments=[{"id": "a1", "content_type": "image/png"}])
     finally:
-        draw.crop.choose = original
+        draw.crop.face.largest_face = original
     assert rig.searches == [] and rig.client.placed
 
 
@@ -179,6 +179,25 @@ def test_paste_and_color_undo_like_any_other_drawing():
     placed = [p["id"] for p in rig.client.placed]
     assert "removed your drawing" in say_with(rig, "!draw undo")
     assert [i for op in rig.client.ops for i in op["object_ids"]] == placed
+
+
+def test_a_busy_picture_is_painted_bigger_than_a_plain_one_in_the_same_region():
+    def stripes(image):
+        for x in range(0, image.width, 4):
+            image.paste((20, 20, 20), (x, 0, x + 2, image.height))
+
+    def gradient(image):
+        for y in range(image.height):
+            v = 60 + y * 150 // image.height
+            image.paste((v, v, v), (0, y, image.width, y + 1))
+
+    wide = plan.Region(0, 0, 1600, 1000)
+
+    def span(data):
+        objects = colorize.color_strokes(data, wide, 4000)
+        return max(o.x + o.w for o in objects) - min(o.x for o in objects)
+
+    assert span(picture(stripes, (320, 240))) > 1.2 * span(picture(gradient, (320, 240)))
 
 
 if __name__ == "__main__":

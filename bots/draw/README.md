@@ -29,7 +29,7 @@ If you are in no call it asks you to join one.
 | `!draw photo [subject]` | anyone | a line drawing traced from a photo (the attached image, else the best freely licensed picture of the subject, credited); no model, no tokens; one per member per minute |
 | `!draw color [subject]` | anyone | the whole picture (attached, else the first picture found, credited) as coloured brushwork: rows of touching strokes, each a run of one colour from a 48-colour palette; no crop, no model, no tokens; one per member per minute |
 | `!draw paste [subject]` | anyone | the picture itself as one image object on the canvas (uploaded as an attachment, sized into the free area), credited; no drawing |
-| `!draw shaded [subject]` (alias `dots`) | anyone | a tonal squiggle portrait of the image attached to your message, else of the first picture found for the subject (credited), cropped to the face and drawn only on the subject; no model, no tokens; one per member per minute |
+| `!draw shaded [subject]` (alias `dots`) | anyone | a tonal squiggle portrait of the image attached to your message, else of the first picture found for the subject (credited), drawn whole with its background, no face crop; no model, no tokens; one per member per minute |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
 | `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
@@ -97,7 +97,7 @@ There is no content scanning, as everywhere in slim-m: the bot is rate limited, 
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
 | `DRAW_COLOR_MAX` | `2000` | the most strokes one `!draw color` painting may use, 200 to 4000 |
-| `DRAW_SHADED_MAX` | `600` | the most strokes one `!draw shaded` portrait may use, 50 to 1500 (`DRAW_DOTS_MAX` is still read if this is unset) |
+| `DRAW_SHADED_MAX` | `1500` | the most strokes one `!draw shaded` picture may use, 200 to 4000 (`DRAW_DOTS_MAX` is still read if this is unset) |
 | `DRAW_BOARD` | `dark` | `dark` or `light`: which board `photo` and `shaded` draw for (see below) |
 | `DRAW_PHOTO_SHADING` | off | `1` adds pen hatching inside the face to `!draw photo` |
 | `SERPAPI_KEY` | empty | when set, SerpAPI's Google Images results are tried first |
@@ -132,13 +132,15 @@ There is no licence filter; the reply credits the page the picture came from (Se
 Every request has a timeout, an honest User-Agent naming the bot, and a 3 MB size cap, and a source that fails is skipped and noted in the command's log line.
 `!draw trace` uses the same sources.
 
-## Cropping to the subject
+## Whole pictures, sized by detail
 
-No model is involved, so `photo` and `shaded` work with no API key and spend no tokens (only `!draw <prompt>` uses the key).
-The bot looks for a face with OpenCV's YuNet detector (`face_detection_yunet_2023mar.onnx`, MIT, shipped in this directory with its licence) and falls back to OpenCV's bundled Haar frontal-face cascade if the model cannot load.
-With a face, the picture is cropped to head and shoulders around the largest face (2.3 face widths across, more below the face than above) and the face box is kept for the next steps.
-Without one, it is cropped to the busiest region by edge strength, padded, when that region clearly holds most of the picture's detail; otherwise the whole picture is used.
-The log line carries `crop="face x,y,w,h"`, `crop="saliency ..."` or `crop="whole ..."`.
+No model is involved, so `photo`, `shaded` and `color` work with no API key and spend no tokens (only `!draw <prompt>` uses the key).
+None of them zooms on a face or masks a subject: the whole picture is drawn, background included, and the only crop is flat white or black borders of at least 12 percent of a side (`crop.trim_box`).
+`photo` still looks for a face (OpenCV's YuNet detector, `face_detection_yunet_2023mar.onnx`, MIT, shipped here with its licence, else the bundled Haar cascade) but only to lower its edge thresholds there; the picture is not cut to it.
+The log line carries `crop="trim x,y,w,h"` or `crop="whole ..."`.
+
+`sizing.py` measures detail as the share of pixels on a clear edge in a 256 pixel copy, from 0 (plain) to 1 (busy).
+Detail sets how much of the free region the drawing uses (70 to 100 percent of what fits, at most 1600 units wide) and, for `shaded` and `color`, how many rows to start from (40 to 200 for shaded, 48 to 220 for color); rows are then reduced until the strokes fit the budget.
 
 ## Line drawings from a photo
 
@@ -154,8 +156,7 @@ A line is split into pieces of at most 150 points sharing a joint, each a stroke
 ## Dark and light boards
 
 The canvas has no background colour a bot can read, so `photo` and `shaded` draw for one board, `DRAW_BOARD` (default `dark`, since most of the app's themes are dark).
-On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive (the darkest quarter of the subject stays bare, an S-curve and gamma separate the mid tones, and bright wall above and beside the head is dropped so only hair-dark pixels count there); on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
-The subject mask works the same either way: whatever is not the subject gets no ink, so the board shows through.
+On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive (the darkest quarter of the picture stays bare and an S-curve and gamma separate the mid tones); on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
 A viewer on the opposite theme sees the drawing inverted, a light-ink drawing on a light board for example, and a client that does not render `#rrggbb` ink paints the theme's default ink, which still reads as a drawing.
 
 ## Colour paintings
@@ -173,13 +174,13 @@ It is undone like any drawing, though the uploaded file stays on the server.
 ## Shaded portraits
 
 `!draw shaded` (and its old name `dots`) draws the picture as wavy scanlines: each row's wave gets taller and tighter where the picture is darker, and the pen lifts where it is light, so tone reads as density.
-It is applied to the subject only: with a face box, an ellipse round the head and a wider one for the shoulders fades to paper, with weights fading smoothly so no line stops dead; without a face, pixels near the picture's border colour are flattened to paper, a vignette fades the corners, and a pale subject on a darker background is drawn light-on-dark so the subject, not the ground, gets the lines.
-Tone is stretched over the subject's own range (a subject with almost no tone range is drawn as one even mid tone) so a mid-tone face keeps its shadows, rows are as many as fit under the stroke budget (up to 100), short gaps are bridged so a row is a few strokes, and each stroke is at most 150 points.
+The whole picture is drawn and the board decides which tones get ink: on a dark board the light tones (the darkest quarter stays bare), on a light board the dark ones, so the background is mapped like everything else.
+Tone is stretched over the picture's own range (one with almost no tone range draws nothing), rows start from the detail-based count and drop until they fit the stroke budget, short gaps are bridged so a row is a few strokes, and each stroke is at most 150 points.
 
 ### How these were chosen
 
 Several ways of turning a photo into a stroke budget were rendered side by side for an official portrait of Barack Obama, a Taylor Swift photo, the Eiffel Tower and a golden retriever: edge contours, scanline squiggles, stippling joined by a nearest-neighbour path, tone hatching and marching-squares tone contours.
-Tone methods need the subject separated from its background, which is why `shaded` carries a subject mask and `photo` stays on edges; tone contours read as a mask and stippling fills the frame.
+Tone contours read as a mask and stippling fills the frame, so `photo` stays on edges and `shaded` on scanlines.
 The algorithms of the plotter tools (linedraw, DrawingBotV3's sketch and squiggle modes, potrace) were studied from their published descriptions and behaviour and reimplemented here; `THIRD_PARTY.md` lists them, their licences and what was taken.
 
 ## Replies and the log

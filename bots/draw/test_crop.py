@@ -25,13 +25,13 @@ def picture(painter, size=(300, 400), ground=(255, 255, 255)):
     return out.getvalue()
 
 
-def busy_corner(image):
+def framed(image):
     from PIL import ImageDraw
 
     pen = ImageDraw.Draw(image)
-    for i in range(0, 90, 6):
-        pen.line([(150, 100 + i), (270, 100 + i)], fill=(0, 0, 0), width=2)
-        pen.line([(150 + i, 100), (150 + i, 190)], fill=(0, 0, 0), width=2)
+    for i in range(0, 120, 6):
+        pen.line([(60, 120 + i), (250, 120 + i)], fill=(90, 40, 40), width=2)
+        pen.line([(60 + i, 100), (60 + i, 260)], fill=(30, 30, 90), width=2)
 
 
 @contextlib.contextmanager
@@ -44,47 +44,34 @@ def faces(answer):
         face.largest_face = original
 
 
-def test_the_crop_around_a_face_keeps_more_below_than_above_and_stays_inside_the_picture():
-    x, y, w, h = crop.box_around_face((0.4, 0.2, 0.2, 0.25))
-    above, below = 0.2 - y, (y + h) - (0.2 + 0.25)
-    assert below > 1.5 * above and abs((x + w / 2) - 0.5) < 1e-9 and abs(w - 0.2 * crop.WIDE) < 1e-9
-    corner = crop.box_around_face((0.0, 0.0, 0.3, 0.3))
-    assert corner[0] == 0.0 and corner[1] == 0.0 and corner[0] + corner[2] <= 1.0 and corner[1] + corner[3] <= 1.0
 
 
 def test_the_face_box_is_re_expressed_in_the_crops_own_fractions():
-    box = crop.box_around_face((0.4, 0.2, 0.2, 0.25))
+    box = (0.1, 0.05, 0.7, 0.8)
     fx, fy, fw, fh = crop.face_in_crop((0.4, 0.2, 0.2, 0.25), box)
     assert abs(fx * box[2] + box[0] - 0.4) < 1e-9 and abs(fw * box[2] - 0.2) < 1e-9 and 0 <= fx and fx + fw <= 1.0 and 0 <= fy and fy + fh <= 1.0
 
 
-def test_a_detected_face_decides_the_crop_and_the_mode():
+
+
+
+
+
+
+def test_only_flat_white_or_black_borders_are_trimmed_and_a_sky_or_a_busy_picture_is_not():
+    left, top, w, h = crop.trim_box(picture(framed))
+    assert left < 0.25 and top < 0.35 and 0.5 < w < 0.8 and h < 0.7 and left + w <= 1.0 and top + h <= 1.0
+    black = picture(framed, ground=(0, 0, 0))
+    assert crop.trim_box(black) is not None
+    assert crop.trim_box(picture(lambda im: im.paste((120, 160, 220), (0, 0, 300, 400)))) is None
+    assert crop.trim_box(picture(lambda im: im.paste((120, 160, 220), (0, 0, 300, 150)), ground=(90, 90, 90))) is None
+
+
+def test_choose_locates_a_face_without_zooming_on_it_and_skips_the_search_when_not_asked():
     with faces(((0.4, 0.2, 0.2, 0.25), "yunet")):
-        box, face_box, mode = crop.choose(picture(lambda im: None))
-    assert mode == "face" and face_box is not None and box[2] < 0.6
-
-
-def test_without_a_face_a_clearly_busiest_region_is_the_crop_and_it_is_padded():
-    with faces(None):
-        box, face_box, mode = crop.choose(picture(busy_corner))
-    assert mode == "saliency" and face_box is None
-    x, y, w, h = box
-    assert w < 0.9 and h < 0.9 and x < 0.5 < x + w + 0.3 and w >= crop.MIN_SIDE and h >= crop.MIN_SIDE and 0 <= x and x + w <= 1.0 and y + h <= 1.0
-    assert x + w > 0.9 and y < 0.25
-
-
-def test_a_picture_with_no_clear_subject_is_used_whole():
-    def texture(image):
-        state = 3
-        for xx in range(image.width):
-            for yy in range(image.height):
-                state = (state * 1103515245 + 12345) % 2**31
-                v = (state >> 8) % 256
-                image.putpixel((xx, yy), (v, v, v))
-
-    with faces(None):
-        assert crop.choose(picture(lambda im: None))[2] == "whole"
-        assert crop.choose(picture(texture))[2] == "whole"
+        box, face_box, mode = crop.choose(picture(lambda im: im.paste((120, 120, 120), (0, 0, 300, 400))))
+        assert box == crop.WHOLE and mode == "whole" and all(abs(a - b) < 1e-9 for a, b in zip(face_box, (0.4, 0.2, 0.2, 0.25)))
+        assert crop.choose(picture(lambda im: None), False)[1] is None
 
 
 def test_the_crop_is_cut_from_the_picture_and_described():
@@ -147,27 +134,10 @@ def run_photo(rig, text="!draw photo a cat"):
     return [line for line in out.getvalue().splitlines() if line.startswith("draw ")][-1]
 
 
-def test_photo_crops_around_the_face_with_no_model_and_logs_mode_and_boxes():
-    rig = rig_for_crop()
-    with faces(((0.4, 0.2, 0.2, 0.25), "yunet")):
-        line = run_photo(rig)
-    assert 'crop="face ' in line and "face=" not in line.split("crop=")[0]
-    (width, height), face_box = rig.seen[0]
-    assert width < 300 * 0.7 and face_box is not None
 
 
-def test_without_a_face_photo_logs_the_whole_picture_mode():
-    rig = rig_for_crop()
-    with faces(None):
-        line = run_photo(rig)
-    assert 'crop="whole 0.00,0.00,1.00,1.00"' in line and rig.seen[0][1] is None
 
 
-def test_shaded_is_cropped_the_same_way():
-    rig = rig_for_crop()
-    with faces(((0.4, 0.2, 0.2, 0.25), "yunet")):
-        line = run_photo(rig, "!draw shaded a cat")
-    assert "crop=" in line
 
 
 def test_photo_and_shaded_never_ask_the_model_and_spend_no_daily_call():
