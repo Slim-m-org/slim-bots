@@ -11,9 +11,9 @@ CHUNK_POINTS = 150
 STROKE_WIDTH = 1.6
 INK = {"dark": "#f2f2f2", "light": "#1f1f1f"}  # a light ink on a dark board, a dark ink on a light one
 ROWS_MIN, ROWS_MAX = 24, 100
-BASE_FREQUENCY = 0.9  # radians per pixel in the lightest drawn tone
-TONE_FREQUENCY = 1.7  # extra radians per pixel at the darkest
-AMPLITUDE = 0.85  # of the row pitch at the darkest
+BASE_FREQUENCY = 1.0  # radians per pixel in the lightest drawn tone
+TONE_FREQUENCY = 1.0  # extra radians per pixel at the darkest
+AMPLITUDE = 1.0  # of the row pitch at the darkest
 TONE_GAMMA = 1.35  # above 1 keeps mid tones (skin) light so shadows and features stand out
 JOIN_GAP = 5  # pixels of light a row may cross without lifting the pen
 MIN_RUN = 6  # points: shorter runs are specks
@@ -23,7 +23,9 @@ FLAT_INK = 0.6
 PEN_UP = 0.12  # darkness below which the pen lifts, so light areas stay empty paper
 SIMPLIFY = 0.45
 BACKGROUND = (28.0, 85.0)  # RGB distance from the border colour over which a pixel fades from paper to subject
-PAPER_PERCENT = (0.03, 0.9)  # tone percentiles that map to full ink and bare paper inside the subject
+PAPER_PERCENT = (0.03, 0.9)
+LIGHT_INK_PERCENT = (0.25, 0.97)  # on a dark board the darkest quarter of the subject stays bare and the lightest 3 percent is full ink
+HEAD_ZONE = 0.35  # face heights above the face top before only dark pixels (hair) count as subject  # tone percentiles that map to full ink and bare paper inside the subject
 
 
 def _smoothstep(low, high, value):
@@ -65,20 +67,44 @@ def _head_and_shoulders(face, w, h, x, y):
     return max(head, 0.8 * shoulders)
 
 
+def _hair_limit(rgb, face):
+    """The luminance below which a pixel beside or above the head can be hair: 0.8 of the face's own median."""
+    w, h = rgb.size
+    fx, fy, fw, fh = face
+    px = rgb.load()
+    samples = sorted(
+        0.299 * px[x, y][0] + 0.587 * px[x, y][1] + 0.114 * px[x, y][2]
+        for y in range(int(fy * h), int(min((fy + fh) * h, h)), 2) for x in range(int(fx * w), int(min((fx + fw) * w, w)), 2)
+    )
+    return 0.8 * samples[len(samples) // 2] if samples else 255.0
+
+
+def _off_the_head(face, w, h, x, y):
+    """True above or beside the head's core, where only hair-dark pixels belong to the subject."""
+    fx, fy, fw, fh = face
+    cx, cy = (fx + fw / 2) * w, (fy + fh / 2) * h
+    core = _ellipse(x, y, cx, cy, 0.62 * fw * w, 0.72 * fh * h)
+    return core < 0.95 and y < (fy + fh) * h or y < (fy - HEAD_ZONE * fh) * h
+
+
 def subject_mask(rgb, face):
-    """Per-pixel weights 0..1, row by row: 1 on the subject, 0 on background, soft between. With a face box, an ellipse around head and shoulders; else distance from the border colour."""
+    """Per-pixel weights 0..1, row by row: 1 on the subject, 0 on background; round a face box an ellipse with the bright wall above and beside the head dropped, else distance from the border colour."""
     w, h = rgb.size
     border = _border_colour(rgb)
     px = rgb.load()
+    limit = _hair_limit(rgb, face) if face else 0.0
     rows = []
     for y in range(h):
         row = []
         for x in range(w):
-            away = _smoothstep(*BACKGROUND, math.dist(px[x, y], border))
-            if not face:
-                away *= 1.0 - 0.8 * _smoothstep(0.55, 1.15, math.hypot((x / w - 0.5) / 0.5, (y / h - 0.5) / 0.5))
             if face:
                 away = _head_and_shoulders(face, w, h, x, y)
+                if away > 0 and _off_the_head(face, w, h, x, y):
+                    lum = 0.299 * px[x, y][0] + 0.587 * px[x, y][1] + 0.114 * px[x, y][2]
+                    away *= 1.0 - _smoothstep(0.9 * limit, 1.15 * limit, lum)
+            else:
+                away = _smoothstep(*BACKGROUND, math.dist(px[x, y], border))
+                away *= 1.0 - 0.8 * _smoothstep(0.55, 1.15, math.hypot((x / w - 0.5) / 0.5, (y / h - 0.5) / 0.5))
             row.append(away)
         rows.append(row)
     return rows
@@ -99,23 +125,29 @@ def _subject_is_light(gray, board):
     return gap > 0 if abs(gap) > LIGHT_SUBJECT else board == "dark"
 
 
+def _scurve(t):
+    return t * t * (3 - 2 * t)
+
+
 def _ink_amount(gray, mask, ink_on_light):
-    """Ink amount 0 (bare board) to 1 (full ink), stretched over the subject's own range and zero outside it; `ink_on_light` puts the ink on the light tones."""
+    """Ink amount 0 (bare board) to 1 (full ink) over the subject's own tone range; with `ink_on_light` the darkest quarter stays bare and an S-curve and gamma separate mid tones."""
     w, h = gray.size
     px = gray.load()
     inside = sorted(px[x, y] for y in range(0, h, 2) for x in range(0, w, 2) if mask[y][x] > 0.5)
     if len(inside) < 50:
         return None
     if ink_on_light:
-        inside = sorted(255 - v for v in inside)
-    lo, hi = inside[int(len(inside) * PAPER_PERCENT[0])], inside[int(len(inside) * PAPER_PERCENT[1])]
+        lo, hi = inside[int(len(inside) * LIGHT_INK_PERCENT[0])], inside[min(int(len(inside) * LIGHT_INK_PERCENT[1]), len(inside) - 1)]
+    else:
+        lo, hi = inside[int(len(inside) * PAPER_PERCENT[0])], inside[int(len(inside) * PAPER_PERCENT[1])]
     span = max(hi - lo, 1)
     flat = hi - lo < FLAT_RANGE
+
     def tone(x, y):
         if flat:
             return FLAT_INK * mask[y][x]
-        value = 255 - px[x, y] if ink_on_light else px[x, y]
-        return min(max((hi - value) / span, 0.0), 1.0) ** TONE_GAMMA * mask[y][x]
+        t = (px[x, y] - lo) / span if ink_on_light else (hi - px[x, y]) / span
+        return _scurve(min(max(t, 0.0), 1.0)) ** TONE_GAMMA * mask[y][x]
 
     return [[tone(x, y) for x in range(w)] for y in range(h)]
 
@@ -135,7 +167,7 @@ def _row(dark, w, y, pitch):
         elif run and x - last > JOIN_GAP:
             runs.append(run)
             run = []
-        run.append((float(x), min(max(y + AMPLITUDE * pitch * d * math.sin(phase), 0.0), h - 1.0)))
+        run.append((float(x), min(max(y + AMPLITUDE * pitch * d ** 0.85 * math.sin(phase), 0.0), h - 1.0)))
         last = x
     if run:
         runs.append(run)

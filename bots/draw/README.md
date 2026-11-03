@@ -140,7 +140,7 @@ A line is split into pieces of at most 150 points sharing a joint, each a stroke
 ## Dark and light boards
 
 The canvas has no background colour a bot can read, so `photo` and `shaded` draw for one board, `DRAW_BOARD` (default `dark`, since most of the app's themes are dark).
-On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive; on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
+On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive (the darkest quarter of the subject stays bare, an S-curve and gamma separate the mid tones, and bright wall above and beside the head is dropped so only hair-dark pixels count there); on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
 The subject mask works the same either way: whatever is not the subject gets no ink, so the board shows through.
 A viewer on the opposite theme sees the drawing inverted, a light-ink drawing on a light board for example, and a client that does not render `#rrggbb` ink paints the theme's default ink, which still reads as a drawing.
 

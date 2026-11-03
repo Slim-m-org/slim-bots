@@ -165,6 +165,47 @@ def test_the_board_setting_defaults_to_dark():
     assert draw.BOARD == "dark"
 
 
+def _ramp_ink(board_dark):
+    def ramp(image):
+        for x in range(image.width):
+            v = int(255 * x / (image.width - 1))
+            image.paste((v, v, v), (x, 0, x + 1, image.height))
+
+    rgb, gray = squiggle._load(picture(ramp, (256, 40)))
+    mask = [[1.0] * rgb.size[0] for _ in range(rgb.size[1])]
+    return squiggle._ink_amount(gray, mask, board_dark)[20]
+
+
+def test_on_a_dark_board_the_darkest_quarter_is_bare_and_mid_tones_separate():
+    ink = _ramp_ink(True)
+    width = len(ink)
+    assert max(ink[: int(width * 0.22)]) == 0.0
+    assert ink[-3] > 0.9 and ink[int(width * 0.4)] < 0.2 and ink[int(width * 0.7)] > ink[int(width * 0.4)] + 0.3
+    assert all(b >= a - 1e-9 for a, b in zip(ink, ink[1:]))
+
+
+def test_the_wave_carries_tone_more_in_height_than_in_tightness():
+    assert squiggle.TONE_FREQUENCY <= squiggle.BASE_FREQUENCY and squiggle.AMPLITUDE >= 1.0
+
+
+def test_bright_wall_above_and_beside_the_head_is_dropped_but_dark_hair_above_the_face_stays():
+    from PIL import ImageDraw
+
+    def head(image):
+        pen = ImageDraw.Draw(image)
+        w, h = image.size
+        pen.ellipse([w * 0.3, h * 0.35, w * 0.7, h * 0.8], fill=(215, 170, 150))
+        pen.ellipse([w * 0.34, h * 0.28, w * 0.66, h * 0.5], fill=(35, 30, 30))
+        pen.ellipse([w * 0.38, h * 0.4, w * 0.62, h * 0.8], fill=(215, 170, 150))
+
+    rgb, _ = squiggle._load(picture(head, (240, 300), (240, 240, 235)))
+    face = (0.38, 0.4, 0.24, 0.3)
+    mask = squiggle.subject_mask(rgb, face)
+    w, h = rgb.size
+    assert mask[int(h * 0.08)][int(w * 0.5)] < 0.05 and mask[int(h * 0.45)][int(w * 0.27)] < 0.2
+    assert mask[int(h * 0.31)][int(w * 0.5)] > 0.5 and mask[int(h * 0.55)][int(w * 0.5)] > 0.9
+
+
 def test_the_cap_is_never_passed_even_for_a_busy_picture():
     state, rows = 5, []
 
