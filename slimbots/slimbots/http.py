@@ -139,12 +139,12 @@ class AsyncClient:
                 continue
             return response.json() if response.content else None
 
-    async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES, timeout: float = DEFAULT_TIMEOUT) -> bytes:
-        """The raw body of `GET path` with `call`'s auth and base URL; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
+    async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES) -> bytes:
+        """The raw body of `GET path` with `call`'s auth and base URL, within DEFAULT_TIMEOUT; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
         chunks: list[bytes] = []
         size = 0
         try:
-            async with self._http.stream("GET", path, timeout=timeout) as response:
+            async with asyncio.timeout(DEFAULT_TIMEOUT), self._http.stream("GET", path) as response:
                 if response.status_code >= 400:
                     await response.aread()
                     raise _error_from_response(response)
@@ -156,6 +156,8 @@ class AsyncClient:
                     if size > max_bytes:
                         raise ResponseTooLarge(max_bytes)
                     chunks.append(chunk)
+        except TimeoutError as err:
+            raise ApiError(None, "the download timed out") from err
         except httpx.HTTPError as err:
             raise ApiError(None, str(err)) from err
         return b"".join(chunks)

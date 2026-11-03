@@ -5,7 +5,7 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
-- `AsyncClient.download(path, max_bytes=, timeout=)` reads the raw body of a `GET`, such as an attachment, with the client's auth and base URL and a size bound; `ResponseTooLarge` is raised past the bound. `FakeAsyncClient.download` answers it from a stubbed bytes response. Needs the next `slim-m` release (0.17.0).
+- `AsyncClient.download(path, max_bytes=)` reads the raw body of a `GET`, such as an attachment, with the client's auth and base URL, a size bound and a 15 second limit (wrap in `asyncio.timeout` for less); `ResponseTooLarge` is raised past the bound. `FakeAsyncClient.download` answers it from a stubbed bytes response. Needs the next `slim-m` release (0.17.0).
 
 ## 0.16.0
 

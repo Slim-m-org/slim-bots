@@ -21,6 +21,7 @@ STROKE_WIDTH = 3.0
 MAX_QUERY = 60
 MAX_PROMPT = 200
 TILE_BYTES = 2 * 1024 * 1024
+TILE_SECONDS = 10
 ATTEMPTS = 3
 RATE_RETRIES = 4
 RATE_BACKOFF = 1.5
@@ -190,8 +191,9 @@ def defuse(text):
 async def fetch_tile(attachment_id):
     """An image tile's bytes for the screenshot (at most 2 MiB); None when it cannot be read."""
     try:
-        return await bot.client.download(f"/attachments/{attachment_id}", max_bytes=TILE_BYTES, timeout=10)
-    except ApiError:
+        async with asyncio.timeout(TILE_SECONDS):
+            return await bot.client.download(f"/attachments/{attachment_id}", max_bytes=TILE_BYTES)
+    except (ApiError, TimeoutError):
         return None
 
 

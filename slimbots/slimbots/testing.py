@@ -43,7 +43,7 @@ class FakeAsyncClient(AsyncClient):
         self.respond("PUT", "/bots/commands", None)
         self.respond("PUT", "/bots/ui", None)
 
-    async def download(self, path: str, *, max_bytes: int = 10 * 1024 * 1024, timeout: float = 15.0) -> bytes:  # type: ignore[override]
+    async def download(self, path: str, *, max_bytes: int = 10 * 1024 * 1024) -> bytes:  # type: ignore[override]
         """Answers from a `respond("GET", path, b"...")` stub; an `ApiError` stub raises, like a failed download."""
         self.calls.append(("GET", path, None, None))
         body = self._queued(self._responses[("GET", path)]) if ("GET", path) in self._responses else None

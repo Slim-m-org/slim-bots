@@ -102,3 +102,28 @@ async def test_download_turns_an_http_error_and_a_network_failure_into_api_error
         assert err.status is None
     else:
         raise AssertionError("expected ApiError")
+
+
+async def test_download_gives_up_after_the_timeout_with_an_api_error():
+    import asyncio
+
+    from slimbots import http
+    from slimbots.http import ApiError
+
+    async def slow():
+        await asyncio.sleep(1)
+        yield b"late"
+
+    def handler(request):
+        return httpx.Response(200, content=slow())
+
+    original = http.DEFAULT_TIMEOUT
+    http.DEFAULT_TIMEOUT = 0.05
+    try:
+        await _client(handler).download("/x")
+    except ApiError as err:
+        assert err.status is None and "timed out" in str(err)
+    else:
+        raise AssertionError("expected ApiError")
+    finally:
+        http.DEFAULT_TIMEOUT = original

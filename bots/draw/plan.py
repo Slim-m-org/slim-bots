@@ -1,6 +1,7 @@
 """The drawing tools a model may call, and the checks every call passes before anything reaches the canvas."""
 
 import json
+import math
 from dataclasses import dataclass
 
 PALETTE = ("annotation", "amber", "green", "blue", "purple", "pink")
@@ -78,7 +79,7 @@ TOOL_NAMES = {tool["name"] for tool in TOOLS}
 
 def _number(args, key):
     value = args.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value or abs(value) == float("inf"):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise PlanError(f"{key} must be a finite number")
     return float(value)
 
