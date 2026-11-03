@@ -231,11 +231,10 @@ def test_modlog_gaps_reports_none_recorded():
     assert client.sent[-1]["content"] == "no reconnect gaps recorded."
 
 
-def test_modlog_permissions_names_both_gaps():
+def test_modlog_permissions_names_the_one_bit():
     client = setup()
     process(client, message("u1", "!modlog permissions"))
-    assert "Manage messages" in client.sent[-1]["content"]
-    assert "Manage roles" in client.sent[-1]["content"]
+    assert "View moderation history" in client.sent[-1]["content"]
     assert "GET /" not in client.sent[-1]["content"]
 
 

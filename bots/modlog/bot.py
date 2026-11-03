@@ -350,10 +350,9 @@ async def show_gaps(ctx):
 
 async def show_permissions(ctx):
     await ctx.reply(
-        "I hold only View channels and Send messages on this channel. Two more would change what I can do:\n"
-        "- Manage messages: I could read the reason behind a timeout or removal, and fill in a reconnect gap "
-        "instead of leaving it permanent.\n"
-        "- Manage roles: I could show what a role's permissions changed, not only its name and look."
+        "I hold only View channels and Send messages on this channel. One more would change what I can do:\n"
+        "- View moderation history: I could show what a role's permissions changed, read the reason behind a "
+        "timeout or removal, and fill in a reconnect gap instead of leaving it permanent. It is read-only."
     )
 
 

@@ -38,8 +38,7 @@ command traffic - never a substitute for `GET /reports/history`.
 - `!modlog gaps` - the last several reconnect gaps this bot noticed, each a
   permanent hole in the log rather than something a later event fills in.
   It also says how many times the server's moderation cursor was ahead of this log.
-- `!modlog permissions` - what Manage messages and Manage roles would each
-  add, on demand.
+- `!modlog permissions` - what View moderation history would add, on demand.
 
 ## What this proves about permissions
 
@@ -60,9 +59,9 @@ the log was the only bit this bot needed.
 The trade is that three routes this bot might have wanted stayed closed the
 whole time, confirmed live with 403s against the running deployment:
 
-- `GET /roles` (needs `MANAGE_ROLES`) - the only way to list every role by
+- `GET /roles` (needs `MANAGE_ROLES` or `VIEW_MODERATION_HISTORY`) - the only way to list every role by
   id, including one nobody currently holds
-- `GET /reports/history` (needs `MANAGE_MESSAGES`) - the moderation-history
+- `GET /reports/history` (needs `MANAGE_MESSAGES` or `VIEW_MODERATION_HISTORY`) - the moderation-history
   feed, and the only thing that could ever answer "what did I miss"
 - `GET /members/removed` (needs `BAN_MEMBERS`) - the current removal list
 
@@ -78,10 +77,11 @@ showing what a permission-poor bot can and cannot do, not asking for more.
   ambiguous.
 - **A role's permission bits are not on the wire.** A current server puts a
   role's name, colour, grouping and mention rule on `role.changed` (before
-  and after), because members already see them. The bits stay behind
-  `MANAGE_ROLES`, so the permissions line of a role post appears only when
-  this bot holds that right and can read the role list; without it the post
-  still names the role and what else changed.
+  and after), because members already see them. The bits are read from
+  `GET /roles`, which the read-only `VIEW_MODERATION_HISTORY` permission
+  opens (so does `MANAGE_ROLES`, which this bot needs no part of). Without
+  either, the post still names the role and what else changed, and leaves
+  the permissions line out.
 
 ## The gap that cannot be closed - now visible, not just documented
 
