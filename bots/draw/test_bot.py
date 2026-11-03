@@ -17,6 +17,7 @@ from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot 
 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
+real_reference_image = sources.reference_image
 CANDIDATE = {"url": "https://t/1.jpg", "title": "A cat", "creator": "Sam", "license": "CC BY 2.0", "landing": "https://page/1"}
 
 
@@ -29,8 +30,18 @@ class CanvasClient(FakeAsyncClient):
         super().__init__(me_id="bot-1")
         self.placed, self.ops, self.rate_limit_next = [], [], 0
         self.existing, self.viewport_error = [], None
+        self.batches, self.batch_error = [], ApiError(404, {"error": "not found"})
 
     async def call(self, method, path, body=None, **kw):
+        if path.endswith("/canvas/objects/batch") and method == "POST":
+            self.batches.append(body)
+            if self.batch_error:
+                raise self.batch_error
+            if self.rate_limit_next:
+                self.rate_limit_next -= 1
+                raise ApiError(429, {"error": "rate limited"})
+            self.placed.extend(body["objects"])
+            return {"objects": body["objects"]}
         if path.endswith("/canvas/objects") and method == "POST":
             if self.rate_limit_next:
                 self.rate_limit_next -= 1
@@ -55,8 +66,9 @@ class Rig:
         self.client.respond("GET", "/users/u-ann", {**ANN, "role_ids": []})
         self.client.respond("GET", "/users/u-bob", {**BOB, "role_ids": []})
         wire_bot(draw.bot, self.client, db_name="draw.db")
-        asyncio.run(draw.bot.open_store(migrate=draw.init_db))
+        asyncio.run(draw.bot.open_store(migrate=draw.store_db.init_db))
         draw.planner, draw.busy = None, set()
+        draw.batch_state["available"] = None
         draw.bot.me_id = "bot-1"
         self.client.respond("GET", "/members/bot-1/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
         draw.bot.space.channels = {"c-voice": Channel({"id": "c-voice", "name": "lounge", "kind": "voice"})}
@@ -64,11 +76,11 @@ class Rig:
         self.in_call(BOB)
         self.searches, self.grid = [], grid if grid is not None else disc()
 
-        def search(get, query, limit=8):
-            self.searches.append(query)
-            return [CANDIDATE] if results is None else results
+        def find(get, subject, google=None, report=None):
+            self.searches.append(subject)
+            return iter([CANDIDATE] if results is None else results)
 
-        sources.search = search
+        sources.find_pictures = find
         sources.fetch_picture = lambda get, url: b"bytes"
         sources.decode_gray = lambda data, size: (self.grid, len(self.grid[0]), len(self.grid))
 

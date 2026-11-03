@@ -5,3 +5,4 @@ slim-m>=0.17.0
 pillow>=10
 # the model call for !draw <prompt>; imported only when ANTHROPIC_API_KEY is set
 anthropic>=0.40
+opencv-python-headless>=4.8,<5
