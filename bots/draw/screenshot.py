@@ -13,6 +13,7 @@ PAGES = 2
 MAX_TILE_FETCHES = 12
 PEN = {"annotation": (214, 94, 94), "amber": (214, 160, 40), "green": (70, 160, 90), "blue": (70, 120, 210), "purple": (140, 100, 200), "pink": (210, 100, 160)}
 PAPER = (250, 250, 247)
+GUIDE = (150, 175, 210)
 
 
 try:
@@ -116,9 +117,11 @@ def fit_view(region, longest=768):
 def _draw_stroke(draw, view, obj):
     points = obj["props"].get("points") or []
     pairs = [view.px(obj["x"] + points[i], obj["y"] + points[i + 1]) for i in range(0, len(points) - 1, 2)]
-    color = PEN.get(obj["props"].get("color"), PEN["annotation"])
+    guide = bool(obj.get("guide"))
+    color = GUIDE if guide else PEN.get(obj["props"].get("color"), PEN["annotation"])
+    width = 1 if guide else max(1, round(float(obj["props"].get("width") or 3) / view.scale))
     if len(pairs) >= 2:
-        draw.line(pairs, fill=color, width=max(1, round(float(obj["props"].get("width") or 3) / view.scale)), joint="curve")
+        draw.line(pairs, fill=color, width=width, joint="curve")
 
 
 def _draw_box(draw, view, obj, outline, fill=None):
@@ -130,7 +133,7 @@ def _draw_box(draw, view, obj, outline, fill=None):
 def _draw_shape(draw, view, obj):
     left, top, right, bottom = view.box(obj)
     shape, props = obj["props"].get("shape"), obj["props"]
-    blue = PEN["blue"]
+    blue = GUIDE if obj.get("guide") else PEN["blue"]
     if shape == "ellipse":
         draw.ellipse([left, top, right, bottom], outline=blue)
     elif shape in ("line", "arrow"):

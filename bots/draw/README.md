@@ -37,11 +37,15 @@ A prompt is at most 200 characters (60 for a trace), the prompt goes only into t
 1. The bot reads the live objects in a 1600 by 1000 area of the canvas and renders them as a picture: strokes in their colours, shapes as outlines, text and notes as labelled boxes, image tiles shrunk (the first bytes of each, at most 12).
    A coordinate ruler runs along the top and left, and the largest empty rectangle (up to 1000 by 800) is boxed in green.
    If nothing big enough is free it says so instead of drawing over people's work.
-2. The model gets that picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
+2. The bot also searches Openverse for the subject (openly licensed, mature results excluded) and sends the best thumbnail along as a reference photo for proportions and likeness; if nothing is found it carries on without one, and the reply credits the source (title, creator, licence) when one was used.
+   The model gets the board picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
 3. Every tool call is checked before it touches the canvas: inside the free region, up to 400 points per stroke (a long contour is split into pieces that share a joint), a colour from the pen palette, every piece under 4 KiB, text boxes sized from their content, at most `DRAW_MAX_STROKES` objects in all.
    A bad call is skipped and counted in the reply.
+   `draw_stroke` and `draw_shape` take `guide: true` for construction and proportion lines: they show faintly in the model's own view but are never placed on the canvas and do not count against the object cap.
 4. After each round the planned objects are drawn onto a picture of the free region (about 768 pixels on its long side, with a 100-unit grid) and sent back in the tool result, along with which calls were refused and why, so the model can see and fix its own drawing.
 5. Objects are placed about 6 a second, below the canvas write limit of 10 a second, with a backoff when the server says slow down, and their ids are stored for `undo`.
+
+The prompt asks for line art in one ink colour, medium contours and thin detail, sparse hatching instead of filled hair, and a check of each round's picture against the reference, fixing the largest proportion error first.
 
 A model that declines, errors or draws nothing gets a plain sentence back; the API key is never logged or echoed.
 

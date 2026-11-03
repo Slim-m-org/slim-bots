@@ -17,6 +17,7 @@ from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot 
 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
+real_reference_image = sources.reference_image
 CANDIDATE = {"url": "https://t/1.jpg", "title": "A cat", "creator": "Sam", "license": "CC BY 2.0", "landing": "https://page/1"}
 
 

@@ -20,6 +20,7 @@ from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
 FREE = plan.Region(100, 100, 600, 400)
+LINE_IN_BIG = ("draw_stroke", {"points": [[200, 200], [500, 600]]})
 LINE = ("draw_stroke", {"points": [[110, 110], [300, 200], [400, 120]], "color": "blue", "width": 4})
 BOX = ("draw_shape", {"shape": "ellipse", "x": 150, "y": 150, "w": 100, "h": 80})
 LABEL = ("add_text", {"text": "hi @everyone", "x": 120, "y": 400, "size": "small", "color": "green"})
@@ -36,9 +37,10 @@ def inside(free):
 
 class FakePlanner:
     def __init__(self, calls=None, error=None):
-        self.calls, self.error, self.seen = calls, error, []
+        self.calls, self.error, self.seen, self.reference = calls, error, [], None
 
-    async def plan(self, prompt, png, free, max_calls=150, review=None):
+    async def plan(self, prompt, png, free, max_calls=150, review=None, reference=None):
+        self.reference = reference
         self.seen.append((prompt, png, free))
         if self.error:
             raise self.error
@@ -367,6 +369,94 @@ def test_undo_outside_a_call_asks_to_join_one():
     rig.say("!draw a cat")
     draw.bot.voice._member_channel.clear()
     assert "join a voice channel first" in rig.say("!draw undo")
+
+
+def test_guides_are_shown_faintly_to_the_model_but_never_placed():
+    free = plan.Region(100, 100, 1000, 800)
+    guide = ("draw_stroke", {"points": [[150, 500], [900, 500]], "guide": True})
+    real = ("draw_stroke", {"points": [[200, 200], [500, 600]], "width": 3})
+    objects, problems = plan.validate_plan([guide, real, ("draw_shape", {"shape": "ellipse", "x": 300, "y": 300, "w": 100, "h": 100, "guide": True})], free, 150)
+    assert problems == [] and len(objects) == 1 and not objects[0].guide
+    assert "guide" not in objects[0].props
+    verdicts, with_guides = asyncio.run(draw.make_review(free)([guide, real]))
+    _, without = asyncio.run(draw.make_review(free)([real]))
+    assert [ok for ok, _ in verdicts] == [True, True] and with_guides != without
+
+
+def test_guides_do_not_count_against_the_object_cap():
+    free = plan.Region(100, 100, 1000, 800)
+    guides = [("draw_stroke", {"points": [[150, 150 + i], [900, 150 + i]], "guide": True}) for i in range(10)]
+    objects, problems = plan.validate_plan(guides + [LINE_IN_BIG] * 2, free, 2)
+    assert len(objects) == 2 and problems == []
+
+
+def test_a_guide_is_never_sent_to_the_canvas_by_a_drawing():
+    planner = FakePlanner(calls=None)
+    rig = rig_with(planner)
+
+    async def with_guides(prompt, png, free, max_calls=150, review=None, reference=None):
+        guide = ("draw_stroke", {"points": [[free.x + 10, free.y + 50], [free.x + 300, free.y + 50]], "guide": True})
+        real = ("draw_stroke", {"points": [[free.x + 10, free.y + 10], [free.x + 300, free.y + 100]]})
+        return [guide, real]
+
+    planner.plan = with_guides
+    rig.say("!draw a cat")
+    assert len(rig.client.placed) == 1 and "1 object" in rig.client.sent[-1]["content"]
+
+
+def test_a_reference_photo_goes_to_the_model_and_is_credited_in_the_reply():
+    from PIL import Image
+
+    planner = FakePlanner()
+    rig = rig_with(planner)
+    jpeg = io.BytesIO()
+    Image.new("RGB", (1600, 900), (10, 120, 200)).save(jpeg, "PNG")
+    base.sources.fetch_picture = lambda get, url: jpeg.getvalue()
+    base.sources.reference_image = base.real_reference_image
+    rig.say("!draw barack obama portrait")
+    data, media_type = planner.reference
+    assert media_type == "image/jpeg" and data.startswith(b"\xff\xd8")
+    reply = rig.client.sent[-1]["content"]
+    assert "Reference: \"A cat\" by Sam (CC BY 2.0) https://page/1" in reply
+
+
+def test_without_a_found_picture_there_is_no_reference_and_no_credit():
+    planner = FakePlanner()
+    rig = rig_with(planner)
+    base.sources.search = lambda get, query, limit=8: []
+    rig.say("!draw something abstract")
+    assert planner.reference is None and "Reference:" not in rig.client.sent[-1]["content"]
+
+
+def test_a_failing_search_or_download_is_skipped_silently():
+    planner = FakePlanner()
+    rig = rig_with(planner)
+
+    def broken(get, query, limit=8):
+        raise base.sources.SourceError("the picture search answered http 500")
+
+    base.sources.search = broken
+    rig.say("!draw a cat")
+    assert planner.reference is None and rig.client.placed
+
+
+def test_the_reference_block_is_in_the_first_user_turn_only_when_there_is_one():
+    client, sent = _conversation([("tool_use", 1), ("end_turn", 0)])
+    asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("a cat", b"png", FREE, reference=(b"\xff\xd8jpg", "image/jpeg")))
+    blocks = sent[0]["messages"][0]["content"]
+    assert [b["type"] for b in blocks] == ["image", "text", "image", "text"] and blocks[2]["source"]["media_type"] == "image/jpeg"
+    assert "Reference photo" in blocks[3]["text"]
+    client, sent = _conversation([("end_turn", 0)])
+    try:
+        asyncio.run(ai.AnthropicPlanner("k", "m", 100, client=client).plan("a cat", b"png", FREE))
+    except ai.Refused:
+        pass
+    assert [b["type"] for b in sent[0]["messages"][0]["content"]] == ["image", "text"]
+
+
+def test_the_prompt_tells_the_model_to_use_guides_one_colour_and_the_reference():
+    for phrase in ("guide=true", "one main ink colour", "reference photo", "largest proportion"):
+        assert phrase in ai.SYSTEM
 
 
 def test_the_conversation_stops_at_the_object_cap_and_the_round_limit():

@@ -250,15 +250,30 @@ def make_review(free):
             except plan.PlanError as err:
                 verdicts.append((False, f"not drawn: {err}"))
                 continue
-            if len(accepted) + len(made) > MAX_STROKES:
+            if sum(not o.guide for o in accepted) + sum(not o.guide for o in made) > MAX_STROKES:
                 verdicts.append((False, f"not drawn: the {MAX_STROKES} object limit is reached; stop drawing"))
                 continue
             accepted.extend(made)
             verdicts.append((True, f"drawn ({len(made)} object{'' if len(made) == 1 else 's'})"))
-        wire = [{"kind": o.kind, "x": o.x, "y": o.y, "w": o.w, "h": o.h, "props": o.props} for o in accepted]
+        wire = [{"kind": o.kind, "x": o.x, "y": o.y, "w": o.w, "h": o.h, "props": o.props, "guide": o.guide} for o in accepted]
         return verdicts, await screenshot.render(wire, screenshot.fit_view(free), None, ruler=100)
 
     return review
+
+
+async def find_reference(prompt):
+    """(picture for the model, candidate) of the best openly licensed match for the subject, or None; never raises."""
+    try:
+        found = await asyncio.to_thread(sources.search, functools.partial(get, token=OPENVERSE_TOKEN), prompt[:100])
+        for candidate in found[:ATTEMPTS]:
+            try:
+                data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
+                return await asyncio.to_thread(sources.reference_image, data), candidate
+            except sources.SourceError:
+                continue
+    except sources.SourceError:
+        pass
+    return None
 
 
 async def _ai_draw(ctx, prompt, channel_id, name):
@@ -277,8 +292,10 @@ async def _ai_draw(ctx, prompt, channel_id, name):
     if not await bot.store.run(take_ai_call, time.strftime("%Y-%m-%d", time.gmtime()), AI_DAILY_CAP):
         await ctx.reply_ephemeral("I have used up today's drawing budget; try again tomorrow.", public_fallback=True)
         return
+    found = await find_reference(prompt)
+    reference, source = found if found else (None, None)
     try:
-        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES, review=make_review(free))
+        calls = await planner.plan(defuse(prompt), png, free, max_calls=MAX_STROKES, review=make_review(free), reference=reference)
     except ai.Refused as err:
         await ctx.reply_ephemeral(f"{err}; try describing something else.", public_fallback=True)
         return
@@ -296,7 +313,8 @@ async def _ai_draw(ctx, prompt, channel_id, name):
         await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
         return
     skipped = f" ({len(problems)} parts of the plan were skipped)" if problems else ""
-    await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} object{'' if done == 1 else 's'}{skipped}.")
+    credited = f" Reference: \"{defuse(source['title'])}\" by {defuse(source['creator'])} ({source['license']}) {source['landing']}".rstrip() if source else ""
+    await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} object{'' if done == 1 else 's'}{skipped}.{credited}")
 
 
 async def _trace_request(ctx, query):

@@ -2,7 +2,7 @@
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 PALETTE = ("annotation", "amber", "green", "blue", "purple", "pink")
 SHAPES = ("rectangle", "ellipse", "line", "arrow")
@@ -55,6 +55,7 @@ class Planned:
     w: float
     h: float
     props: dict
+    guide: bool = False  # drawn faintly in the model's own view, never placed on the canvas
 
 
 def _tool(name, description, properties, required):
@@ -63,18 +64,19 @@ def _tool(name, description, properties, required):
 
 _COLOR = {"type": "string", "enum": list(PALETTE), "description": "pen colour name"}
 _NUMBER = {"type": "number"}
+_GUIDE = {"type": "boolean", "description": "true for construction and proportion lines: drawn faintly in your view but never placed on the board"}
 
 TOOLS = [
     _tool(
         "draw_stroke",
         f"A freehand line through up to {MAX_POINTS} points in canvas units (use many points for smooth curves; longer lines are split for you); repeat the first point to close a contour. width 1 to {int(MAX_STROKE_WIDTH)}: thin for hatching and detail, thick for bold outlines.",
-        {"points": {"type": "array", "items": {"type": "array", "items": _NUMBER, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": MAX_POINTS}, "color": _COLOR, "width": {"type": "number", "description": "line width, 1 to 24; default 3"}},
+        {"points": {"type": "array", "items": {"type": "array", "items": _NUMBER, "minItems": 2, "maxItems": 2}, "minItems": 2, "maxItems": MAX_POINTS}, "color": _COLOR, "width": {"type": "number", "description": "line width, 1 to 24; default 3"}, "guide": _GUIDE},
         ["points"],
     ),
     _tool(
         "draw_shape",
         "An outlined rectangle, ellipse, line or arrow filling the box x, y, w, h.",
-        {"shape": {"type": "string", "enum": list(SHAPES)}, "x": _NUMBER, "y": _NUMBER, "w": _NUMBER, "h": _NUMBER, "flip_x": {"type": "boolean"}, "flip_y": {"type": "boolean"}},
+        {"shape": {"type": "string", "enum": list(SHAPES)}, "x": _NUMBER, "y": _NUMBER, "w": _NUMBER, "h": _NUMBER, "flip_x": {"type": "boolean"}, "flip_y": {"type": "boolean"}, "guide": _GUIDE},
         ["shape", "x", "y", "w", "h"],
     ),
     _tool(
@@ -207,11 +209,13 @@ def validate_call(name, args, region):
         planned = _label(args, region, "note" if name == "add_note" else "text")
     if any(len(json.dumps(p.props)) >= PROPS_LIMIT for p in planned):
         raise PlanError("the object is larger than 4 KiB")
+    if args.get("guide") is True and name in ("draw_stroke", "draw_shape"):
+        return [replace(p, guide=True) for p in planned]
     return planned
 
 
 def validate_plan(calls, region, cap):
-    """(objects to place, problems) for a model's calls; a bad call is skipped, objects past `cap` dropped."""
+    """(objects to place, problems) for a model's calls; a bad call is skipped, guides are left out, objects past `cap` dropped."""
     objects, problems = [], []
     for name, args in calls:
         try:
@@ -219,8 +223,9 @@ def validate_plan(calls, region, cap):
         except PlanError as err:
             problems.append(f"{name}: {err}")
             continue
-        if len(objects) + len(made) > cap:
+        real = [p for p in made if not p.guide]
+        if len(objects) + len(real) > cap:
             problems.append(f"more than {cap} objects; the rest were dropped")
             break
-        objects.extend(made)
+        objects.extend(real)
     return objects, problems

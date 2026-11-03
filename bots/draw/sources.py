@@ -79,3 +79,22 @@ def decode_gray(data, size):
     except Exception as err:
         raise SourceError("the picture could not be read") from err
     return [pixels[y * width : (y + 1) * width] for y in range(height)], width, height
+
+
+def reference_image(data, side=768):
+    """(JPEG bytes, media type) of a downloaded picture shrunk to at most `side` pixels, for a model to look at."""
+    try:
+        from PIL import Image
+    except ImportError as err:
+        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
+    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+    try:
+        with Image.open(io.BytesIO(data)) as picture:
+            picture.draft("RGB", (side * 2, side * 2))
+            rgb = picture.convert("RGB")
+            rgb.thumbnail((side, side))
+            out = io.BytesIO()
+            rgb.save(out, "JPEG", quality=82)
+    except Exception as err:
+        raise SourceError("the picture could not be read") from err
+    return out.getvalue(), "image/jpeg"
