@@ -4,7 +4,9 @@
 import asyncio
 import contextlib
 import functools
+from dataclasses import replace
 import time
+import uuid
 
 import ai
 import crop
@@ -17,11 +19,13 @@ import sources
 import store_db
 import tracer
 import where
-from slimbots import ApiError, Bot, Permissions
+from slimbots import ApiError, BatchUnavailable, Bot, Permissions
 from slimbots.http import is_rate_limited
-from store_db import SLOTS, add_stroke, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
+from store_db import SLOTS, add_stroke, add_strokes, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
 REMOVE_BATCH = 64  # the server's most object ids in one remove op
+REMOVE_PARALLEL = 3
+BATCH_SIZE = 200  # the server's most objects in one batch placement
 PER_ROW = 3
 STROKE_WIDTH = 3.0
 MAX_QUERY = 60
@@ -43,8 +47,8 @@ PACE_SECONDS = max(bot.setting("DRAW_PACE", 0.15, type=float), 0.1)
 OPENVERSE_TOKEN = bot.setting("OPENVERSE_TOKEN")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
-DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 900, type=int), 50), 1500)
-PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 220, type=int), 20), 400)
+DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 1500, type=int), 50), 3000)
+PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 600, type=int), 20), 1500)
 AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
 AI_REQUEST_TIMEOUT = max(bot.setting("DRAW_AI_REQUEST_TIMEOUT", 90, type=int), 10)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
@@ -61,6 +65,8 @@ planner = ai.make_planner(
 COOLDOWN_SECONDS = 60
 # user id -> monotonic time of that member's last drawing, so one person cannot keep the pen busy.
 last_draw = {}
+# Whether the server has the batch placement route: None until first tried, False once it answered 404 or 405.
+batch_state = {"available": None}
 # Channels with a drawing in progress: one at a time per canvas.
 busy = set()
 
@@ -79,10 +85,48 @@ async def place_with_retry(canvas, planned):
             await asyncio.sleep(RATE_BACKOFF * (attempt + 1))
 
 
-async def place_all(canvas, drawing_id, objects):
-    """Places each object paced under the canvas write limit, remembering its id for undo; returns how many went down."""
+def grouped(objects):
+    """The objects with one shared `props.group`, which the client reads as a single undo step."""
+    group = str(uuid.uuid4())
+    return [replace(o, props={**o.props, "group": group}) for o in objects]
+
+
+async def batch_with_retry(canvas, wire):
+    for attempt in range(RATE_RETRIES):
+        try:
+            return await canvas.place_many(wire)
+        except ApiError as err:
+            if not is_rate_limited(err) or attempt == RATE_RETRIES - 1:
+                raise
+            await asyncio.sleep(RATE_BACKOFF * (attempt + 1))
+
+
+async def place_batches(canvas, drawing_id, objects):
+    """Places `objects` in batches; returns how many went down, or None when the server has no batch route (noted for the process)."""
     done = 0
-    for planned in objects:
+    for start in range(0, len(objects), BATCH_SIZE):
+        chunk = objects[start : start + BATCH_SIZE]
+        wire = [{"kind": o.kind, "x": o.x, "y": o.y, "w": o.w, "h": o.h, "props": o.props} for o in chunk]
+        try:
+            ids = await batch_with_retry(canvas, wire)
+        except BatchUnavailable:
+            batch_state["available"] = False
+            return done if done else None
+        await bot.store.run(add_strokes, drawing_id, ids)
+        done += len(ids)
+    return done
+
+
+async def place_all(canvas, drawing_id, objects):
+    """Places the drawing as one undo group and keeps the ids for undo; batches when the server can, else paced singles; returns the count."""
+    objects = grouped(objects)
+    done = 0
+    if batch_state["available"] is not False:
+        placed = await place_batches(canvas, drawing_id, objects)
+        if placed is not None and batch_state["available"] is not False:
+            return placed
+        done = placed or 0
+    for planned in objects[done:]:
         placed = await place_with_retry(canvas, planned)
         await bot.store.run(add_stroke, drawing_id, placed["id"])
         done += 1
@@ -126,9 +170,21 @@ def credit(candidate, query, count):
     return f"drew \"{query}\" with {count} strokes from \"{candidate['title']}\" by {candidate['creator']} ({candidate['license']}) {candidate['landing']}".strip()
 
 
+async def remove_batch(canvas, ids, gate):
+    async with gate:
+        for attempt in range(RATE_RETRIES):
+            try:
+                return await canvas.remove(ids)
+            except ApiError as err:
+                if not is_rate_limited(err) or attempt == RATE_RETRIES - 1:
+                    raise
+                await asyncio.sleep(RATE_BACKOFF * (attempt + 1))
+
+
 async def remove_strokes(canvas, object_ids):
-    for start in range(0, len(object_ids), REMOVE_BATCH):
-        await canvas.remove(object_ids[start : start + REMOVE_BATCH])
+    """Removes the ids in ops of REMOVE_BATCH, a few at a time, backing off when the server says slow down."""
+    gate = asyncio.Semaphore(REMOVE_PARALLEL)
+    await asyncio.gather(*(remove_batch(canvas, object_ids[start : start + REMOVE_BATCH], gate) for start in range(0, len(object_ids), REMOVE_BATCH)))
 
 
 def defuse(text):

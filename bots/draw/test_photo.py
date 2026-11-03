@@ -89,6 +89,47 @@ def test_douglas_peucker_drops_collinear_points_and_keeps_corners():
     assert photo.simplify(line) == [(0, 0), (9, 0), (9, 9)]
 
 
+def test_a_long_straight_line_along_the_edge_is_dropped_but_the_same_line_inside_is_kept():
+    top = [(10, 3), (300, 3)]
+    assert photo.hugs_border(top, 400, 300)
+    assert photo.hugs_border([(2, 20), (2, 250)], 400, 300)
+    assert not photo.hugs_border([(10, 150), (300, 150)], 400, 300)
+    assert not photo.hugs_border([(10, 3), (30, 3)], 400, 300)
+    assert not photo.hugs_border([(10, 3), (150, 12), (300, 3)], 400, 300)
+
+
+def test_a_tiny_lone_fragment_is_dropped_and_one_beside_a_line_is_kept():
+    long_line = [(0, 0), (200, 0)]
+    near = [(100, 6), (108, 6)]
+    far = [(100, 200), (108, 200)]
+    kept = photo.drop_isolated([long_line, near, far])
+    assert long_line in kept and near in kept and far not in kept
+
+
+def test_a_frame_along_the_picture_border_is_not_traced_but_the_subject_inside_is():
+    def framed(image):
+        from PIL import ImageDraw
+
+        pen = ImageDraw.Draw(image)
+        pen.rectangle([0, 0, image.width - 1, image.height - 1], outline=(0, 0, 0), width=6)
+        pen.ellipse([70, 50, 170, 130], outline=(0, 0, 0), width=4)
+
+    lines, width, height = photo.strokes(shot(framed), 220)
+    assert lines and not any(photo.hugs_border(line, width, height) for line in lines)
+    assert any(60 < sum(p[0] for p in line) / len(line) < width - 60 for line in lines)
+
+
+def test_photos_are_analysed_at_900_pixels_and_large_ones_trace_in_under_a_few_seconds():
+    import time
+
+    assert photo.WORK_SIDE == 900
+    big = shot(box_and_circle, (2400, 1800))
+    started = time.time()
+    lines, width, height = photo.strokes(big, 600)
+    assert max(width, height) == 900 and lines
+    assert time.time() - started < 5
+
+
 def say_with(rig, text, attachments=None, user=ANN):
     member = draw.bot.space._make_member({**user, "role_ids": []})
     member._base_permissions = 0

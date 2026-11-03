@@ -30,8 +30,18 @@ class CanvasClient(FakeAsyncClient):
         super().__init__(me_id="bot-1")
         self.placed, self.ops, self.rate_limit_next = [], [], 0
         self.existing, self.viewport_error = [], None
+        self.batches, self.batch_error = [], ApiError(404, {"error": "not found"})
 
     async def call(self, method, path, body=None, **kw):
+        if path.endswith("/canvas/objects/batch") and method == "POST":
+            self.batches.append(body)
+            if self.batch_error:
+                raise self.batch_error
+            if self.rate_limit_next:
+                self.rate_limit_next -= 1
+                raise ApiError(429, {"error": "rate limited"})
+            self.placed.extend(body["objects"])
+            return {"objects": body["objects"]}
         if path.endswith("/canvas/objects") and method == "POST":
             if self.rate_limit_next:
                 self.rate_limit_next -= 1
@@ -58,6 +68,7 @@ class Rig:
         wire_bot(draw.bot, self.client, db_name="draw.db")
         asyncio.run(draw.bot.open_store(migrate=draw.store_db.init_db))
         draw.planner, draw.busy = None, set()
+        draw.batch_state["available"] = None
         draw.bot.me_id = "bot-1"
         self.client.respond("GET", "/members/bot-1/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
         draw.bot.space.channels = {"c-voice": Channel({"id": "c-voice", "name": "lounge", "kind": "voice"})}

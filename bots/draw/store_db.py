@@ -42,6 +42,11 @@ def add_stroke(conn, drawing_id, object_id):
     conn.commit()
 
 
+def add_strokes(conn, drawing_id, object_ids):
+    conn.executemany("INSERT INTO strokes (drawing_id, object_id) VALUES (?, ?)", [(drawing_id, i) for i in object_ids])
+    conn.commit()
+
+
 def latest_live(conn, user_id, channel_id):
     return conn.execute(
         "SELECT id, query, channel_id FROM drawings WHERE live = 1 AND user_id = ? AND channel_id = ? ORDER BY id DESC LIMIT 1", (user_id, channel_id)

@@ -5,6 +5,8 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+- `Canvas.place_many(objects)` places up to 200 objects in one request to `canvas/objects/batch` and returns their ids; `BatchUnavailable` is raised when the server lacks the route. Needs a server with the batch route.
+
 ## 0.17.0
 
 - Requires Python 3.11 or later (was 3.9), because `download` bounds its read with `asyncio.timeout`. The bots and CI already ran on 3.12.

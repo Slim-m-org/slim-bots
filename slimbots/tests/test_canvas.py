@@ -1,4 +1,5 @@
-from slimbots import Canvas
+from slimbots import BatchUnavailable, Canvas
+from slimbots.http import ApiError
 from slimbots.testing import FakeAsyncClient
 
 
@@ -82,3 +83,44 @@ async def test_viewport_sends_the_rectangle_as_query_params():
     assert method == "GET"
     assert path == "/channels/c1/canvas/objects"
     assert params == {"min_x": 0, "min_y": 0, "max_x": 100, "max_y": 100, "limit": 100}
+
+
+async def test_place_many_posts_every_object_in_one_request_and_returns_their_ids():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/canvas/objects/batch", {"objects": []})
+    ids = await Canvas(client, "c1").place_many(
+        [{"kind": "stroke", "x": 1, "y": 2, "w": 3, "h": 4, "props": {"points": [0, 0, 3, 4]}, "id": "fixed"}, {"kind": "shape", "x": 0, "y": 0, "w": 5, "h": 5}]
+    )
+    method, path, body, _ = client.calls[-1]
+    assert (method, path) == ("POST", "/channels/c1/canvas/objects/batch")
+    assert [o["id"] for o in body["objects"]] == ids and ids[0] == "fixed" and len(ids[1]) == 36
+    assert body["objects"][1]["props"] == {} and body["objects"][0]["props"] == {"points": [0, 0, 3, 4]}
+
+
+async def test_place_many_refuses_more_than_the_servers_batch_limit_and_sends_nothing_for_none():
+    client = FakeAsyncClient()
+    assert await Canvas(client, "c1").place_many([]) == []
+    try:
+        await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1}] * 201)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError")
+
+
+async def test_a_missing_batch_route_is_batch_unavailable_and_other_errors_pass_through():
+    for status in (404, 405):
+        client = FakeAsyncClient()
+        client.respond("POST", "/channels/c1/canvas/objects/batch", ApiError(status, "no route"))
+        try:
+            await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1}])
+        except BatchUnavailable:
+            pass
+        else:
+            raise AssertionError("expected BatchUnavailable")
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/canvas/objects/batch", ApiError(429, "slow down"))
+    try:
+        await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1}])
+    except ApiError as err:
+        assert err.status == 429 and not isinstance(err, BatchUnavailable)

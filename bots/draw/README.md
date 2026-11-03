@@ -94,8 +94,8 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
-| `DRAW_DOTS_MAX` | `900` | the most dots one `!draw dots` portrait may use, 50 to 1500 |
-| `DRAW_PHOTO_MAX` | `220` | the most strokes one `!draw photo` drawing may use, 20 to 400 |
+| `DRAW_DOTS_MAX` | `1500` | the most dots one `!draw dots` portrait may use, 50 to 3000 |
+| `DRAW_PHOTO_MAX` | `600` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
 | `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
 | `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
@@ -114,7 +114,7 @@ The log line carries `crop="model x,y,w,h"` or `crop="heuristic x,y,w,h"`.
 ## Line drawings from a photo
 
 `!draw photo` needs no model.
-It blurs the picture lightly at about 560 pixels, finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments and keeps the longest and strongest lines (leaning only slightly towards the centre, since the crop has already focused the subject) up to `DRAW_PHOTO_MAX` strokes.
+It blurs the picture lightly at about 900 pixels (a trace takes well under a second), finds edges with a Sobel filter judged against each neighbourhood's own strength (so a faint brow in a quiet area still counts), thins them to one pixel, follows them into lines, smooths and simplifies each line (Douglas-Peucker), drops short fragments, isolated tiny ones and long straight lines that run along the crop's border (frame and curtain edges), and keeps the longest and strongest lines (leaning only slightly towards the centre, since the crop has already focused the subject) up to `DRAW_PHOTO_MAX` strokes.
 A line is split into pieces of at most 150 points that share a joint, each is a stroke in the one ink colour at width 2, and the drawing is scaled into the largest free area of your call's canvas with the photo's aspect ratio.
 A clean, close portrait or a landmark photo works best; a busy wide shot traces its background too.
 
@@ -132,3 +132,11 @@ A drawing is acknowledged straight away in the channel ("drawing ..., this takes
 Every command writes one line to stdout when it ends, for example `draw command=draw channel=<call id> outcome="drew 41" source=wikipedia search=0.9s download=0.4s model=52.3s place=7.2s total=61.0s prompt="barack obama"`.
 It has the outcome (drew N, refused with the reason, no call, cooldown, busy, no source, error and its class), the source used and the time per stage, and never a key or more than 60 characters of the prompt.
 An unexpected exception is logged with its traceback on a `draw traceback` line, because the framework otherwise swallows a handler's exception.
+
+## Placement speed
+
+When the server has `POST /channels/{id}/canvas/objects/batch`, a drawing goes down in batches of up to 200 objects (one request and one transaction each) instead of one paced request per object, so 600 strokes take seconds instead of a minute.
+A 429 backs off and retries; a 404 or 405 on the first batch means an older server, which is remembered for the process and every object is then placed alone at the usual pace.
+All objects of one drawing carry the same `props.group`, so the client treats them as one undo step.
+`!draw undo` and `clear` remove in ops of 64 ids, three at a time, backing off on 429.
+Batch placement needs `slimbots` with `Canvas.place_many`, which is not in a release yet.

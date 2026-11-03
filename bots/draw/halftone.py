@@ -10,7 +10,7 @@ BACKGROUND = 38  # cells this close (RGB distance) to the photo's border colour 
 FULL_INK = 160  # distance from the background at which a dot reaches full size
 MIN_DOT = 1.2  # smallest dot radius in canvas units
 SIDES = 8  # a dot is a closed polygon this many sided
-MAX_SIDE = 480  # pixels on the long side the picture is read at before gridding
+MAX_SIDE = 640  # pixels on the long side the picture is read at before gridding
 
 
 def _load(data):
