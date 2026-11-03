@@ -18,6 +18,7 @@ from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
 real_reference_image = sources.reference_image
+real_find_pictures = sources.find_pictures
 CANDIDATE = {"url": "https://t/1.jpg", "title": "A cat", "creator": "Sam", "license": "CC BY 2.0", "landing": "https://page/1"}
 
 
@@ -76,7 +77,7 @@ class Rig:
         self.in_call(BOB)
         self.searches, self.grid = [], grid if grid is not None else disc()
 
-        def find(get, subject, google=None, report=None):
+        def find(get, subject, google=None, report=None, serpapi=None, on_call=None):
             self.searches.append(subject)
             return iter([CANDIDATE] if results is None else results)
 

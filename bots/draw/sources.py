@@ -82,6 +82,7 @@ WIKI_API = "https://en.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 BING_IMAGES = "https://www.bing.com/images/async"
 GOOGLE_CSE = "https://www.googleapis.com/customsearch/v1"
+SERPAPI = "https://serpapi.com/search.json"
 WIKI_PAGES = 3
 COMMONS_FILES = 6
 WEB_RESULTS = 5
@@ -178,9 +179,42 @@ def google_candidates(get, subject, key, engine, report=None):
     ]
 
 
-def find_pictures(get, subject, google=None, report=None):
-    """Candidates for `subject`, read lazily one source at a time: Google (if `google` is a (key, engine) pair), Bing, the Wikipedia lead image, Commons; a failing source is skipped and reported."""
-    steps = [("google", lambda: google_candidates(get, subject, *google, report=report))] if google else []
+def _masked(text, key):
+    return str(text).replace(key, "***") if key else str(text)
+
+
+def serpapi_candidates(get, subject, key, report=None, on_call=None):
+    """Google Images results through SerpAPI (`images_results`): the original picture, its page (`link`) and the thumbnail as a fallback; `on_call` hears each request, the key is masked in every message."""
+    if on_call:
+        on_call()
+    status, body = get(f"{SERPAPI}?{urllib.parse.urlencode({'engine': 'google_images', 'q': subject, 'safe': 'off', 'api_key': key})}")
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        data = None
+    if status != 200 or not isinstance(data, dict) or data.get("error"):
+        detail = _masked(data.get("error", ""), key)[:60] if isinstance(data, dict) else ""
+        raise SourceError(f"serpapi answered http {status}{': ' + detail if detail else ''}")
+    found = []
+    for item in data.get("images_results") or []:
+        original = item.get("original")
+        if not str(original or "").startswith("http"):
+            continue
+        entry = _candidate(original, item.get("title") or item.get("source"), item.get("link"), "serpapi")
+        if str(item.get("thumbnail", "")).startswith("http"):
+            entry["fallback"] = item["thumbnail"]
+        found.append(entry)
+        if len(found) >= WEB_RESULTS:
+            break
+    if not found:
+        _say(report, "serpapi: no images in the answer")
+    return found
+
+
+def find_pictures(get, subject, google=None, report=None, serpapi=None, on_call=None):
+    """Candidates for `subject`, read lazily one source at a time: SerpAPI (if `serpapi` is a key), Google CSE (if `google` is a (key, engine) pair), Bing, Wikipedia's lead image, Commons; a failing source is skipped and reported."""
+    steps = [("serpapi", lambda: serpapi_candidates(get, subject, serpapi, report, on_call))] if serpapi else []
+    steps += [("google", lambda: google_candidates(get, subject, *google, report=report))] if google else []
     steps += [
         ("bing", lambda: bing_candidates(get, subject, report)),
         ("wikipedia", lambda: [c] if (c := wikipedia_candidate(get, subject, report)) else []),
@@ -190,7 +224,7 @@ def find_pictures(get, subject, google=None, report=None):
         try:
             yield from step()
         except SourceError as err:
-            _say(report, f"{name}: {err}")
+            _say(report, f"{name}: {_masked(err, serpapi)}")
 
 
 def credit_line(candidate):

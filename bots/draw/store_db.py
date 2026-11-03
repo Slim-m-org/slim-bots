@@ -15,6 +15,7 @@ def init_db(conn):
         CREATE TABLE IF NOT EXISTS strokes (drawing_id INTEGER NOT NULL, object_id TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS strokes_by_drawing ON strokes (drawing_id);
         CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS serpapi_usage (month TEXT PRIMARY KEY, calls INTEGER NOT NULL);
         """
     )
     if "channel_id" not in {row[1] for row in conn.execute("PRAGMA table_info(drawings)")}:
@@ -74,3 +75,10 @@ def take_ai_call(conn, day, cap):
     conn.execute("INSERT INTO ai_usage (day, calls) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET calls = calls + 1", (day,))
     conn.commit()
     return True
+
+
+def add_serpapi_calls(conn, month, count):
+    """Adds `count` SerpAPI searches to `month`'s tally and returns the month's total, so the owner can watch the free quota."""
+    conn.execute("INSERT INTO serpapi_usage (month, calls) VALUES (?, ?) ON CONFLICT (month) DO UPDATE SET calls = calls + ?", (month, count, count))
+    conn.commit()
+    return conn.execute("SELECT calls FROM serpapi_usage WHERE month = ?", (month,)).fetchone()[0]
