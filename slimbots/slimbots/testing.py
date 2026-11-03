@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .authors import AuthorFilter
-from .http import AsyncClient
+from .http import AsyncClient, ResponseTooLarge
 from .space import Space
 from .voice import VoiceError
 
@@ -42,6 +42,16 @@ class FakeAsyncClient(AsyncClient):
         self.respond("GET", "/roles", [])
         self.respond("PUT", "/bots/commands", None)
         self.respond("PUT", "/bots/ui", None)
+
+    async def download(self, path: str, *, max_bytes: int = 10 * 1024 * 1024) -> bytes:  # type: ignore[override]
+        """Answers from a `respond("GET", path, b"...")` stub; an `ApiError` stub raises, like a failed download."""
+        self.calls.append(("GET", path, None, None))
+        body = self._queued(self._responses[("GET", path)]) if ("GET", path) in self._responses else None
+        if body is None:
+            raise KeyError(f"FakeAsyncClient: no download queued for GET {path} - call .respond() first")
+        if len(body) > max_bytes:
+            raise ResponseTooLarge(max_bytes)
+        return body
 
     def respond(self, method: str, path: str, response: Any) -> None:
         """Queues `response` (or, if callable, its return value) for every future `method path` call."""

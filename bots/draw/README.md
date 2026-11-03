@@ -1,32 +1,61 @@
 # draw
 
-A slim-m bot (directory `bots/draw`, command `!draw`) that finds an openly licensed picture and redraws a simplified version of it on a voice channel's Voice Canvas, as a few dozen stroke objects.
-It credits the source in its reply and can take its drawing back in one command.
+A slim-m bot (directory `bots/draw`, command `!draw`) that draws on the Voice Canvas of the call you are in.
+`!draw <prompt>` has a model look at the canvas, pick free space and draw your prompt with real canvas objects (strokes, shapes, text, notes).
+`!draw trace <word>` is the older picture tracer: it finds an openly licensed picture and redraws a simplified version as stroke objects, crediting the source.
+Without a model configured, `!draw <word>` does the tracing.
 
-Needs `slim-m>=0.15.0` and Pillow for reading the downloaded picture; everything else, including the tracer, is plain Python and the standard library.
+Needs `slim-m>=0.15.0` and Pillow (to read the canvas and downloaded pictures); the model call uses the official `anthropic` package.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
-It keeps the ids of the strokes it placed in its own sqlite file (`SLIMM_DB_PATH`, default `draw.db`) so undo works after a restart.
+It keeps the ids of the objects it placed in its own sqlite file (`SLIMM_DB_PATH`, default `draw.db`) so undo works after a restart.
 
 ```bash
 pip install -r requirements.txt
 SLIMM_URL=https://your.space \
 SLIMM_BOT_TOKEN=slimbot_... \
-DRAW_CHANNEL=<voice channel name or id> \
+ANTHROPIC_API_KEY=sk-ant-... \
 python3 bot.py
 ```
 
-The bot needs `VIEW_CHANNEL` and `USE_CANVAS` in that voice channel.
+The bot acts where you are: it finds the voice call you are in and draws on that call's canvas, wherever you typed the command (a voice call's own chat works).
+It needs `VIEW_CHANNEL` and `USE_CANVAS` there, and says exactly which one is missing when it lacks one.
+If you are in no call it asks you to join one.
 
 ## Commands
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `!draw <query>` | anyone | search, trace and draw; one drawing per member per minute, one at a time overall |
-| `!draw undo` | the member who drew it | remove your latest drawing, every stroke of it |
-| `!draw clear` | Manage Canvas | remove every drawing the bot made |
+| `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
+| `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
+| `!draw undo` | the member who drew it | remove your latest drawing, every object of it |
+| `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
 
-The canvas area holds six drawings in a 3 by 2 grid starting at `DRAW_X`, `DRAW_Y`; undo or clear makes room.
-A query is at most 60 characters, and an at-sign in it is defused in the reply.
+A prompt is at most 200 characters (60 for a trace), the prompt goes only into the user turn of the model call, and mentions in replies are defused.
+
+## How a prompt becomes a drawing
+
+1. The bot reads the live objects in a 1600 by 1000 area of the canvas and renders them as a picture: strokes in their colours, shapes as outlines, text and notes as labelled boxes, image tiles shrunk (the first bytes of each, at most 12).
+   A coordinate ruler runs along the top and left, and the largest empty rectangle (up to 1000 by 800) is boxed in green.
+   If nothing big enough is free it says so instead of drawing over people's work.
+2. The model gets that picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
+3. Every tool call is checked before it touches the canvas: inside the free region, at most 120 points per stroke, a colour from the pen palette, an object under 4 KiB, at most `DRAW_MAX_STROKES` objects in all.
+   A bad call is skipped and counted in the reply.
+4. Objects are placed about 6 a second, below the canvas write limit of 10 a second, with a backoff when the server says slow down, and their ids are stored for `undo`.
+
+A model that declines, errors or draws nothing gets a plain sentence back; the API key is never logged or echoed.
+
+## Cost
+
+Each `!draw <prompt>` is one model call with one image and up to `DRAW_AI_MAX_TOKENS` output tokens (default 4096).
+The default model is `claude-sonnet-4-6`, so a drawing is one image in and up to a few thousand tokens out; check current pricing before opening it to a large community.
+`DRAW_AI_DAILY_CAP` (default 100) bounds the calls per day and `DRAW_AI_COOLDOWN` (default 120 seconds) bounds one member.
+
+## A local model instead
+
+Set `DRAW_LLM_URL` to an OpenAI-compatible base URL (for example `http://host:11434/v1`) and `DRAW_LLM_MODEL` to a vision model that supports tool calls.
+No API key is needed; `DRAW_LLM_KEY` is sent as a bearer token if the endpoint wants one.
+It is used instead of Anthropic whenever set.
+Local models draw noticeably worse: expect rougher shapes and more skipped calls.
 
 ## How a picture becomes strokes
 
@@ -44,11 +73,19 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `DRAW_CHANNEL` | the one `SLIMM_CHANNELS` channel | the voice channel whose canvas gets the drawings |
-| `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first drawing in canvas units |
-| `DRAW_SIZE` | `480` | the side of the square a drawing fits in |
-| `DRAW_MAX_STROKES` | `150` | the most stroke objects one drawing may use, 10 to 300 |
+| `ANTHROPIC_API_KEY` | empty | turns on model drawing; without it `!draw <word>` traces |
+| `DRAW_MODEL` | `claude-sonnet-4-6` | the Anthropic model id |
+| `DRAW_AI_MAX_TOKENS` | `4096` | output tokens per drawing, 512 to 16000 |
+| `DRAW_AI_DAILY_CAP` | `100` | model calls per day |
+| `DRAW_AI_COOLDOWN` | `120` | seconds between one member's drawings |
+| `DRAW_LLM_URL`, `DRAW_LLM_MODEL`, `DRAW_LLM_KEY` | empty | an OpenAI-compatible endpoint used instead of Anthropic |
+| `DRAW_VIEW_X`, `DRAW_VIEW_Y` | `0`, `0` | the middle of the canvas area the model looks at |
+| `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
+| `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
+| `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
 | `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
+| `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
 
+`DRAW_CHANNEL` is no longer used: the bot draws in the call the member is in, never a fixed channel.
 Without Pillow installed the bot starts and answers `!draw` with a sentence saying so.

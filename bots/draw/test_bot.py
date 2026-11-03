@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as draw  # noqa: E402
 import sources  # noqa: E402
-from slimbots import Canvas  # noqa: E402
+from slimbots.models import Channel  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
@@ -28,6 +28,7 @@ class CanvasClient(FakeAsyncClient):
     def __init__(self):
         super().__init__(me_id="bot-1")
         self.placed, self.ops, self.rate_limit_next = [], [], 0
+        self.existing, self.viewport_error = [], None
 
     async def call(self, method, path, body=None, **kw):
         if path.endswith("/canvas/objects") and method == "POST":
@@ -36,6 +37,10 @@ class CanvasClient(FakeAsyncClient):
                 raise ApiError(429, {"error": "rate limited"})
             self.placed.append(body)
             return {**body, "seq": len(self.placed)}
+        if path.endswith("/canvas/objects") and method == "GET":
+            if self.viewport_error:
+                raise self.viewport_error
+            return {"objects": self.existing, "has_more": False, "latest_seq": 1}
         if path.endswith("/canvas/ops"):
             self.ops.append(body)
             return {"affected": len(body.get("object_ids", []))}
@@ -44,14 +49,19 @@ class CanvasClient(FakeAsyncClient):
 
 class Rig:
     def __init__(self, grid=None, results=None):
-        draw.PACE_SECONDS, draw.COOLDOWN_SECONDS, draw.MAX_STROKES, draw.RATE_BACKOFF = 0, 0, 150, 0
+        draw.PACE_SECONDS, draw.COOLDOWN_SECONDS, draw.AI_COOLDOWN, draw.MAX_STROKES, draw.RATE_BACKOFF = 0, 0, 0, 150, 0
         draw.last_draw.clear()
         self.client = CanvasClient()
         self.client.respond("GET", "/users/u-ann", {**ANN, "role_ids": []})
         self.client.respond("GET", "/users/u-bob", {**BOB, "role_ids": []})
         wire_bot(draw.bot, self.client, db_name="draw.db")
         asyncio.run(draw.bot.open_store(migrate=draw.init_db))
-        draw.canvas = Canvas(self.client, "c-voice")
+        draw.planner, draw.busy = None, set()
+        draw.bot.me_id = "bot-1"
+        self.client.respond("GET", "/members/bot-1/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
+        draw.bot.space.channels = {"c-voice": Channel({"id": "c-voice", "name": "lounge", "kind": "voice"})}
+        self.in_call(ANN)
+        self.in_call(BOB)
         self.searches, self.grid = [], grid if grid is not None else disc()
 
         def search(get, query, limit=8):
@@ -67,11 +77,14 @@ class Rig:
 
         draw.bot.send_frame = no_gateway
 
-    def say(self, text, user=ANN, permissions=0):
+    def in_call(self, user, channel="c-voice"):
+        draw.bot.voice._member_channel[user["id"]] = (channel, 0.0)
+
+    def say(self, text, user=ANN, permissions=0, channel="c1"):
         member = draw.bot.space._make_member({**user, "role_ids": []})
         member._base_permissions = permissions
         draw.bot.space.members[user["id"]] = member
-        asyncio.run(draw.bot.process_message({"id": "m1", "channel_id": "c1", "author_id": user["id"], "content": text, "seq": 1}))
+        asyncio.run(draw.bot.process_message({"id": "m1", "channel_id": channel, "author_id": user["id"], "content": text, "seq": 1}))
         return self.client.ephemerals[-1]["content"] if self.client.ephemerals else ""
 
 
@@ -150,12 +163,9 @@ def test_a_rate_limited_placement_is_retried_not_dropped():
     assert rig.client.placed and "strokes" in rig.client.sent[-1]["content"]
 
 
-def test_nothing_found_a_flat_picture_and_a_missing_canvas_each_get_a_sentence():
+def test_nothing_found_and_a_flat_picture_each_get_a_sentence():
     assert "no openly licensed picture" in Rig(results=[]).say("!draw zzzz")
     assert "could not turn" in Rig(grid=[[200] * 30 for _ in range(30)]).say("!draw blank")
-    rig = Rig()
-    draw.canvas = None
-    assert "DRAW_CHANNEL" in rig.say("!draw cat")
 
 
 def test_bad_input_and_the_per_member_cooldown():

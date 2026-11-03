@@ -3,6 +3,11 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
+## Unreleased
+
+- Requires Python 3.11 or later (was 3.9), because `download` bounds its read with `asyncio.timeout`. The bots and CI already ran on 3.12.
+- `AsyncClient.download(path, max_bytes=)` reads the raw body of a `GET`, such as an attachment, with the client's auth and base URL, a size bound and a 15 second limit (wrap in `asyncio.timeout` for less); `ResponseTooLarge` is raised past the bound. `FakeAsyncClient.download` answers it from a stubbed bytes response. Needs the next `slim-m` release (0.17.0).
+
 ## 0.16.0
 
 - `AsyncClient.set_watch_session` takes an optional `direct_play` body, the offer that lets each viewer play the title on their own device (slim-m decision 0050). Leaving it out withdraws the offer. Needs slim-m 0.120 or later; an older server ignores the field.

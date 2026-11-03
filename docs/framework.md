@@ -208,6 +208,9 @@ A bot's steady state is awaiting the websocket, and httpx gives real connection 
 httpx was already a transitive dependency in this environment, so it costs nothing new to vet.
 `call()` retries a 429 or 5xx with exponential backoff (slim-m sends no `Retry-After`) and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
+`await bot.client.download(path, max_bytes=)` is the matching read: the raw body of a `GET` (an attachment, say) with the same auth and base URL, never reading past `max_bytes` (10 MiB by default) and giving up after the client's 15 seconds; wrap the call in `asyncio.timeout(...)` for a tighter bound.
+It raises `ApiError` for an HTTP error or a network failure and `ResponseTooLarge` (an `ApiError` with no status, `.limit` set) when the body is bigger; `FakeAsyncClient` answers it from `respond("GET", path, b"...")`.
+New in 0.17.0: a bot that calls it needs that `slim-m` release.
 
 ## Outside services
 

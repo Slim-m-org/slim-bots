@@ -22,7 +22,7 @@ from .exceptions import (
     MissingRequiredArgument,
     SlimBotsError,
 )
-from .http import ApiError
+from .http import ApiError, ResponseTooLarge
 from .http import AsyncClient
 from .interactions import Interaction
 from .limits import Cooldown, Quota, RateLimiter, ValidationError, require_int, require_len, require_range
@@ -92,4 +92,5 @@ __all__ = [
     "require_range",
     "rows",
     "socket_url",
+    "ResponseTooLarge",
 ]
