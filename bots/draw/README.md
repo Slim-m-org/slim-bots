@@ -26,6 +26,7 @@ If you are in no call it asks you to join one.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
+| `!draw dots [subject]` | anyone | a halftone dot portrait of the image attached to your message, else of the best openly licensed picture of the subject (credited); no model, no tokens, but hundreds of small objects; one per member per minute |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
 | `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
@@ -90,9 +91,18 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
+| `DRAW_DOTS_MAX` | `600` | the most dots one `!draw dots` portrait may use, 50 to 2000 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
 | `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
 | `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
 
 `DRAW_CHANNEL` is no longer used: the bot draws in the call the member is in, never a fixed channel.
 Without Pillow installed the bot starts and answers `!draw` with a sentence saying so.
+
+## Dot portraits
+
+`!draw dots` needs no model.
+It reads the picture, averages it into a grid, skips cells that are nearly background, and places one small closed stroke per remaining cell with its radius following darkness and its colour set to the cell's `#rrggbb` hex.
+The grid is narrowed until the dots fit under `DRAW_DOTS_MAX`, the picture is fitted into the largest free area of your call's canvas, and placement uses the usual pacing and backoff, so 600 dots take a couple of minutes.
+A client without hex colour support paints the dots in the default ink, which still reads as a monochrome halftone.
+`!draw undo` and `!draw clear` remove a dot portrait like any other drawing.

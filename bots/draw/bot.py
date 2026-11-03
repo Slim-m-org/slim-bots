@@ -6,6 +6,7 @@ import functools
 import time
 
 import ai
+import halftone
 import plan
 import screenshot
 import sources
@@ -54,6 +55,7 @@ PACE_SECONDS = max(bot.setting("DRAW_PACE", 0.15, type=float), 0.1)
 OPENVERSE_TOKEN = bot.setting("OPENVERSE_TOKEN")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
+DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 600, type=int), 50), 2000)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
 AI_DAILY_CAP = bot.setting("DRAW_AI_DAILY_CAP", 100, type=int)
 AI_MAX_TOKENS = min(max(bot.setting("DRAW_AI_MAX_TOKENS", 16000, type=int), 1536), 32000)
@@ -345,6 +347,67 @@ async def _trace(ctx, query, channel_id):
         await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
         return
     await ctx.reply(credit(candidate, defuse(query), done))
+
+
+async def dots_source(ctx, subject):
+    """(picture bytes, candidate or None) from an image attached to the command, else the best Openverse match; a sentence when neither works."""
+    for attached in ctx.message.get("attachments") or []:
+        if str(attached.get("content_type") or "").startswith("image/"):
+            try:
+                return await bot.client.download(f"/attachments/{attached['id']}", max_bytes=sources.MAX_PICTURE_BYTES), None
+            except ApiError:
+                return "I could not read the image you attached."
+    if not subject:
+        return f"attach an image or say what to draw: `{bot.prefix}draw dots <subject>`."
+    try:
+        found = await asyncio.to_thread(sources.search, functools.partial(get, token=OPENVERSE_TOKEN), subject)
+        for candidate in found[:ATTEMPTS]:
+            try:
+                return await asyncio.to_thread(sources.fetch_picture, get, candidate["url"]), candidate
+            except sources.SourceError:
+                continue
+    except sources.SourceError as err:
+        return f"{err}."
+    return "no openly licensed picture matched that; try a simpler word."
+
+
+async def _dots(ctx, subject, channel_id, name):
+    canvas = bot.canvas(channel_id)
+    window = plan.Region(VIEW_X - 800, VIEW_Y - 500, 1600, 1000)
+    try:
+        free = screenshot.largest_free(await screenshot.read_objects(canvas, window), window)
+        if free is None:
+            await ctx.reply_ephemeral(f"there is no free space on {name}'s canvas near the middle; clear some room and ask again.", public_fallback=True)
+            return
+        source = await dots_source(ctx, subject)
+        if isinstance(source, str):
+            await ctx.reply_ephemeral(source, public_fallback=True)
+            return
+        data, candidate = source
+        dots = await asyncio.to_thread(halftone.halftone, data, free, DOTS_MAX)
+    except (screenshot.ScreenshotError, sources.SourceError) as err:
+        await ctx.reply_ephemeral(f"{err}.", public_fallback=True)
+        return
+    if not dots:
+        await ctx.reply_ephemeral("that picture is too light to make dots from.", public_fallback=True)
+        return
+    drawing_id, _ = await bot.store.run(new_drawing, ctx.author.id, subject or "an attached image", channel_id, False)
+    try:
+        done = await place_all(canvas, drawing_id, dots)
+    except ApiError as err:
+        await ctx.reply_ephemeral(f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.", public_fallback=True)
+        return
+    credit_text = f" from \"{defuse(candidate['title'])}\" by {defuse(candidate['creator'])} ({candidate['license']}) {candidate['landing']}".rstrip() if candidate else ""
+    await ctx.reply(f"drew a dot portrait on the canvas in {name} with {done} dots{credit_text}")
+
+
+@draw.command(name="dots", help="Draw a halftone dot portrait of an attached image or a subject; no model, no cost")
+async def draw_dots(ctx, subject: str = ""):
+    subject = subject.strip()
+    if len(subject) > MAX_QUERY:
+        await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
+        return
+    await guarded(ctx, COOLDOWN_SECONDS, lambda channel_id, name: _dots(ctx, subject, channel_id, name))
 
 
 @draw.command(name="trace", help="Trace an openly licensed picture of a word")
