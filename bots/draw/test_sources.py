@@ -143,7 +143,7 @@ def test_serpapi_is_asked_with_the_google_images_engine_the_subject_and_the_key_
     calls, spent = [], []
     sources.serpapi_candidates(web({"serpapi.com/search.json": SERP_OK}, calls), "barack obama", "KEY123", None, lambda: spent.append(1))
     query = urllib.parse.parse_qs(urllib.parse.urlparse(calls[0]).query)
-    assert query["engine"] == ["google_images"] and query["q"] == ["barack obama"] and query["api_key"] == ["KEY123"] and spent == [1]
+    assert query["engine"] == ["google_images"] and query["q"] == ["barack obama"] and query["api_key"] == ["KEY123"] and query["safe"] == ["off"] and spent == [1]
 
 
 def test_a_serpapi_error_is_a_source_error_that_never_carries_the_key():

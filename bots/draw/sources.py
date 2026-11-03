@@ -187,7 +187,7 @@ def serpapi_candidates(get, subject, key, report=None, on_call=None):
     """Google Images results through SerpAPI (`images_results`): the original picture, its page (`link`) and the thumbnail as a fallback; `on_call` hears each request, the key is masked in every message."""
     if on_call:
         on_call()
-    status, body = get(f"{SERPAPI}?{urllib.parse.urlencode({'engine': 'google_images', 'q': subject, 'api_key': key})}")
+    status, body = get(f"{SERPAPI}?{urllib.parse.urlencode({'engine': 'google_images', 'q': subject, 'safe': 'off', 'api_key': key})}")
     try:
         data = json.loads(body)
     except (ValueError, TypeError):
