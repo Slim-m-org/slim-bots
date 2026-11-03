@@ -19,7 +19,14 @@ import sources
 import store_db
 import tracer
 import where
-from slimbots import ApiError, BatchUnavailable, Bot, Permissions
+from slimbots import ApiError, Bot, Permissions
+
+try:
+    from slimbots import BatchUnavailable
+except ImportError:  # slimbots before 0.18 has no batch place
+
+    class BatchUnavailable(Exception):
+        pass
 from slimbots.http import is_rate_limited
 from store_db import SLOTS, add_stroke, add_strokes, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
@@ -92,6 +99,8 @@ def grouped(objects):
 
 
 async def batch_with_retry(canvas, wire):
+    if not hasattr(canvas, "place_many"):
+        raise BatchUnavailable("this slimbots has no batch place")
     for attempt in range(RATE_RETRIES):
         try:
             return await canvas.place_many(wire)
