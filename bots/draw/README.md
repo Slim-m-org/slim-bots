@@ -27,7 +27,7 @@ If you are in no call it asks you to join one.
 | --- | --- | --- |
 | `!draw <prompt>` | anyone | the model draws your prompt in free space on your call's canvas; one drawing per member per two minutes, one at a time per call |
 | `!draw photo [subject]` | anyone | a line drawing traced from a photo (the attached image, else the best freely licensed picture of the subject, credited); no model, no tokens; one per member per minute |
-| `!draw dots [subject]` | anyone | a halftone dot portrait of the image attached to your message, else of the best openly licensed picture of the subject (credited); no model, no tokens, but hundreds of small objects; one per member per minute |
+| `!draw shaded [subject]` (alias `dots`) | anyone | a tonal squiggle portrait of the image attached to your message, else of the first picture found for the subject (credited), cropped to the face and drawn only on the subject; no model, no tokens; one per member per minute |
 | `!draw trace <word>` | anyone | search, trace and draw a picture; one per member per minute |
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
 | `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
@@ -39,7 +39,7 @@ A prompt is at most 200 characters (60 for a trace), the prompt goes only into t
 1. The bot reads the live objects in a 1600 by 1000 area of the canvas and renders them as a picture: strokes in their colours, shapes as outlines, text and notes as labelled boxes, image tiles shrunk (the first bytes of each, at most 12).
    A coordinate ruler runs along the top and left, and the largest empty rectangle (up to 1000 by 800) is boxed in green.
    If nothing big enough is free it says so instead of drawing over people's work.
-2. The bot also looks for a reference picture: the lead image of the best matching Wikipedia article when its file is freely licensed on Wikimedia Commons (CC or public domain; fair-use files are skipped), else the best Openverse result (openly licensed, mature results excluded). It sends the best thumbnail along as a reference photo for proportions and likeness; if nothing is found it carries on without one, and the reply credits the source (title, creator, licence) when one was used.
+2. The bot also looks for a reference picture (see Picture sources) and sends the best one along as a reference photo for proportions and likeness; if nothing is found it carries on without one, and the reply credits the page it came from when one was used.
    The model gets the board picture, the free region and four tools: `draw_stroke`, `draw_shape`, `add_text` and `add_note`, which map to the canvas object kinds `stroke`, `shape`, `text` and `note`.
 3. Every tool call is checked before it touches the canvas: inside the free region, up to 400 points per stroke (a long contour is split into pieces that share a joint), a colour from the pen palette, every piece under 4 KiB, text boxes sized from their content, at most `DRAW_MAX_STROKES` objects in all.
    A bad call is skipped and counted in the reply.
@@ -67,15 +67,14 @@ Local models draw noticeably worse: expect rougher shapes and more skipped calls
 
 ## How a picture becomes strokes
 
-1. The search asks [Openverse](https://openverse.org/) for commercially usable pictures and excludes results it marks mature.
-   It needs no key; set `OPENVERSE_TOKEN` to an API token for a higher rate limit.
+1. The search finds a picture of the word (see Picture sources).
 2. The picture's thumbnail is downloaded (at most 3 MB) and shrunk to fit 96 pixels.
 3. The tracer blurs it, cuts it at three brightness levels, finds the outline of each dark area, simplifies the outlines and keeps the longest ones within the stroke budget.
    An outline longer than 120 points is split into pieces that share a joint, so each stroke object stays well under the server's 4 KiB limit.
 4. Each outline is one stroke object. The bot places them about 6 a second, below the canvas write limit of 10 a second, and waits and retries if the server says slow down.
 
-The reply names the picture, its creator, its licence and the page it came from.
-There is no content scanning, as everywhere in slim-m: the search excludes mature results, the bot is rate limited, and anything on the canvas can be reported and removed like any other mark.
+The reply names the picture and the page it came from.
+There is no content scanning, as everywhere in slim-m: the bot is rate limited, and anything on the canvas can be reported and removed like any other mark.
 
 ## Settings
 
@@ -94,56 +93,59 @@ There is no content scanning, as everywhere in slim-m: the search excludes matur
 | `DRAW_X`, `DRAW_Y` | `900`, `600` | the top-left of the first traced drawing in canvas units |
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
-| `DRAW_DOTS_MAX` | `1500` | the most dots one `!draw dots` portrait may use, 50 to 3000 |
+| `DRAW_SHADED_MAX` | `600` | the most strokes one `!draw shaded` portrait may use, 50 to 1500 (`DRAW_DOTS_MAX` is still read if this is unset) |
+| `DRAW_PHOTO_SHADING` | off | `1` adds pen hatching inside the face to `!draw photo` |
+| `GOOGLE_CSE_KEY`, `GOOGLE_CSE_ID` | empty | when both are set, Google's Programmable Search image results are tried first |
 | `DRAW_PHOTO_MAX` | `300` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
-| `OPENVERSE_TOKEN` | empty | an optional Openverse API token |
 | `SLIMM_CHANNELS` | unset | optional; a voice call's chat is always listened to |
 
 `DRAW_CHANNEL` is no longer used: the bot draws in the call the member is in, never a fixed channel.
 Without Pillow installed the bot starts and answers `!draw` with a sentence saying so.
 
+## Picture sources
+
+`photo`, `shaded` and the AI reference photo find pictures with no key, in this order, reading only as far as needed and trying the next candidate when one fails to download or decode (up to six tries):
+
+1. Google Programmable Search image results, only when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_ID` are set.
+2. DuckDuckGo image search, the first result first, through its unofficial `i.js` endpoint and `vqd` token. It sometimes answers with a bot check, which is skipped quietly.
+3. The lead image of the best Wikipedia article.
+4. Wikimedia Commons picture files (a file search in namespace 6).
+
+There is no licence filter; the reply credits the page the picture came from.
+Every request has a timeout, an honest User-Agent naming the bot, and a 3 MB size cap, and a source that fails is skipped and noted in the command's log line.
+`!draw trace` uses the same sources.
+
 ## Cropping to the subject
 
-Before tracing, `photo` and `dots` cut the picture down to its subject so the face is not a small part of a wide shot.
-With an Anthropic key, one small model call looks at a 512 pixel copy and the subject text and answers with a bounding box through a single `crop` tool (the head and shoulders for a person); the box is validated, clamped, padded 8 percent and kept at least a fifth of the picture on each side.
-The call is capped at 300 output tokens, uses the same request timeout, happens at most once per command, and counts against `DRAW_AI_DAILY_CAP`.
-Without a key, with a local model, with the cap spent or on any failure, a heuristic crop is used: the centre-top 70 percent of a portrait-shaped picture, the whole picture otherwise.
-The log line carries `crop="model x,y,w,h"` or `crop="heuristic x,y,w,h"`.
+No model is involved, so `photo` and `shaded` work with no API key and spend no tokens (only `!draw <prompt>` uses the key).
+The bot looks for a face with OpenCV's YuNet detector (`face_detection_yunet_2023mar.onnx`, MIT, shipped in this directory with its licence) and falls back to OpenCV's bundled Haar frontal-face cascade if the model cannot load.
+With a face, the picture is cropped to head and shoulders around the largest face (2.3 face widths across, more below the face than above) and the face box is kept for the next steps.
+Without one, it is cropped to the busiest region by edge strength, padded, when that region clearly holds most of the picture's detail; otherwise the whole picture is used.
+The log line carries `crop="face x,y,w,h"`, `crop="saliency ..."` or `crop="whole ..."`.
 
 ## Line drawings from a photo
 
 `!draw photo` needs no model, and it favours a few clean contours over many rough ones.
 It analyses the picture at about 560 pixels with a fairly strong blur, so structure shows and texture (hair strands, skin, fabric) does not, and finds edges with a Sobel filter judged against each neighbourhood's own strength.
-Edges are kept by hysteresis, so only weak pixels touching a strong edge survive; inside the ellipse where a portrait's face sits the thresholds are lower, so eyes, nose and lips come through.
+Edges are kept by hysteresis, so only weak pixels touching a strong edge survive; inside the face ellipse the thresholds are lower, so eyes, nose and lips come through.
 Edges are thinned, linked into long lines, smoothed with a moving average, simplified (Douglas-Peucker) and rounded (one Chaikin pass).
 A line must pass a quality bar: at least 4 percent of the image diagonal long (2 percent on the face), not jagged (a short line that doubles back on itself is dropped), not along the crop's border, not a long straight near-vertical or near-horizontal line outside the middle 60 percent (curtain, flag and frame edges), and on the subject ellipse.
-Lines are ranked by length times strength times a soft subject weight, so long clean contours win, up to `DRAW_PHOTO_MAX` strokes (default 300); a larger budget is only filled with lines that pass the same bar.
+Lines are ranked by length times strength times a soft subject weight, so long clean contours win, up to `DRAW_PHOTO_MAX` strokes (default 300).
 A line is split into pieces of at most 150 points sharing a joint, each a stroke in the one ink colour at width 2, scaled into the largest free area of your call's canvas with the photo's aspect ratio.
+`DRAW_PHOTO_SHADING=1` also hatches the dark features inside the face (`photo_shade.py`); it is off by default because the cross-hatching blacks out the eyes.
 
-### Why this tracer
+## Shaded portraits
 
-Several ways of turning a photo into 150 to 600 strokes were rendered side by side for an official portrait of Barack Obama, a Taylor Swift photo, the Eiffel Tower and a golden retriever: scanline squiggles, stippling joined by a nearest-neighbour path, tone hatching, marching-squares tone contours, plain strong edges, and strong edges plus pen shading of the face.
-Tone methods (squiggle, stipple, hatch) need the subject cut out from its background, which the bot does not have, so a dark curtain or suit beats a light face; contour lines of tone inside the face read as a mask.
-Strong clean edges plus hatching of only the dark features inside the face box (hair, eye sockets, lips, nostrils, shadows) read as a pen drawing: it keeps the likeness of the contours and gives the face volume.
-Without a key the face box is unknown, so the trace is edges only.
-`THIRD_PARTY.md` lists the tools that were considered, their licences, and why none is vendored.
+`!draw shaded` (and its old name `dots`) draws the picture as wavy scanlines: each row's wave gets taller and tighter where the picture is darker, and the pen lifts where it is light, so tone reads as density.
+It is applied to the subject only: with a face box, an ellipse round the head and a wider one for the shoulders fades to paper, with weights fading smoothly so no line stops dead; without a face, pixels near the picture's border colour are flattened to paper, a vignette fades the corners, and a pale subject on a darker background is drawn light-on-dark so the subject, not the ground, gets the lines.
+Tone is stretched over the subject's own range so a mid-tone face keeps its shadows, rows are as many as fit under the stroke budget (up to 100), short gaps are bridged so a row is a few strokes, and each stroke is at most 150 points.
 
-When a crop call finds a face, the face ellipse also lowers the edge thresholds there so brows, nose and lips come through, and `photo_shade.py` hatches whatever is darker than the face's own tones: one direction for mid darks, a cross direction for the darkest, joined into zigzags to keep the stroke count down.
+### How these were chosen
 
-## Safety
-
-Every mode refuses a request that names something sexual, naked or graphic (a whole-word list in `safety.py`) with a plain private reply, and logs `refused: explicit prompt`.
-In `photo` and `dots`, the crop call is also asked whether the picture shows nudity, sexual content or graphic violence; a flagged picture is refused before anything is drawn and logged as `refused: explicit picture`.
-Without a key, Openverse's mature filter and Wikipedia's lead image are the only guard on the picture.
-
-## Dot portraits
-
-`!draw dots` needs no model.
-It reads the picture, averages it into a grid, treats cells close to the photo's border colour as background and skips them, and places one small closed stroke per remaining cell with its radius following how far the cell is from the background and its colour set to the cell's own `#rrggbb` hex.
-The grid is narrowed until the dots fit under `DRAW_DOTS_MAX`, the picture is fitted into the largest free area of your call's canvas, and placement uses the usual pacing and backoff, so 600 dots take a couple of minutes.
-A client without hex colour support paints the dots in the default ink, which still reads as a monochrome halftone.
-`!draw undo` and `!draw clear` remove a dot portrait like any other drawing.
+Several ways of turning a photo into a stroke budget were rendered side by side for an official portrait of Barack Obama, a Taylor Swift photo, the Eiffel Tower and a golden retriever: edge contours, scanline squiggles, stippling joined by a nearest-neighbour path, tone hatching and marching-squares tone contours.
+Tone methods need the subject separated from its background, which is why `shaded` carries a subject mask and `photo` stays on edges; tone contours read as a mask and stippling fills the frame.
+The algorithms of the plotter tools (linedraw, DrawingBotV3's sketch and squiggle modes, potrace) were studied from their published descriptions and behaviour and reimplemented here; `THIRD_PARTY.md` lists them, their licences and what was taken.
 
 ## Replies and the log
 

@@ -1,6 +1,5 @@
 """Openly licensed pictures from Openverse and the decode step; both are injectable so tests need no network."""
 
-import html as html_module
 import io
 import json
 import re
@@ -8,7 +7,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SEARCH_URL = "https://api.openverse.org/v1/images/"
 TIMEOUT = 15
 MAX_PICTURE_BYTES = 3 * 1024 * 1024
 MAX_PIXELS = 25_000_000
@@ -30,29 +28,6 @@ def http_get(url, token=""):
         return err.code, b""
     except Exception as err:
         raise SourceError(f"could not connect ({type(err).__name__})") from err
-
-
-def search(get, query, limit=8):
-    """Candidates with a licence and a thumbnail: {url, title, creator, license, landing}, mature results excluded."""
-    params = {"q": query, "page_size": limit, "mature": "false", "category": "illustration,digitized_artwork,photograph", "license_type": "commercial"}
-    status, body = get(f"{SEARCH_URL}?{urllib.parse.urlencode(params)}")
-    if status == 429:
-        raise SourceError("the picture search is rate limited right now; try again in a minute")
-    if status != 200:
-        raise SourceError(f"the picture search answered http {status}")
-    try:
-        results = json.loads(body).get("results", [])
-    except (ValueError, AttributeError) as err:
-        raise SourceError("the picture search gave an answer I could not read") from err
-    found = []
-    for item in results:
-        if item.get("thumbnail") and item.get("license"):
-            version = f" {item['license_version']}" if item.get("license_version") else ""
-            found.append({
-                "url": item["thumbnail"], "title": (item.get("title") or "untitled")[:80], "creator": (item.get("creator") or "unknown")[:60],
-                "license": f"CC {item['license'].upper()}{version}", "landing": item.get("foreign_landing_url") or item.get("url") or "",
-            })
-    return found
 
 
 def fetch_picture(get, url):
@@ -104,13 +79,19 @@ def reference_image(data, side=768):
 
 WIKI_API = "https://en.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+DDG_PAGE = "https://duckduckgo.com/"
+DDG_IMAGES = "https://duckduckgo.com/i.js"
+GOOGLE_CSE = "https://www.googleapis.com/customsearch/v1"
 WIKI_PAGES = 3
+COMMONS_FILES = 6
+WEB_RESULTS = 6
+PICTURE_TYPES = ("image/jpeg", "image/png", "image/webp")
 FILLER = {"a", "an", "the", "of", "portrait", "picture", "photo", "photograph", "drawing", "image", "realistic", "hyperrealistic", "me", "please", "draw"}
-FREE_LICENCE = re.compile(r"^(cc[ -]|public domain|pd[ -]|pd$|cc0)", re.I)
+VQD = re.compile(rb"vqd=[\"']?([\d-]+)")
 
 
 def clean_subject(subject):
-    """The subject without drawing words ("portrait", "hyperrealistic"), which only confuse an encyclopedia search."""
+    """The subject without drawing words ("portrait", "hyperrealistic"), which only confuse a search."""
     words = [w for w in re.split(r"\s+", subject.strip()) if w.lower() not in FILLER]
     return " ".join(words) or subject.strip()
 
@@ -120,67 +101,103 @@ def _say(report, text):
         report(text[:100])
 
 
-def _json(get, base, params):
+def _json(get, base, params, what):
     status, body = get(f"{base}?{urllib.parse.urlencode(params)}")
     if status != 200:
-        raise SourceError(f"wikipedia answered http {status}")
+        raise SourceError(f"{what} answered http {status}")
     try:
         return json.loads(body)
     except (ValueError, AttributeError) as err:
-        raise SourceError("wikipedia gave an answer I could not read") from err
+        raise SourceError(f"{what} gave an answer I could not read") from err
 
 
-def _plain(html):
-    return " ".join(html_module.unescape(re.sub(r"<[^>]*>", " ", html or "")).split())[:60]
-
-
-def _free_file(get, filename, report=None):
-    """(licence, author) of a Commons file when it is freely licensed, else None (and why, to `report`); a file Commons lacks is non-free."""
-    data = _json(get, COMMONS_API, {
-        "action": "query", "format": "json", "titles": f"File:{filename}", "prop": "imageinfo",
-        "iiprop": "extmetadata", "iiextmetadatafilter": "LicenseShortName|Artist|NonFree",
-    })
-    for page in (data.get("query", {}).get("pages") or {}).values():
-        if "missing" in page:
-            continue
-        meta = ((page.get("imageinfo") or [{}])[0]).get("extmetadata") or {}
-        licence = (meta.get("LicenseShortName") or {}).get("value", "")
-        nonfree = str((meta.get("NonFree") or {}).get("value", "")).lower() in ("true", "1", "yes")
-        if licence and not nonfree and FREE_LICENCE.match(licence):
-            return licence[:40], _plain((meta.get("Artist") or {}).get("value")) or "unknown"
-        _say(report, f"{filename}: licence {licence or 'unknown'}{' (non-free)' if nonfree else ''} rejected")
-        return None
-    _say(report, f"{filename}: not on Commons, treated as non-free")
-    return None
+def _candidate(url, title, landing, source, creator=""):
+    return {"url": url, "title": (title or "untitled")[:80], "creator": (creator or "")[:60], "license": "", "landing": landing or "", "source": source}
 
 
 def wikipedia_candidate(get, subject, report=None):
-    """The lead image of the best Wikipedia article for `subject` as a candidate dict if freely licensed, else None; `report` hears why a page was passed over."""
+    """The lead image of the best Wikipedia article for `subject` as a candidate dict, or None."""
     data = _json(get, WIKI_API, {
         "action": "query", "format": "json", "generator": "search", "gsrsearch": clean_subject(subject), "gsrlimit": WIKI_PAGES,
         "prop": "pageimages|info", "piprop": "thumbnail|name", "pithumbsize": 800, "inprop": "url",
-    })
+    }, "wikipedia")
     pages = sorted((data.get("query", {}).get("pages") or {}).values(), key=lambda page: page.get("index", 99))
     for page in pages:
-        thumbnail, filename = (page.get("thumbnail") or {}).get("source"), page.get("pageimage")
-        if not thumbnail or not filename:
-            _say(report, f"{page.get('title', '?')}: no lead image")
-            continue
-        free = _free_file(get, filename, report)
-        if free:
-            return {"url": thumbnail, "title": page.get("title", "untitled")[:80], "creator": free[1], "license": free[0], "landing": page.get("fullurl", "")}
+        thumbnail = (page.get("thumbnail") or {}).get("source")
+        if thumbnail:
+            return _candidate(thumbnail, page.get("title"), page.get("fullurl"), "wikipedia")
+        _say(report, f"{page.get('title', '?')}: no lead image")
     return None
 
 
-def find_pictures(get, subject, openverse_get=None, report=None):
-    """Candidates for `subject`: the free Wikipedia lead image, else Openverse; `get` has no credentials, `openverse_get` may, and its token never reaches Wikipedia."""
+def commons_candidates(get, subject, report=None):
+    """Picture files from a Wikimedia Commons file search (namespace 6), best match first."""
+    data = _json(get, COMMONS_API, {
+        "action": "query", "format": "json", "generator": "search", "gsrnamespace": 6, "gsrsearch": clean_subject(subject), "gsrlimit": COMMONS_FILES,
+        "prop": "imageinfo", "iiprop": "url|mime|size", "iiurlwidth": 800,
+    }, "commons")
+    pages = sorted((data.get("query", {}).get("pages") or {}).values(), key=lambda page: page.get("index", 99))
+    found = []
+    for page in pages:
+        info = (page.get("imageinfo") or [{}])[0]
+        if info.get("mime") in PICTURE_TYPES and info.get("thumburl") and info.get("width", 0) >= 300:
+            found.append(_candidate(info["thumburl"], str(page.get("title", "")).removeprefix("File:"), info.get("descriptionurl"), "commons"))
+    if not found:
+        _say(report, "commons: no picture file matched")
+    return found
+
+
+def duckduckgo_candidates(get, subject, report=None):
+    """DuckDuckGo image results through its unofficial endpoint and `vqd` token; it often answers with a bot check, which is a quiet empty result."""
+    query = {"q": subject, "iax": "images", "ia": "images"}
+    status, page = get(f"{DDG_PAGE}?{urllib.parse.urlencode(query)}")
+    token = VQD.search(page) if status == 200 else None
+    if not token:
+        _say(report, f"duckduckgo: no token (http {status})")
+        return []
+    params = {"l": "us-en", "o": "json", "q": subject, "vqd": token.group(1).decode(), "f": ",,,,,", "p": "1"}
+    status, body = get(f"{DDG_IMAGES}?{urllib.parse.urlencode(params)}")
     try:
-        wiki = wikipedia_candidate(get, subject, report)
-    except SourceError as err:
-        _say(report, f"wikipedia: {err}")
-        wiki = None
-    if wiki is None:
-        _say(report, "no free wikipedia picture, using openverse")
-    if wiki:
-        return [{**wiki, "source": "wikipedia"}]
-    return [{**c, "source": "openverse"} for c in search(openverse_get or get, subject)]
+        results = json.loads(body).get("results", []) if status == 200 else []
+    except (ValueError, AttributeError):
+        results = []
+    found = [_candidate(r["image"], r.get("title"), r.get("url"), "duckduckgo") for r in results[:WEB_RESULTS] if r.get("image")]
+    if not found:
+        _say(report, f"duckduckgo: no results (http {status})")
+    return found
+
+
+def google_candidates(get, subject, key, engine, report=None):
+    """Image results from Google's official Programmable Search; the key goes in the request but never into a message."""
+    data = _json(get, GOOGLE_CSE, {"key": key, "cx": engine, "q": subject, "searchType": "image", "num": WEB_RESULTS, "safe": "off"}, "google search")
+    return [
+        _candidate(i["link"], i.get("title"), (i.get("image") or {}).get("contextLink"), "google")
+        for i in data.get("items", []) if i.get("link")
+    ]
+
+
+def find_pictures(get, subject, google=None, report=None):
+    """Candidates for `subject`, read lazily one source at a time: Google (if `google` is a (key, engine) pair), DuckDuckGo, the Wikipedia lead image, Commons; a failing source is skipped and reported."""
+    steps = [("google", lambda: google_candidates(get, subject, *google, report=report))] if google else []
+    steps += [
+        ("duckduckgo", lambda: duckduckgo_candidates(get, subject, report)),
+        ("wikipedia", lambda: [c] if (c := wikipedia_candidate(get, subject, report)) else []),
+        ("commons", lambda: commons_candidates(get, subject, report)),
+    ]
+    for name, step in steps:
+        try:
+            yield from step()
+        except SourceError as err:
+            _say(report, f"{name}: {err}")
+
+
+def credit_line(candidate):
+    """`"Title" by Creator (Licence) page`, leaving out what the source did not say."""
+    parts = [f'"{candidate["title"]}"']
+    if candidate.get("creator") and candidate["creator"] != "unknown":
+        parts.append(f"by {candidate['creator']}")
+    if candidate.get("license"):
+        parts.append(f"({candidate['license']})")
+    if candidate.get("landing"):
+        parts.append(candidate["landing"])
+    return " ".join(parts)

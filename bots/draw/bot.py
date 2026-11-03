@@ -4,19 +4,19 @@
 import asyncio
 import contextlib
 import functools
+import itertools
 from dataclasses import replace
 import time
 import uuid
 
 import ai
 import crop
-import halftone
 import photo
 import plan
 import runlog
-import safety
 import screenshot
 import sources
+import squiggle
 import store_db
 import tracer
 import where
@@ -41,6 +41,7 @@ MAX_PROMPT = 200
 TILE_BYTES = 2 * 1024 * 1024
 TILE_SECONDS = 10
 ATTEMPTS = 3
+PICTURE_TRIES = 6
 RATE_RETRIES = 4
 RATE_BACKOFF = 1.5
 
@@ -52,11 +53,14 @@ ORIGIN_Y = bot.setting("DRAW_Y", 600.0, type=float)
 SIZE = bot.setting("DRAW_SIZE", 480.0, type=float)
 MAX_STROKES = min(max(bot.setting("DRAW_MAX_STROKES", 150, type=int), 10), 300)
 PACE_SECONDS = max(bot.setting("DRAW_PACE", 0.15, type=float), 0.1)
-OPENVERSE_TOKEN = bot.setting("OPENVERSE_TOKEN")
+GOOGLE_KEY = bot.setting("GOOGLE_CSE_KEY")
+GOOGLE_ENGINE = bot.setting("GOOGLE_CSE_ID")
+GOOGLE = (GOOGLE_KEY, GOOGLE_ENGINE) if GOOGLE_KEY and GOOGLE_ENGINE else None
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
-DOTS_MAX = min(max(bot.setting("DRAW_DOTS_MAX", 1500, type=int), 50), 3000)
+SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 600, type=int), type=int), 50), 1500)
 PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 300, type=int), 20), 1500)
+PHOTO_SHADING = bot.setting("DRAW_PHOTO_SHADING", False, type=bool)
 AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
 AI_REQUEST_TIMEOUT = max(bot.setting("DRAW_AI_REQUEST_TIMEOUT", 90, type=int), 10)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
@@ -159,7 +163,7 @@ def pieces_to_objects(slot, pieces, width, height):
 
 async def find_drawable(query):
     """(candidate, pieces, width, height) for the first search result that traces to something, else a sentence."""
-    found = await asyncio.to_thread(sources.search, functools.partial(get, token=OPENVERSE_TOKEN), query)
+    found = await asyncio.to_thread(lambda: list(itertools.islice(sources.find_pictures(get, query, GOOGLE), ATTEMPTS)))
     if not found:
         return "no openly licensed picture matched that; try a simpler word."
     for candidate in found[:ATTEMPTS]:
@@ -177,7 +181,7 @@ async def find_drawable(query):
 
 
 def credit(candidate, query, count):
-    return f"drew \"{query}\" with {count} strokes from \"{candidate['title']}\" by {candidate['creator']} ({candidate['license']}) {candidate['landing']}".strip()
+    return f"drew \"{query}\" with {count} strokes from {defuse(sources.credit_line(candidate))}"
 
 
 async def remove_batch(canvas, ids, gate):
@@ -250,13 +254,11 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
             busy.discard(owned)
 
 
-@bot.group(name="draw", help="`<prompt>` AI drawing, `photo <subject>` line drawing from a photo, `dots <subject>` dot portrait, `trace <word>` old picture tracer, `undo`, `clear`")
+@bot.group(name="draw", help="`<prompt>` AI drawing, `photo <subject>` line drawing from a photo, `shaded <subject>` tonal squiggle portrait, `trace <word>` old picture tracer, `undo`, `clear`")
 async def draw(ctx, query: str = ""):
     query = query.strip()
     if not query:
-        await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw photo <subject>`, `{bot.prefix}draw dots <subject>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
-        return
-    if await deny_explicit(ctx, "draw", query):
+        await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw photo <subject>`, `{bot.prefix}draw shaded <subject>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
         return
     if planner is None:
         await _trace_request(ctx, query)
@@ -293,23 +295,27 @@ def make_review(free):
     return review
 
 
-async def search_pictures(subject, log):
-    """Candidates from Wikipedia first, Openverse only when Wikipedia has nothing; the Openverse token never goes to Wikipedia."""
-    with log.stage("search"):
-        return await asyncio.to_thread(sources.find_pictures, get, subject, functools.partial(get, token=OPENVERSE_TOKEN), log.note)
+def candidate_pictures(subject, log):
+    """The picture candidates for `subject`, best source first, read lazily (each read may call a source)."""
+    return iter(sources.find_pictures(get, subject, GOOGLE, log.note))
 
 
 async def first_picture(candidates, log, convert=None):
-    """(bytes, candidate) for the first candidate that downloads (and converts); None when none do."""
-    for candidate in candidates[:ATTEMPTS]:
+    """(bytes, candidate) for the first of up to PICTURE_TRIES candidates that downloads (and converts); None when none do."""
+    for _ in range(PICTURE_TRIES):
+        with log.stage("search"):
+            candidate = await asyncio.to_thread(next, candidates, None)
+        if candidate is None:
+            return None
         try:
             with log.stage("download"):
                 data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
                 if convert:
                     data = await asyncio.to_thread(convert, data)
-        except sources.SourceError:
+        except sources.SourceError as err:
+            log.note(f"{candidate.get('source', '?')}: {err}")
             continue
-        log.source = candidate.get("source", "openverse")
+        log.source = candidate.get("source", "unknown")
         return data, candidate
     return None
 
@@ -317,8 +323,7 @@ async def first_picture(candidates, log, convert=None):
 async def find_reference(prompt, log):
     """(reference for the model, candidate) of the best freely licensed picture of the subject, or None; never raises."""
     try:
-        found = await search_pictures(prompt[:100], log)
-        return await first_picture(found, log, sources.reference_image)
+        return await first_picture(candidate_pictures(prompt[:100], log), log, sources.reference_image)
     except sources.SourceError:
         return None
 
@@ -364,7 +369,7 @@ async def _ai_draw(ctx, prompt, channel_id, name, log):
         await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     skipped = f" ({len(problems)} parts of the plan were skipped)" if problems else ""
-    credited = f" Reference: \"{defuse(source['title'])}\" by {defuse(source['creator'])} ({source['license']}) {source['landing']}".rstrip() if source else ""
+    credited = f" Reference: {defuse(sources.credit_line(source))}" if source else ""
     log.done(f"drew {done}")
     await ctx.reply(f"drew \"{defuse(prompt)}\" on the canvas in {name} with {done} object{'' if done == 1 else 's'}{skipped}.{credited}")
 
@@ -418,30 +423,22 @@ async def dots_source(ctx, subject, log):
             log.source = "attachment"
             return data, None
     if not subject:
-        return f"attach an image or say what to draw: `{bot.prefix}draw dots <subject>`."
+        return f"attach an image or say what to draw: `{bot.prefix}draw shaded <subject>`."
     try:
-        found = await first_picture(await search_pictures(subject, log), log)
+        found = await first_picture(candidate_pictures(subject, log), log)
     except sources.SourceError as err:
         return f"{err}."
-    return found if found else "no freely licensed picture matched that; try a simpler word."
+    return found if found else "no picture matched that; try a simpler word."
 
 
-async def crop_picture(data, subject, log):
-    """(cut picture, face box in it or None, explicit): one model call when a key is configured, else (or on failure) the heuristic box."""
+async def crop_picture(data, log):
+    """(cut picture, face box in it or None): around the largest face found locally, else the busiest region, else the whole picture."""
     try:
-        width, height = await asyncio.to_thread(crop.size_of, data)
-        answer = crop.Answer(None, None, "other", False)
-        if hasattr(planner, "locate") and await bot.store.run(take_ai_call, time.strftime("%Y-%m-%d", time.gmtime()), AI_DAILY_CAP):
-            preview, media_type = await asyncio.to_thread(crop.preview, data)
-            answer = crop.parse_answer(await planner.locate(defuse(subject), preview, media_type))
-        mode = "model" if answer.box else "heuristic"
-        box = answer.box or crop.heuristic_box(width, height)
+        box, face_box, mode = await asyncio.to_thread(crop.choose, data)
         log.set("crop", f"{mode} {crop.describe(box)}")
-        if answer.face:
-            log.set("face", crop.describe(answer.face))
-        return await asyncio.to_thread(crop.crop_bytes, data, box), answer.face, answer.explicit
+        return await asyncio.to_thread(crop.crop_bytes, data, box), face_box
     except sources.SourceError:
-        return data, None, False
+        return data, None
 
 
 async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
@@ -460,12 +457,9 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
             return
         data, candidate = source
         with log.stage("crop"):
-            data, face, explicit = await crop_picture(data, subject, log)
-        if explicit:
-            await refuse(ctx, log, "refused: explicit picture", "that picture looks explicit, so I won't draw it.")
-            return
+            data, face_box = await crop_picture(data, log)
         with log.stage("trace"):
-            objects = await asyncio.to_thread(build, data, free, face)
+            objects = await asyncio.to_thread(build, data, free, face_box)
     except (screenshot.ScreenshotError, sources.SourceError) as err:
         await refuse(ctx, log, f"refused: {err}", f"{err}.")
         return
@@ -479,24 +473,13 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun):
     except ApiError as err:
         await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
-    credit_text = f" from \"{defuse(candidate['title'])}\" by {defuse(candidate['creator'])} ({candidate['license']}) {candidate['landing']}".rstrip() if candidate else ""
+    credit_text = f" from {defuse(sources.credit_line(candidate))}" if candidate else ""
     log.done(f"drew {done}")
     await ctx.reply(f"drew {noun.format(count=done)} on the canvas in {name}{credit_text}")
 
 
-async def deny_explicit(ctx, command, text):
-    """True after refusing (privately, and in the log) a request that names something sexual, naked or graphic."""
-    if not safety.is_explicit(text):
-        return False
-    runlog.RunLog(command, ctx.channel_id, text).done("refused: explicit prompt")
-    await ctx.reply_ephemeral(safety.REFUSAL, public_fallback=True)
-    return True
-
-
 async def _picture_command(ctx, subject, command, build, noun, ack):
     subject = subject.strip()
-    if await deny_explicit(ctx, command, subject):
-        return
     if len(subject) > MAX_QUERY:
         await ctx.reply_ephemeral(f"keep it under {MAX_QUERY} characters.", public_fallback=True)
         return
@@ -506,18 +489,18 @@ async def _picture_command(ctx, subject, command, build, noun, ack):
     )
 
 
-@draw.command(name="dots", help="Draw a halftone dot portrait of an attached image or a subject; no model, no cost")
-async def draw_dots(ctx, subject: str = ""):
+@draw.command(name="shaded", aliases=("dots",), help="Draw a tonal squiggle portrait of an attached image or a subject; no model, no cost")
+async def draw_shaded(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "dots", lambda data, free, face: halftone.halftone(data, free, DOTS_MAX), "a dot portrait with {count} dots",
-        "making a dot portrait of {subject}, this takes a couple of minutes.",
+        ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, face), "a shaded portrait with {count} strokes",
+        "making a shaded portrait of {subject}, this takes a minute or two.",
     )
 
 
 @draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")
 async def draw_photo(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face), "a line drawing of the photo with {count} strokes",
+        ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face, PHOTO_SHADING), "a line drawing of the photo with {count} strokes",
         "tracing a line drawing of {subject}, this takes a minute or two.",
     )
 
@@ -527,8 +510,6 @@ async def draw_trace(ctx, query: str = ""):
     query = query.strip()
     if not query:
         await ctx.reply_ephemeral(f"`{bot.prefix}draw trace <word>`", public_fallback=True)
-        return
-    if await deny_explicit(ctx, "trace", query):
         return
     await _trace_request(ctx, query)
 

@@ -167,8 +167,8 @@ def _worth_drawing(path, line, width, height, face):
     )
 
 
-def strokes(data, cap, face_box=None):
-    """(polylines in pixels, width, height): the best lines, at most `cap` after splitting; with `face_box` (x, y, w, h fractions) the face is also shaded."""
+def strokes(data, cap, face_box=None, shading=False):
+    """(polylines in pixels, width, height): the best lines, at most `cap` after splitting; with `face_box` (x, y, w, h fractions) the face gets lower edge thresholds, and with `shading` also pen hatching."""
     gray = _gray(data)
     width, height = gray.size
     face = quality.face_from_box(face_box, width, height) if face_box else quality.default_face(width, height)
@@ -180,7 +180,7 @@ def strokes(data, cap, face_box=None):
         line = simplify(smooth)
         if _worth_drawing(smooth, line, width, height, face):
             traced.append((quality.chaikin(line), sum(edges.get(p, 0) for p in path) / len(path)))
-    if face_box:
+    if face_box and shading:
         traced += [(line, FACE_STRENGTH) for line in photo_shade.shade_lines(gray, face)]
     survivors = {id(line) for line in drop_isolated([line for line, _ in traced])}
     ranked = sorted(
@@ -216,9 +216,9 @@ def _stroke(points, scale, left, top):
     )
 
 
-def trace_photo(data, region, cap, face_box=None):
+def trace_photo(data, region, cap, face_box=None, shading=False):
     """Stroke objects of the photo's lines, fitted inside `region` with the photo's aspect ratio and centred."""
-    lines, width, height = strokes(data, cap, face_box)
+    lines, width, height = strokes(data, cap, face_box, shading)
     scale = min(region.w / width, region.h / height)
     left, top = region.x + (region.w - scale * width) / 2, region.y + (region.h - scale * height) / 2
     return [_stroke(line, scale, left, top) for line in lines]

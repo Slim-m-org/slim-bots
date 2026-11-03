@@ -78,18 +78,28 @@ def test_the_source_used_is_logged():
     Image.new("RGB", (64, 64), (9, 9, 9)).save(png, "PNG")
     base.sources.fetch_picture = lambda get, url: png.getvalue()
     base.sources.reference_image = base.real_reference_image
-    base.sources.wikipedia_candidate = lambda get, subject, report=None: {"url": "https://t/w.jpg", "title": "T", "creator": "C", "license": "CC0", "landing": "https://w"}
+    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter([{"url": "https://t/w.jpg", "title": "T", "creator": "", "license": "", "landing": "https://w", "source": "wikipedia"}])
     (line,) = lines_for(rig, "!draw barack obama")
     assert "source=wikipedia" in line and "search=" in line
-    base.sources.wikipedia_candidate = lambda get, subject, report=None: None
 
 
-def test_the_reasons_a_picture_source_was_passed_over_are_in_the_log_line():
-    rig = rig_with(FakePlanner())
-    base.sources.wikipedia_candidate = lambda get, subject, report=None: report("File.jpg: licence All rights reserved rejected")
-    (line,) = lines_for(rig, "!draw barack obama")
-    assert 'notes="File.jpg: licence All rights reserved rejected; no free wikipedia picture, using openverse"' in line
-    base.sources.wikipedia_candidate = lambda get, subject, report=None: None
+def test_a_download_that_fails_moves_to_the_next_candidate_and_says_why():
+    rig = base.Rig()
+    good = [{"url": "https://bad/1", "title": "Bad", "creator": "", "license": "", "landing": "", "source": "duckduckgo"}, {"url": "https://ok/2", "title": "Ok", "creator": "", "license": "", "landing": "https://ok", "source": "wikipedia"}]
+    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter(good)
+
+    def fetch(get, url):
+        if "bad" in url:
+            raise base.sources.SourceError("the picture could not be downloaded (http 403)")
+        from PIL import Image
+
+        out = io.BytesIO()
+        Image.new("RGB", (80, 80), (20, 20, 20)).save(out, "PNG")
+        return out.getvalue()
+
+    base.sources.fetch_picture = fetch
+    (line,) = lines_for(rig, "!draw photo a cat")
+    assert "source=wikipedia" in line and "duckduckgo: the picture could not be downloaded (http 403)" in line
 
 
 def test_an_unexpected_exception_is_logged_with_a_traceback_and_the_invoker_is_told():

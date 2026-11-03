@@ -76,12 +76,11 @@ class Rig:
         self.in_call(BOB)
         self.searches, self.grid = [], grid if grid is not None else disc()
 
-        def search(get, query, limit=8):
-            self.searches.append(query)
-            return [CANDIDATE] if results is None else results
+        def find(get, subject, google=None, report=None):
+            self.searches.append(subject)
+            return iter([CANDIDATE] if results is None else results)
 
-        sources.search = search
-        sources.wikipedia_candidate = lambda get, subject, report=None: None
+        sources.find_pictures = find
         sources.fetch_picture = lambda get, url: b"bytes"
         sources.decode_gray = lambda data, size: (self.grid, len(self.grid[0]), len(self.grid))
 

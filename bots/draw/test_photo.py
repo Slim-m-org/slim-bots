@@ -234,7 +234,7 @@ def test_a_blank_photo_and_no_subject_each_get_a_sentence():
 
 def test_the_help_text_lists_every_mode():
     text = draw.draw.help if hasattr(draw.draw, "help") else ""
-    for mode in ("photo <subject>", "dots <subject>", "trace <word>", "undo", "clear"):
+    for mode in ("photo <subject>", "shaded <subject>", "trace <word>", "undo", "clear"):
         assert mode in text, mode
 
 
