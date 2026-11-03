@@ -5,6 +5,8 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.17.0
+
 - Requires Python 3.11 or later (was 3.9), because `download` bounds its read with `asyncio.timeout`. The bots and CI already ran on 3.12.
 - `AsyncClient.download(path, max_bytes=)` reads the raw body of a `GET`, such as an attachment, with the client's auth and base URL, a size bound and a 15 second limit (wrap in `asyncio.timeout` for less); `ResponseTooLarge` is raised past the bound. `FakeAsyncClient.download` answers it from a stubbed bytes response. Needs the next `slim-m` release (0.17.0).
 
