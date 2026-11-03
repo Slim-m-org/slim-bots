@@ -42,7 +42,7 @@ A bot script imports `Bot` and little else.
 
 ## Commands
 
-`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None, choices=None)` registers a function `async def name(ctx, *typed_args)`.
+`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None, choices=None, suggest=None)` registers a function `async def name(ctx, *typed_args)`.
 `requires` is a `Permissions` bit; a member without it gets a private `MissingPermissions` reply (`requires_message` if given), before the arguments are parsed.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
@@ -56,6 +56,7 @@ Arguments convert from the function's own annotations (`slimbots/commands.py`):
 `choices={"param": ("a", "b")}` fixes the values a parameter accepts: a value is matched ignoring case and handed to the function in its declared spelling, any other is a `BadArgument` naming the choices, and the composer offers them as a pick list after the command (below).
 A choice is 1-100 characters with no whitespace, a parameter has at most 25, and a command with choices takes at most 5 parameters; a name that is no parameter, or a list the server would refuse, raises when the command is declared.
 A `@group.command()` subcommand takes `choices=` and enforces it, but only a top-level command advertises its choices.
+`suggest={"param": ("a", "b")}` advertises the same pick list but enforces nothing: a value outside it is delivered and runs, which is what a command whose first word is either a mode or free text needs (`@bot.group` takes it too, so `!draw` offers `photo`, `shaded` and the rest while `!draw a cat` still works). The composer opens the list as soon as the keyword and a space are typed, no `/` needed; it shows the values only, with the parameter's name beside each, so name the parameter for what the list is.
 
 `help` is auto-generated from the registered set (name, aliases, usage, help text) unless a bot registers its own `help` command first.
 

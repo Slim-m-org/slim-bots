@@ -270,12 +270,13 @@ class Bot:
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None, usage: str | None = None,
         cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
         check: Callable[[Context], Any] | None = None, choices: Mapping[str, Sequence[str]] | None = None,
+        suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             self.add_command(Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
                 cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
-                choices=choices,
+                choices=choices, suggest=suggest,
             ))
             return func
         return decorator
@@ -283,12 +284,13 @@ class Bot:
     def group(
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
         cooldown: float | None = None, cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None,
-        check: Callable[[Context], Any] | None = None,
+        check: Callable[[Context], Any] | None = None, suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Group]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Group:
             grp = Group(
                 func, name=name or func.__name__, aliases=aliases, help=help,
                 cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
+                suggest=suggest,
             )
             self.add_command(grp)
             return grp

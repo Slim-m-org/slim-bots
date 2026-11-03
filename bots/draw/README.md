@@ -32,6 +32,7 @@ If you are in no call it asks you to join one.
 | `!draw undo` | the member who drew it | remove your latest drawing in the call you are in, every object of it |
 | `!draw clear` | Manage Canvas | remove every drawing the bot made on your call's canvas |
 
+Typing `!draw ` opens a pick list of the modes (`photo`, `shaded`, `trace`, `undo`, `clear`) while anything else you type is still just the idea to draw; the list needs a slimbots with `suggest` and a slim-m with command options, and without them the bot works the same minus the list.
 A prompt is at most 200 characters (60 for a trace), the prompt goes only into the user turn of the model call, and mentions in replies are defused.
 
 ## How a prompt becomes a drawing

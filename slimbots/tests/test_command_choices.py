@@ -88,3 +88,38 @@ def test_a_choice_list_the_server_would_refuse_fails_at_declaration(values):
         @bot.command(name="x", choices={"source": values})
         async def x(ctx, source: str):
             pass
+
+
+async def test_suggestions_are_advertised_as_choices_but_free_text_still_runs(bot, client):
+    @bot.group(name="draw", suggest={"query": ("photo", "shaded", "undo")})
+    async def draw(ctx, query: str = ""):
+        await ctx.reply(f"free {query}")
+
+    @draw.command(name="photo")
+    async def photo(ctx, subject: str = ""):
+        await ctx.reply(f"photo {subject}")
+
+    assert _entry(bot, "draw")["options"] == [{"name": "query", "required": False, "choices": ["photo", "shaded", "undo"]}]
+    assert await send(bot, client, "!draw michael jordan dunking") == "free michael jordan dunking"
+    assert await send(bot, client, "!draw photo obama") == "photo obama"
+
+
+async def test_a_suggestion_does_not_refuse_an_unlisted_word_on_a_plain_command(bot, client):
+    @bot.command(name="mode", suggest={"kind": ("a", "b")})
+    async def mode(ctx, kind: str):
+        await ctx.reply(f"kind {kind}")
+
+    assert _entry(bot, "mode")["options"] == [{"name": "kind", "required": True, "choices": ["a", "b"]}]
+    assert await send(bot, client, "!mode zzz") == "kind zzz"
+
+
+async def test_suggestions_are_checked_like_choices_when_declared(bot):
+    with pytest.raises(ValueError):
+        @bot.command(name="x", suggest={"nope": ("a",)})
+        async def x(ctx, kind: str = ""):
+            pass
+
+    with pytest.raises(ValueError):
+        @bot.command(name="y", suggest={"kind": ("a", "A")})
+        async def y(ctx, kind: str = ""):
+            pass

@@ -4,6 +4,7 @@
 import asyncio
 import contextlib
 import functools
+import inspect
 import itertools
 from dataclasses import replace
 import time
@@ -255,11 +256,22 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
             busy.discard(owned)
 
 
-@bot.group(name="draw", help="`<prompt>` AI drawing, `photo <subject>` line drawing from a photo, `shaded <subject>` tonal squiggle portrait, `trace <word>` old picture tracer, `undo`, `clear`")
-async def draw(ctx, query: str = ""):
-    query = query.strip()
+MODES = ("photo", "shaded", "trace", "undo", "clear")
+# slimbots before 0.18 has no `suggest`, so the composer then just lacks the pick list
+_PICKER = {"suggest": {"mode": MODES}} if "suggest" in inspect.signature(bot.group).parameters else {}
+
+
+@bot.group(name="draw", help="Draw in your call: <idea>, photo <subject>, shaded <subject>, trace <word>, undo, clear", **_PICKER)
+async def draw(ctx, mode: str = ""):
+    """The composer labels the first word `mode`; anything that is not a mode is the idea to draw."""
+    query = mode.strip()
     if not query:
-        await ctx.reply_ephemeral(f"`{bot.prefix}draw <what to draw>`, `{bot.prefix}draw photo <subject>`, `{bot.prefix}draw shaded <subject>`, `{bot.prefix}draw trace <word>`, `{bot.prefix}draw undo`, `{bot.prefix}draw clear`", public_fallback=True)
+        await ctx.reply_ephemeral(
+            f"`{bot.prefix}draw <idea>` an AI drawing, `{bot.prefix}draw photo <subject>` a line sketch of a photo, "
+            f"`{bot.prefix}draw shaded <subject>` a tonal portrait, `{bot.prefix}draw trace <word>` the old tracer, "
+            f"`{bot.prefix}draw undo`, `{bot.prefix}draw clear`.",
+            public_fallback=True,
+        )
         return
     if planner is None:
         await _trace_request(ctx, query)

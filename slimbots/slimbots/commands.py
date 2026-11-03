@@ -113,7 +113,7 @@ class Command:
         self, func: Callable[..., Awaitable[Any]], *, name: str, aliases: tuple[str, ...] = (),
         help: str | None = None, usage: str | None = None, cooldown: float | None = None,
         cooldown_bucket: str = "user", requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
-        choices: Mapping[str, Sequence[str]] | None = None,
+        choices: Mapping[str, Sequence[str]] | None = None, suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         self.func = func
         self.name = name
@@ -126,6 +126,7 @@ class Command:
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
         self.params = _handler_params(func)
         self.choices = validate_choices(self.params, choices)
+        self.suggested = validate_choices(self.params, suggest)
         self.usage = usage or " ".join(_usage_token(p) for p in self.params)
 
     @property
@@ -145,8 +146,8 @@ class Command:
 
     @property
     def options(self) -> list[dict[str, Any]]:
-        """The wire `options` this command advertises; empty unless some argument has choices."""
-        return option_entries(self.params, self.choices, _NO_DEFAULT)
+        """The wire `options` this command advertises; empty unless some argument has choices or suggestions."""
+        return option_entries(self.params, {**self.suggested, **self.choices}, _NO_DEFAULT)
 
     def _pick(self, name: str, token: str) -> str:
         """`token` in its declared spelling when `name` has choices; anything else is a BadArgument naming them."""
@@ -216,6 +217,7 @@ class Group(Command):
         self, func: Callable[..., Awaitable[Any]], *, name: str, aliases: tuple[str, ...] = (),
         help: str | None = None, cooldown: float | None = None, cooldown_bucket: str = "user",
         requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
+        suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         self.func = func
         self.name = name
@@ -228,6 +230,7 @@ class Group(Command):
         self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
         self.params = _handler_params(func)
         self.choices: dict[str, tuple[str, ...]] = {}
+        self.suggested = validate_choices(self.params, suggest)
         self.subcommands: dict[str, Command] = {}
         self._unique_subcommands: list[Command] = []
 
@@ -235,13 +238,13 @@ class Group(Command):
         self, name: str | None = None, *, aliases: tuple[str, ...] = (), help: str | None = None,
         usage: str | None = None, cooldown: float | None = None, cooldown_bucket: str = "user",
         requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
-        choices: Mapping[str, Sequence[str]] | None = None,
+        choices: Mapping[str, Sequence[str]] | None = None, suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
         def decorator(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
             sub = Command(
                 func, name=name or func.__name__, aliases=aliases, help=help, usage=usage,
                 cooldown=cooldown, cooldown_bucket=cooldown_bucket, requires=requires, requires_message=requires_message, check=check,
-                choices=choices,
+                choices=choices, suggest=suggest,
             )
             for sub_name in sub.names:
                 if sub_name in self.subcommands:
