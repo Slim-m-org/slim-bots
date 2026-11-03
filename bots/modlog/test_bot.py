@@ -5,7 +5,8 @@ import asyncio
 import sqlite3
 
 import bot as modlog
-from slimbots import Store, style
+import render
+from slimbots import ApiError, Store, style
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 MEMBERS = [human("u1", "nick", "Nick", role_ids=[], roles=[])]
@@ -22,10 +23,13 @@ def setup():
     modlog._last_roles.clear()
     modlog._role_names.clear()
     modlog._open_gap_notice = None
+    modlog._last_notice_at = None
+    modlog._role_bits.clear()
     modlog.bot.moderation_head = None
     modlog.MODERATION_SETTLE_SECONDS = 0
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
+    client.respond("GET", "/roles", ApiError(403, "forbidden"))
     wire_bot(modlog.bot, client, me_id="bot-1")
     asyncio.run(modlog.bot.space.refresh_members())
     return client
@@ -43,55 +47,168 @@ def process(client, *messages):
     asyncio.run(run())
 
 
+def last_embed(client):
+    return client.sent[-1]["embeds"][0]
+
+
+def field_values(client):
+    return {f["name"]: f["value"] for f in last_embed(client).get("fields", [])}
+
+
 def test_member_timeout_is_logged():
     client = setup()
     client.respond("GET", "/users/u1", {**MEMBERS[0]})
     dispatch_frame({"type": "member.timeout", "user_id": "u1", "until": 9999999999000})
-    assert "was timed out" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Member timed out"
+    assert field_values(client)["Member"] == "Nick (@nick)"
+    assert field_values(client)["Until"].startswith("until 2286-")
 
 
 def test_member_timeout_lifted_is_logged():
     client = setup()
     client.respond("GET", "/users/u1", {**MEMBERS[0]})
     dispatch_frame({"type": "member.timeout", "user_id": "u1", "until": None})
-    assert "timeout was lifted" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Timeout lifted"
+    assert field_values(client) == {"Member": "Nick (@nick)"}
 
 
 def test_member_removed_is_logged():
     client = setup()
     client.respond("GET", "/users/u1", {**MEMBERS[0]})
     dispatch_frame({"type": "member.removed", "user_id": "u1"})
-    assert "was removed from the Space" in client.sent[-1]["content"]
-    assert client.sent[-1]["embeds"] == [{"color": style.NEUTRAL, "footer": {"text": "member.removed"}}]
+    assert last_embed(client)["title"] == "Member removed"
+    assert field_values(client) == {"Member": "Nick (@nick)"}
+    assert client.sent[-1]["content"] == "Member removed: member Nick (@nick)"
 
 
-def test_role_change_first_sighting_reads_now_holds():
+def test_member_restored_is_logged():
     client = setup()
-    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["helper"]})
-    dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1"})
-    assert "now holds" in client.sent[-1]["content"]
-    assert "helper" in client.sent[-1]["content"]
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    dispatch_frame({"type": "member.restored", "user_id": "u1"})
+    assert last_embed(client)["title"] == "Member restored"
 
 
-def test_role_change_grant_then_revoke():
+def test_an_unknown_member_is_never_shown_as_an_id():
+    client = setup()
+    gone = "0190aaaa-0000-7000-8000-000000000001"
+    client.respond("GET", f"/users/{gone}", ApiError(404, "not found"))
+    dispatch_frame({"type": "member.removed", "user_id": gone})
+    assert field_values(client) == {"Member": "Unknown member"}
+
+
+def test_role_grant_from_a_current_server_names_the_role():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["Helper"]})
+    dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1", "granted": True, "role_name": "Helper"})
+    assert last_embed(client)["title"] == "Role granted"
+    assert field_values(client) == {"Member": "Nick (@nick)", "Role": "Helper"}
+
+
+def test_role_revoke_from_a_current_server():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1", "granted": False, "role_name": "Helper"})
+    assert last_embed(client)["title"] == "Role revoked"
+
+
+def test_role_change_from_an_older_server_is_inferred_from_the_member():
     client = setup()
     client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": [], "roles": []})
     dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1"})
-    assert "does not hold" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Member roles changed"
 
-    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["helper"]})
+    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["Helper"]})
     dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1"})
-    assert "was granted" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Role granted"
+    assert field_values(client)["Role"] == "Helper"
 
     client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": [], "roles": []})
     dispatch_frame({"type": "member.role_changed", "user_id": "u1", "role_id": "r1"})
-    assert "was revoked from" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Role revoked"
 
 
-def test_role_definition_change_unresolvable_name():
+def test_role_created_shows_its_name():
+    client = setup()
+    after = {"name": "Helpers", "color": 1, "hoist": False, "mentionable": False}
+    dispatch_frame({"type": "role.changed", "role_id": "r1", "change": "created", "name": "Helpers", "after": after})
+    assert last_embed(client)["title"] == "Role created"
+    assert field_values(client) == {"Role": "Helpers"}
+
+
+def test_role_renamed_and_recoloured_shows_each_difference():
+    client = setup()
+    before = {"name": "Mods", "color": None, "hoist": False, "mentionable": False}
+    after = {"name": "Moderators", "color": 3, "hoist": True, "mentionable": False}
+    dispatch_frame({"type": "role.changed", "role_id": "r1", "change": "updated", "name": "Moderators", "before": before, "after": after})
+    assert last_embed(client)["title"] == "Role changed"
+    assert field_values(client) == {
+        "Role": "Moderators",
+        "Name": "Mods -> Moderators",
+        "Colour": "Automatic -> Violet",
+        "Listed separately": "off -> on",
+    }
+
+
+def test_role_deleted_keeps_its_name():
+    client = setup()
+    dispatch_frame({"type": "role.changed", "role_id": "r1", "change": "deleted", "name": "Helpers", "before": {"name": "Helpers"}})
+    assert last_embed(client)["title"] == "Role deleted"
+    assert field_values(client) == {"Role": "Helpers"}
+
+
+def test_role_permissions_diff_when_the_role_list_is_readable():
+    client = setup()
+    manage_messages, kick = 1 << 3, 1 << 6
+    client.respond("GET", "/roles", [{"id": "r1", "permissions": manage_messages | kick}])
+    asyncio.run(modlog.on_ready())
+    client.respond("GET", "/roles", [{"id": "r1", "permissions": manage_messages | (1 << 7)}])
+    dispatch_frame({"type": "role.changed", "role_id": "r1", "change": "updated", "name": "Mods", "before": {"name": "Mods"}, "after": {"name": "Mods"}})
+    assert field_values(client)["Permissions"] == "+ Ban members, - Kick members"
+
+
+def test_role_change_without_details_is_still_readable():
     client = setup()
     dispatch_frame({"type": "role.changed", "role_id": "r-unknown"})
-    assert "cannot be resolved here" in client.sent[-1]["content"]
+    assert last_embed(client)["title"] == "Role changed"
+    assert field_values(client) == {"Role": "Unknown role"}
+    assert last_embed(client)["description"] == "Its position or access was adjusted."
+
+
+def test_no_post_carries_an_id_a_route_or_an_event_type():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["Helper"]})
+    for frame in (
+        {"type": "member.removed", "user_id": "u1"},
+        {"type": "member.timeout", "user_id": "u1", "until": None},
+        {"type": "member.role_changed", "user_id": "u1", "role_id": "r1", "granted": True, "role_name": "Helper"},
+        {"type": "role.changed", "role_id": "r1"},
+    ):
+        dispatch_frame(frame)
+    for sent in client.sent:
+        text = sent["content"] + str(sent["embeds"])
+        for banned in ("r1", "GET /", "MANAGE_", ".removed", ".changed", ".timeout", "footer"):
+            assert banned not in text, (banned, text)
+
+
+def test_permission_diff_names_what_was_added_and_removed():
+    before = (1 << 3) | (1 << 6)
+    after = (1 << 3) | (1 << 19)
+    assert render.permission_diff(before, after) == "+ Move members, - Kick members"
+    assert render.permission_diff(before, before) is None
+
+
+def test_every_server_permission_bit_has_a_label():
+    assert sorted(render.PERMISSION_LABELS) == list(range(20))
+
+
+def test_colour_names_follow_the_client_palette():
+    assert [render.colour_name(i) for i in (0, 9, None, 10)] == ["Gold", "Teal", "Automatic", "Automatic"]
+
+
+def test_look_diff_ignores_what_did_not_change():
+    same = {"name": "A", "color": 2, "hoist": False, "mentionable": True}
+    assert render.role_look_diff(same, dict(same)) == []
+    assert render.role_look_diff(None, same) == []
 
 
 def test_modlog_stats_reports_nothing_recorded_yet():
@@ -117,24 +234,9 @@ def test_modlog_gaps_reports_none_recorded():
 def test_modlog_permissions_names_both_gaps():
     client = setup()
     process(client, message("u1", "!modlog permissions"))
-    assert "MANAGE_MESSAGES" in client.sent[-1]["content"]
-    assert "MANAGE_ROLES" in client.sent[-1]["content"]
-
-
-class prefixed:
-    """Runs a block with the bot answering to `?`, the way `SLIMM_PREFIX` would set it."""
-
-    def __enter__(self):
-        self.original, modlog.bot.prefix = modlog.bot.prefix, "?"
-
-    def __exit__(self, *_exc):
-        modlog.bot.prefix = self.original
-
-
-def test_modlog_hints_name_the_configured_prefix():
-    setup()
-    with prefixed():
-        assert "`?modlog permissions`" in modlog.gap_notice_text(1, 3600)
+    assert "Manage messages" in client.sent[-1]["content"]
+    assert "Manage roles" in client.sent[-1]["content"]
+    assert "GET /" not in client.sent[-1]["content"]
 
 
 def test_modlog_bad_subcommand_is_a_clear_reply():
@@ -153,7 +255,7 @@ def test_reconnect_gap_is_recorded_and_reported():
     modlog._last_seen_at -= 4000
     client = modlog.bot.client
     asyncio.run(modlog.report_reconnect_gap())
-    assert "reconnected after approximately 1h6m offline" in client.sent[-1]["content"]
+    assert client.sent[-1]["content"] == "Mod log was offline for about 1h6m; events in that time were not recorded."
     assert "embeds" not in client.sent[-1]
     assert modlog.bot.store.connection.execute("SELECT COUNT(*) FROM gaps").fetchone()[0] == 1
 
@@ -183,13 +285,22 @@ def test_back_to_back_gaps_edit_one_notice():
     assert len(client.sent) == 1
     method, path, body, _ = client.calls[-1]
     assert (method, path) == ("PATCH", f"/channels/{modlog.bot.channel}/messages/{first_id}")
-    assert "reconnected 2 times, approximately 25m offline in total" in body["content"]
+    assert body["content"] == "Mod log was offline for about 25m in total; events in that time were not recorded."
 
 
-def test_a_gap_after_a_log_line_gets_a_fresh_notice():
+def test_a_gap_right_after_a_notice_and_a_log_line_is_not_repeated():
     client = setup()
     reconnect_after(600)
-    asyncio.run(modlog.post("member.role_changed", "Nick was granted x"))
+    asyncio.run(modlog.post("member.role_changed", "Role granted"))
+    reconnect_after(600)
+    assert len(client.sent) == 2
+
+
+def test_a_gap_after_the_cooldown_gets_a_fresh_notice():
+    client = setup()
+    reconnect_after(600)
+    asyncio.run(modlog.post("member.role_changed", "Role granted"))
+    modlog._last_notice_at -= modlog.GAP_NOTICE_COOLDOWN_SECONDS + 1
     reconnect_after(600)
     assert len(client.sent) == 3
 
