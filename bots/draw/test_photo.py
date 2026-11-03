@@ -53,7 +53,7 @@ def test_every_stroke_is_a_small_inked_stroke_inside_the_region_with_the_photos_
     objects = photo.trace_photo(shot(box_and_circle), REGION, 220)
     assert objects
     for o in objects:
-        assert o.kind == "stroke" and o.props["color"] == "annotation" and o.props["width"] == 2.0
+        assert o.kind == "stroke" and o.props["color"] == "#f2f2f2" and o.props["width"] == 2.0
         assert len(json.dumps(o.props)) < plan.PROPS_LIMIT and len(o.props["points"]) // 2 <= photo.CHUNK_POINTS
         assert REGION.x - 1 <= o.x and o.x + o.w <= REGION.x + REGION.w + 1 and REGION.y - 1 <= o.y and o.y + o.h <= REGION.y + REGION.h + 1
     left, right = min(o.x for o in objects), max(o.x + o.w for o in objects)
@@ -208,7 +208,7 @@ def test_the_photo_command_searches_traces_places_strokes_and_credits_the_source
     rig = rig_for_photo()
     say_with(rig, "!draw photo a cat")
     assert rig.searches == ["a cat"] and rig.client.placed
-    assert all(p["kind"] == "stroke" and p["props"]["color"] == "annotation" for p in rig.client.placed)
+    assert all(p["kind"] == "stroke" and p["props"]["color"] == "#f2f2f2" for p in rig.client.placed)
     assert rig.client.sent[0]["content"].startswith("tracing a line drawing of a cat")
     reply = rig.client.sent[-1]["content"]
     assert f"{len(rig.client.placed)} strokes" in reply and 'from "A cat" by Sam (CC BY 2.0) https://page/1' in reply

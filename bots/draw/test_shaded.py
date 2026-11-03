@@ -54,26 +54,29 @@ def test_every_stroke_is_a_small_wavy_stroke_inside_the_region_under_the_cap():
     objects = squiggle.squiggle(picture(dark_head), REGION, 200)
     assert 0 < len(objects) <= 200
     for o in objects:
-        assert o.kind == "stroke" and o.props["color"] == "annotation"
+        assert o.kind == "stroke" and o.props["color"] == "#f2f2f2"
         assert len(json.dumps(o.props)) < plan.PROPS_LIMIT and len(o.props["points"]) // 2 <= squiggle.CHUNK_POINTS
         assert REGION.x - 2 <= o.x and o.x + o.w <= REGION.x + REGION.w + 2 and REGION.y - 2 <= o.y and o.y + o.h <= REGION.y + REGION.h + 2
 
 
 def test_a_darker_tone_waves_taller_and_tighter():
-    from PIL import Image
+    def bands(image):
+        image.paste((20, 20, 20), (20, 100, 100, 200))
+        image.paste((140, 140, 140), (140, 100, 220, 200))
 
-    def band(level):
-        return picture(lambda im: im.paste((level,) * 3, (40, 100, 200, 200)), (240, 300), (250, 250, 250))
+    rgb, gray = squiggle._load(picture(bands, (240, 300), (250, 250, 250)))
+    dark = squiggle._ink_amount(gray, subject_mask_all(rgb), False)
+    runs = squiggle._row(dark, rgb.size[0], 150.0, 8.0)
 
-    def amplitude(data):
-        rgb, gray = squiggle._load(data)
-        mask = squiggle.subject_mask(rgb, None)
-        dark = squiggle._darkness(gray, mask)
-        runs = squiggle._row(dark, rgb.size[0], 150.0, 6.0)
-        ys = [p[1] for run in runs for p in run]
-        return (max(ys) - min(ys)) if ys else 0.0
+    def spread(low, high):
+        ys = [p[1] for run in runs for p in run if low <= p[0] < high]
+        return max(ys) - min(ys) if ys else 0.0
 
-    assert amplitude(band(20)) > amplitude(band(150)) or amplitude(band(150)) == 0.0
+    assert spread(20, 100) > spread(140, 220) > 0.0
+
+
+def subject_mask_all(rgb):
+    return [[1.0] * rgb.size[0] for _ in range(rgb.size[1])]
 
 
 def test_a_face_box_keeps_head_and_shoulders_and_drops_the_ground_beside_them():
@@ -111,6 +114,55 @@ def test_short_gaps_are_bridged_so_a_row_is_few_strokes():
             dark[y][x] = 0.9
     runs = squiggle._row(dark, 60, 5.0, 6.0)
     assert len(runs) == 1 and runs[0][0][0] == 5.0 and runs[0][-1][0] == 39.0
+
+
+def _amount_at(board, face, x, y, gray_level_at):
+    """The ink amount at one pixel of a picture that is dark on the left half and light on the right."""
+    def halves(image):
+        image.paste((30, 30, 30), (0, 0, image.width // 2, image.height))
+        image.paste((225, 225, 225), (image.width // 2, 0, image.width, image.height))
+
+    data = picture(halves, (240, 300), (128, 128, 128))
+    rgb, gray = squiggle._load(data)
+    mask = [[1.0] * rgb.size[0] for _ in range(rgb.size[1])]
+    return squiggle._ink_amount(gray, mask, board == "dark")[y][x]
+
+
+def test_on_a_dark_board_ink_goes_where_the_picture_is_light_and_on_a_light_board_where_it_is_dark():
+    dark_left, light_right = (20, 150), (220, 150)
+    assert _amount_at("dark", None, *light_right, None) > 0.8 and _amount_at("dark", None, *dark_left, None) < 0.1
+    assert _amount_at("light", None, *dark_left, None) > 0.8 and _amount_at("light", None, *light_right, None) < 0.1
+
+
+def test_a_face_is_inked_on_its_light_tones_on_a_dark_board_and_the_ink_colour_follows_the_board():
+    def face_on_dark(image):
+        from PIL import ImageDraw
+
+        ImageDraw.Draw(image).ellipse([70, 80, 170, 220], fill=(225, 190, 165))
+        ImageDraw.Draw(image).ellipse([95, 130, 115, 145], fill=(30, 20, 20))
+
+    data = picture(face_on_dark, (240, 300), (40, 40, 50))
+    face = (0.3, 0.25, 0.4, 0.4)
+    dark_board = squiggle.squiggle(data, REGION, 600, face, "dark")
+    light_board = squiggle.squiggle(data, REGION, 600, face, "light")
+    assert {o.props["color"] for o in dark_board} == {"#f2f2f2"} and {o.props["color"] for o in light_board} == {"#1f1f1f"}
+    assert dark_board and light_board and sum(o.w * o.h for o in dark_board) > 0
+
+
+def test_a_faceless_subject_is_inked_on_the_subject_whichever_board():
+    def dark_on_light(image):
+        from PIL import ImageDraw
+
+        ImageDraw.Draw(image).ellipse([70, 90, 170, 210], fill=(30, 30, 30))
+
+    for board in ("dark", "light"):
+        objects = squiggle.squiggle(picture(dark_on_light, (240, 300), (240, 240, 240)), REGION, 600, None, board)
+        left, right = x_range(objects)
+        assert left > REGION.x + 0.15 * REGION.w and right < REGION.x + 0.85 * REGION.w, board
+
+
+def test_the_board_setting_defaults_to_dark():
+    assert draw.BOARD == "dark"
 
 
 def test_the_cap_is_never_passed_even_for_a_busy_picture():

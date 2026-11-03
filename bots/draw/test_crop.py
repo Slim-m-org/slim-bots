@@ -135,7 +135,7 @@ def rig_for_crop():
     base.sources.fetch_picture = lambda get, url: rig.png
     seen = []
     original = draw.photo.trace_photo
-    draw.photo.trace_photo = lambda data, free, cap, face_box=None, shading=False: seen.append((crop.size_of(data), face_box)) or original(data, free, cap, face_box, shading)
+    draw.photo.trace_photo = lambda data, free, cap, face_box=None, shading=False, board="dark": seen.append((crop.size_of(data), face_box)) or original(data, free, cap, face_box, shading, board)
     rig.seen = seen
     return rig
 

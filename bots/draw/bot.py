@@ -61,6 +61,7 @@ VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
 SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 600, type=int), type=int), 50), 1500)
 PHOTO_MAX = min(max(bot.setting("DRAW_PHOTO_MAX", 300, type=int), 20), 1500)
 PHOTO_SHADING = bot.setting("DRAW_PHOTO_SHADING", False, type=bool)
+BOARD = "light" if str(bot.setting("DRAW_BOARD", "dark")).lower() == "light" else "dark"
 AI_TIME_CAP = max(bot.setting("DRAW_AI_TIME_CAP", 180, type=int), 30)
 AI_REQUEST_TIMEOUT = max(bot.setting("DRAW_AI_REQUEST_TIMEOUT", 90, type=int), 10)
 AI_COOLDOWN = bot.setting("DRAW_AI_COOLDOWN", 120, type=int)
@@ -492,7 +493,7 @@ async def _picture_command(ctx, subject, command, build, noun, ack):
 @draw.command(name="shaded", aliases=("dots",), help="Draw a tonal squiggle portrait of an attached image or a subject; no model, no cost")
 async def draw_shaded(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, face), "a shaded portrait with {count} strokes",
+        ctx, subject, "shaded", lambda data, free, face: squiggle.squiggle(data, free, SHADED_MAX, face, BOARD), "a shaded portrait with {count} strokes",
         "making a shaded portrait of {subject}, this takes a minute or two.",
     )
 
@@ -500,7 +501,7 @@ async def draw_shaded(ctx, subject: str = ""):
 @draw.command(name="photo", help="Trace a line drawing from a photo (attached or found for a subject); no model, no cost")
 async def draw_photo(ctx, subject: str = ""):
     await _picture_command(
-        ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face, PHOTO_SHADING), "a line drawing of the photo with {count} strokes",
+        ctx, subject, "photo", lambda data, free, face: photo.trace_photo(data, free, PHOTO_MAX, face, PHOTO_SHADING, BOARD), "a line drawing of the photo with {count} strokes",
         "tracing a line drawing of {subject}, this takes a minute or two.",
     )
 

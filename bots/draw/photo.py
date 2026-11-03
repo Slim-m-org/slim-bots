@@ -21,7 +21,7 @@ SMOOTH = 4  # moving-average half window over a traced path, before simplifying
 CHUNK_POINTS = 150
 CENTRE_WEIGHT = 0.15
 STROKE_WIDTH = 2.0
-INK = "annotation"
+INK = {"dark": "#f2f2f2", "light": "#1f1f1f"}  # a light ink on a dark board, a dark ink on a light one
 FACE_SENSITIVITY = 0.55  # inside the face ellipse an edge needs only this share of the usual strength: eyes, nose and lips are faint
 FACE_STRENGTH = 150  # the strength tone contours rank at, between a faint and a strong edge
 FACE_MIN_FRACTION = 0.02  # of the diagonal: the shortest line worth keeping there
@@ -206,19 +206,19 @@ def _split(line):
             return pieces
 
 
-def _stroke(points, scale, left, top):
+def _stroke(points, scale, left, top, ink):
     scaled = [(left + x * scale, top + y * scale) for x, y in points]
     low_x, low_y = min(p[0] for p in scaled), min(p[1] for p in scaled)
     flat = [round(v, 1) for p in scaled for v in (p[0] - low_x, p[1] - low_y)]
     return Planned(
         "stroke", low_x, low_y, max(max(p[0] for p in scaled) - low_x, 0.5), max(max(p[1] for p in scaled) - low_y, 0.5),
-        {"points": flat, "width": STROKE_WIDTH, "color": INK},
+        {"points": flat, "width": STROKE_WIDTH, "color": ink},
     )
 
 
-def trace_photo(data, region, cap, face_box=None, shading=False):
+def trace_photo(data, region, cap, face_box=None, shading=False, board="dark"):
     """Stroke objects of the photo's lines, fitted inside `region` with the photo's aspect ratio and centred."""
     lines, width, height = strokes(data, cap, face_box, shading)
     scale = min(region.w / width, region.h / height)
     left, top = region.x + (region.w - scale * width) / 2, region.y + (region.h - scale * height) / 2
-    return [_stroke(line, scale, left, top) for line in lines]
+    return [_stroke(line, scale, left, top, INK.get(board, INK["dark"])) for line in lines]

@@ -94,6 +94,7 @@ There is no content scanning, as everywhere in slim-m: the bot is rate limited, 
 | `DRAW_SIZE` | `480` | the side of the square a traced drawing fits in |
 | `DRAW_MAX_STROKES` | `150` | the most objects one drawing may use, 10 to 300 |
 | `DRAW_SHADED_MAX` | `600` | the most strokes one `!draw shaded` portrait may use, 50 to 1500 (`DRAW_DOTS_MAX` is still read if this is unset) |
+| `DRAW_BOARD` | `dark` | `dark` or `light`: which board `photo` and `shaded` draw for (see below) |
 | `DRAW_PHOTO_SHADING` | off | `1` adds pen hatching inside the face to `!draw photo` |
 | `GOOGLE_CSE_KEY`, `GOOGLE_CSE_ID` | empty | when both are set, Google's Programmable Search image results are tried first |
 | `DRAW_PHOTO_MAX` | `300` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
@@ -135,11 +136,18 @@ Lines are ranked by length times strength times a soft subject weight, so long c
 A line is split into pieces of at most 150 points sharing a joint, each a stroke in the one ink colour at width 2, scaled into the largest free area of your call's canvas with the photo's aspect ratio.
 `DRAW_PHOTO_SHADING=1` also hatches the dark features inside the face (`photo_shade.py`); it is off by default because the cross-hatching blacks out the eyes.
 
+## Dark and light boards
+
+The canvas has no background colour a bot can read, so `photo` and `shaded` draw for one board, `DRAW_BOARD` (default `dark`, since most of the app's themes are dark).
+On a dark board the ink is light (`#f2f2f2`) and `shaded` puts it where the picture is light, so the photo reads as a positive; on a light board the ink is dark (`#1f1f1f`) and goes where the picture is dark.
+The subject mask works the same either way: whatever is not the subject gets no ink, so the board shows through.
+A viewer on the opposite theme sees the drawing inverted, a light-ink drawing on a light board for example, and a client that does not render `#rrggbb` ink paints the theme's default ink, which still reads as a drawing.
+
 ## Shaded portraits
 
 `!draw shaded` (and its old name `dots`) draws the picture as wavy scanlines: each row's wave gets taller and tighter where the picture is darker, and the pen lifts where it is light, so tone reads as density.
 It is applied to the subject only: with a face box, an ellipse round the head and a wider one for the shoulders fades to paper, with weights fading smoothly so no line stops dead; without a face, pixels near the picture's border colour are flattened to paper, a vignette fades the corners, and a pale subject on a darker background is drawn light-on-dark so the subject, not the ground, gets the lines.
-Tone is stretched over the subject's own range so a mid-tone face keeps its shadows, rows are as many as fit under the stroke budget (up to 100), short gaps are bridged so a row is a few strokes, and each stroke is at most 150 points.
+Tone is stretched over the subject's own range (a subject with almost no tone range is drawn as one even mid tone) so a mid-tone face keeps its shadows, rows are as many as fit under the stroke budget (up to 100), short gaps are bridged so a row is a few strokes, and each stroke is at most 150 points.
 
 ### How these were chosen
 

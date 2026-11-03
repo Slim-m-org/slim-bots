@@ -9,7 +9,7 @@ from sources import SourceError
 WORK_SIDE = 560
 CHUNK_POINTS = 150
 STROKE_WIDTH = 1.6
-INK = "annotation"
+INK = {"dark": "#f2f2f2", "light": "#1f1f1f"}  # a light ink on a dark board, a dark ink on a light one
 ROWS_MIN, ROWS_MAX = 24, 100
 BASE_FREQUENCY = 0.9  # radians per pixel in the lightest drawn tone
 TONE_FREQUENCY = 1.7  # extra radians per pixel at the darkest
@@ -18,6 +18,8 @@ TONE_GAMMA = 1.35  # above 1 keeps mid tones (skin) light so shadows and feature
 JOIN_GAP = 5  # pixels of light a row may cross without lifting the pen
 MIN_RUN = 6  # points: shorter runs are specks
 LIGHT_SUBJECT = 14  # grey levels the middle must beat the ring by before a faceless picture is drawn light-on-dark
+FLAT_RANGE = 12  # grey levels: a subject with less tone range than this is drawn as one even mid tone
+FLAT_INK = 0.6
 PEN_UP = 0.12  # darkness below which the pen lifts, so light areas stay empty paper
 SIMPLIFY = 0.45
 BACKGROUND = (28.0, 85.0)  # RGB distance from the border colour over which a pixel fades from paper to subject
@@ -82,8 +84,8 @@ def subject_mask(rgb, face):
     return rows
 
 
-def _lighter_in_the_middle(gray):
-    """True when the middle of the picture is clearly lighter than its outer ring: a pale subject on a darker background."""
+def _subject_is_light(gray, board):
+    """True when the subject should be inked on its light tones: the middle is clearly lighter than the ring, clearly darker means ink on its dark tones, else the board decides."""
     w, h = gray.size
     px = gray.load()
     middle, ring = [], []
@@ -91,21 +93,29 @@ def _lighter_in_the_middle(gray):
         for x in range(0, w, 3):
             r = math.hypot((x / w - 0.5) / 0.5, (y / h - 0.5) / 0.5)
             (middle if r < 0.5 else ring if r > 0.85 else []).append(px[x, y])
-    return bool(middle and ring) and sum(middle) / len(middle) - sum(ring) / len(ring) > LIGHT_SUBJECT
+    if not (middle and ring):
+        return board == "dark"
+    gap = sum(middle) / len(middle) - sum(ring) / len(ring)
+    return gap > 0 if abs(gap) > LIGHT_SUBJECT else board == "dark"
 
 
-def _darkness(gray, mask, invert=False):
-    """Tone as 0 (paper) to 1 (full ink), stretched over the subject's own range and zero outside it."""
+def _ink_amount(gray, mask, ink_on_light):
+    """Ink amount 0 (bare board) to 1 (full ink), stretched over the subject's own range and zero outside it; `ink_on_light` puts the ink on the light tones."""
     w, h = gray.size
     px = gray.load()
     inside = sorted(px[x, y] for y in range(0, h, 2) for x in range(0, w, 2) if mask[y][x] > 0.5)
     if len(inside) < 50:
         return None
+    if ink_on_light:
+        inside = sorted(255 - v for v in inside)
     lo, hi = inside[int(len(inside) * PAPER_PERCENT[0])], inside[int(len(inside) * PAPER_PERCENT[1])]
     span = max(hi - lo, 1)
+    flat = hi - lo < FLAT_RANGE
     def tone(x, y):
-        t = min(max((hi - px[x, y]) / span, 0.0), 1.0)
-        return (1.0 - t if invert else t) ** TONE_GAMMA * mask[y][x]
+        if flat:
+            return FLAT_INK * mask[y][x]
+        value = 255 - px[x, y] if ink_on_light else px[x, y]
+        return min(max((hi - value) / span, 0.0), 1.0) ** TONE_GAMMA * mask[y][x]
 
     return [[tone(x, y) for x in range(w)] for y in range(h)]
 
@@ -151,11 +161,12 @@ def _pieces(runs):
     return [p for p in out if len(p) >= 2]
 
 
-def lines(data, cap, face=None):
-    """(polylines in pixels, width, height): wavy rows over the subject, as many rows as fit under `cap` pieces."""
+def lines(data, cap, face=None, board="dark"):
+    """(polylines in pixels, width, height): wavy rows over the subject, ink on light tones for a dark board and dark tones for a light one, as many rows as fit under `cap`."""
     rgb, gray = _load(data)
     w, h = rgb.size
-    dark = _darkness(gray, subject_mask(rgb, face), invert=not face and _lighter_in_the_middle(gray))
+    ink_on_light = (board == "dark") if face else _subject_is_light(gray, board)
+    dark = _ink_amount(gray, subject_mask(rgb, face), ink_on_light)
     if dark is None:
         return [], w, h
     inked = [y for y in range(h) if max(dark[y]) >= PEN_UP]
@@ -171,16 +182,16 @@ def lines(data, cap, face=None):
         rows = max(int(rows * min(0.9, cap / len(pieces) * 1.05)), ROWS_MIN)
 
 
-def _stroke(points, scale, left, top):
+def _stroke(points, scale, left, top, ink):
     scaled = [(left + x * scale, top + y * scale) for x, y in points]
     low_x, low_y = min(p[0] for p in scaled), min(p[1] for p in scaled)
     flat = [round(v, 1) for p in scaled for v in (p[0] - low_x, p[1] - low_y)]
-    return Planned("stroke", low_x, low_y, max(max(p[0] for p in scaled) - low_x, 0.5), max(max(p[1] for p in scaled) - low_y, 0.5), {"points": flat, "width": STROKE_WIDTH, "color": INK})
+    return Planned("stroke", low_x, low_y, max(max(p[0] for p in scaled) - low_x, 0.5), max(max(p[1] for p in scaled) - low_y, 0.5), {"points": flat, "width": STROKE_WIDTH, "color": ink})
 
 
-def squiggle(data, region, cap, face=None):
+def squiggle(data, region, cap, face=None, board="dark"):
     """Stroke objects of the tonal squiggle portrait, fitted inside `region` with the picture's aspect ratio and centred."""
-    pieces, w, h = lines(data, cap, face)
+    pieces, w, h = lines(data, cap, face, board)
     scale = min(region.w / w, region.h / h)
     left, top = region.x + (region.w - scale * w) / 2, region.y + (region.h - scale * h) / 2
-    return [_stroke(piece, scale, left, top) for piece in pieces]
+    return [_stroke(piece, scale, left, top, INK[board if board in INK else 'dark']) for piece in pieces]

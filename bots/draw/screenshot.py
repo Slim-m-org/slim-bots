@@ -218,12 +218,12 @@ async def _draw_object(image, draw, view, obj, fetch_tile, fetched):
     return False
 
 
-async def render(objects, view, free=None, fetch_tile=None, ruler=200):
+async def render(objects, view, free=None, fetch_tile=None, ruler=200, paper=PAPER):
     """PNG bytes of `view`: strokes in pen colours, shapes as their outline, text and notes as labelled boxes, image tiles shrunk, `free` outlined in green."""
     _require_pillow()
     if isinstance(view, Region):
         view = View(view)
-    image = pil_image.new("RGB", view.size, PAPER)
+    image = pil_image.new("RGB", view.size, paper)
     draw = pil_draw.Draw(image)
     _draw_ruler(draw, view, ruler)
     fetched = 0
