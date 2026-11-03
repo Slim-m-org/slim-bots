@@ -423,7 +423,7 @@ def test_a_reference_photo_goes_to_the_model_and_is_credited_in_the_reply():
 def test_without_a_found_picture_there_is_no_reference_and_no_credit():
     planner = FakePlanner()
     rig = rig_with(planner)
-    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter([])
+    base.sources.find_pictures = lambda get, subject, google=None, report=None, serpapi=None, on_call=None: iter([])
     rig.say("!draw something abstract")
     assert planner.reference is None and "Reference:" not in rig.client.sent[-1]["content"]
 
@@ -432,7 +432,7 @@ def test_a_failing_search_or_download_is_skipped_silently():
     planner = FakePlanner()
     rig = rig_with(planner)
 
-    def broken(get, subject, google=None, report=None):
+    def broken(get, subject, google=None, report=None, serpapi=None, on_call=None):
         raise base.sources.SourceError("the picture search answered http 500")
 
     base.sources.find_pictures = broken

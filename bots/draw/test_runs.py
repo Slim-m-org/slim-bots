@@ -78,7 +78,7 @@ def test_the_source_used_is_logged():
     Image.new("RGB", (64, 64), (9, 9, 9)).save(png, "PNG")
     base.sources.fetch_picture = lambda get, url: png.getvalue()
     base.sources.reference_image = base.real_reference_image
-    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter([{"url": "https://t/w.jpg", "title": "T", "creator": "", "license": "", "landing": "https://w", "source": "wikipedia"}])
+    base.sources.find_pictures = lambda get, subject, google=None, report=None, serpapi=None, on_call=None: iter([{"url": "https://t/w.jpg", "title": "T", "creator": "", "license": "", "landing": "https://w", "source": "wikipedia"}])
     (line,) = lines_for(rig, "!draw barack obama")
     assert "source=wikipedia" in line and "search=" in line
 
@@ -86,7 +86,7 @@ def test_the_source_used_is_logged():
 def test_a_download_that_fails_moves_to_the_next_candidate_and_says_why():
     rig = base.Rig()
     good = [{"url": "https://bad/1", "title": "Bad", "creator": "", "license": "", "landing": "", "source": "bing"}, {"url": "https://ok/2", "title": "Ok", "creator": "", "license": "", "landing": "https://ok", "source": "wikipedia"}]
-    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter(good)
+    base.sources.find_pictures = lambda get, subject, google=None, report=None, serpapi=None, on_call=None: iter(good)
 
     def fetch(get, url):
         if "bad" in url:
@@ -100,6 +100,56 @@ def test_a_download_that_fails_moves_to_the_next_candidate_and_says_why():
     base.sources.fetch_picture = fetch
     (line,) = lines_for(rig, "!draw photo a cat")
     assert "source=wikipedia" in line and "bing: the picture could not be downloaded (http 403)" in line
+
+
+def serp_rig():
+    from PIL import Image
+
+    rig = base.Rig()
+    served = io.BytesIO()
+    picture = Image.new("RGB", (160, 160), (235, 235, 235))
+    for x in range(40, 120):
+        for y in range(30, 130):
+            picture.putpixel((x, y), (30 + x, 40, 60))
+    picture.save(served, "PNG")
+    answer = (200, json.dumps({"images_results": [{"original": "https://orig/1.jpg", "thumbnail": "https://thumb/1.jpg", "title": "T", "link": "https://page/1"}]}).encode())
+    draw.get = lambda url, token="": answer if "serpapi.com" in url else (404, b"")
+    base.sources.find_pictures = base.real_find_pictures
+
+    def fetch(get, url):
+        if "orig" in url:
+            raise base.sources.SourceError("the picture could not be downloaded (http 403)")
+        return served.getvalue()
+
+    base.sources.fetch_picture = fetch
+    draw.SERPAPI_KEY = "SECRETKEY"
+    return rig
+
+
+def test_serpapi_leads_when_a_key_is_set_falls_back_to_the_thumbnail_and_counts_the_month():
+    original_get, original_key = draw.get, draw.SERPAPI_KEY
+    try:
+        rig = serp_rig()
+        (first,) = lines_for(rig, "!draw photo a cat")
+        (second,) = lines_for(rig, "!draw shaded a cat")
+    finally:
+        draw.get, draw.SERPAPI_KEY = original_get, original_key
+    assert "source=serpapi" in first and "serpapi_month=1" in first and "serpapi_month=2" in second
+    assert "serpapi: the picture could not be downloaded (http 403)" in first and "SECRETKEY" not in first + second
+    assert 'from "T" https://page/1' in rig.client.sent[-1]["content"]
+
+
+def test_without_a_key_serpapi_is_never_called_and_the_log_has_no_count():
+    original_get, original_key = draw.get, draw.SERPAPI_KEY
+    asked = []
+    try:
+        rig = serp_rig()
+        draw.SERPAPI_KEY = None
+        draw.get = lambda url, token="": asked.append(url) or (404, b"")
+        (line,) = lines_for(rig, "!draw photo a cat")
+    finally:
+        draw.get, draw.SERPAPI_KEY = original_get, original_key
+    assert "serpapi" not in line and not any("serpapi" in u for u in asked)
 
 
 def test_an_unexpected_exception_is_logged_with_a_traceback_and_the_invoker_is_told():

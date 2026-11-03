@@ -259,7 +259,7 @@ def test_an_attached_image_is_used_instead_of_a_search():
 
 def test_nothing_found_a_failed_attachment_and_a_blank_picture_each_get_a_sentence():
     rig = rig_for_shaded()
-    base.sources.find_pictures = lambda get, subject, google=None, report=None: iter([])
+    base.sources.find_pictures = lambda get, subject, google=None, report=None, serpapi=None, on_call=None: iter([])
     assert "no picture matched" in say_with(rig, "!draw shaded zzzz")
     rig = rig_for_shaded()
     from slimbots.http import ApiError

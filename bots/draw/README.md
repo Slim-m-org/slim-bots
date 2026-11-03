@@ -97,6 +97,7 @@ There is no content scanning, as everywhere in slim-m: the bot is rate limited, 
 | `DRAW_SHADED_MAX` | `600` | the most strokes one `!draw shaded` portrait may use, 50 to 1500 (`DRAW_DOTS_MAX` is still read if this is unset) |
 | `DRAW_BOARD` | `dark` | `dark` or `light`: which board `photo` and `shaded` draw for (see below) |
 | `DRAW_PHOTO_SHADING` | off | `1` adds pen hatching inside the face to `!draw photo` |
+| `SERPAPI_KEY` | empty | when set, SerpAPI's Google Images results are tried first |
 | `GOOGLE_CSE_KEY`, `GOOGLE_CSE_ID` | empty | when both are set, Google's Programmable Search image results are tried first |
 | `DRAW_PHOTO_MAX` | `300` | the most strokes one `!draw photo` drawing may use, 20 to 1500 |
 | `DRAW_PACE` | `0.15` | seconds between placements, at least 0.1 |
@@ -107,14 +108,24 @@ Without Pillow installed the bot starts and answers `!draw` with a sentence sayi
 
 ## Picture sources
 
-`photo`, `shaded` and the AI reference photo find pictures with no key, in this order, reading only as far as needed and trying the next candidate when one fails to download or decode (up to eight tries):
+`photo`, `shaded` and the AI reference photo find pictures, in this order, reading only as far as needed and trying the next candidate when one fails to download or decode (up to eight tries):
 
-1. Google Programmable Search image results, only when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_ID` are set.
-2. Bing image search, the first result first (its async results page, read for each result's full-size picture and the page it was on). It is asked with the bot's own honest User-Agent; no attempt is made to look like a browser.
-3. The lead image of the best Wikipedia article.
-4. Wikimedia Commons picture files (a file search in namespace 6).
+1. SerpAPI's Google Images results, only when `SERPAPI_KEY` is set (below). The first result's original picture is tried first, then its thumbnail if the original does not download.
+2. Google Programmable Search image results, only when `GOOGLE_CSE_KEY` and `GOOGLE_CSE_ID` are set.
+3. Bing image search, the first result first (its async results page, read for each result's full-size picture and the page it was on). It is asked with the bot's own honest User-Agent; no attempt is made to look like a browser.
+4. The lead image of the best Wikipedia article.
+5. Wikimedia Commons picture files (a file search in namespace 6).
 
-There is no licence filter; the reply credits the page the picture came from (Bing's `purl`, the Wikipedia article or the Commons file page).
+With no keys the order is Bing, Wikipedia, Commons.
+
+### SerpAPI
+
+[SerpAPI](https://serpapi.com) answers Google Images searches over a plain API, and its free plan allows about 250 searches a month.
+Sign up there, copy the key from the dashboard (the "API key" page), and add `SERPAPI_KEY=<the key>` to the bots' `.env` file, the one the compose file passes to the draw bot, then restart the bot.
+Each picture lookup costs one search; the log line carries `serpapi_month=<n>`, the searches this bot has made this calendar month, so you can watch the quota.
+The key is sent only to serpapi.com and is masked in anything the bot logs or says; when SerpAPI refuses it or the quota is spent, the lookup falls through to Bing and the log notes `serpapi: ...`.
+
+There is no licence filter; the reply credits the page the picture came from (SerpAPI's `link`, Bing's `purl`, the Wikipedia article or the Commons file page).
 Every request has a timeout, an honest User-Agent naming the bot, and a 3 MB size cap, and a source that fails is skipped and noted in the command's log line.
 `!draw trace` uses the same sources.
 

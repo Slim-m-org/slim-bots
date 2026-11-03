@@ -57,6 +57,7 @@ PACE_SECONDS = max(bot.setting("DRAW_PACE", 0.15, type=float), 0.1)
 GOOGLE_KEY = bot.setting("GOOGLE_CSE_KEY")
 GOOGLE_ENGINE = bot.setting("GOOGLE_CSE_ID")
 GOOGLE = (GOOGLE_KEY, GOOGLE_ENGINE) if GOOGLE_KEY and GOOGLE_ENGINE else None
+SERPAPI_KEY = bot.setting("SERPAPI_KEY")
 VIEW_X = bot.setting("DRAW_VIEW_X", 0.0, type=float)
 VIEW_Y = bot.setting("DRAW_VIEW_Y", 0.0, type=float)
 SHADED_MAX = min(max(bot.setting("DRAW_SHADED_MAX", bot.setting("DRAW_DOTS_MAX", 600, type=int), type=int), 50), 1500)
@@ -308,28 +309,61 @@ def make_review(free):
     return review
 
 
+class Candidates:
+    """The picture candidates for a subject, read lazily, counting the SerpAPI searches they cost."""
+
+    def __init__(self, subject, log):
+        self.serpapi_calls = 0
+        self._found = iter(sources.find_pictures(get, subject, GOOGLE, log.note, SERPAPI_KEY, self._spent))
+
+    def _spent(self):
+        self.serpapi_calls += 1
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._found)
+
+
 def candidate_pictures(subject, log):
     """The picture candidates for `subject`, best source first, read lazily (each read may call a source)."""
-    return iter(sources.find_pictures(get, subject, GOOGLE, log.note))
+    return Candidates(subject, log)
+
+
+async def note_serpapi_spend(candidates, log):
+    """Adds this lookup's SerpAPI searches to the month's tally and puts the total in the log line."""
+    calls = getattr(candidates, "serpapi_calls", 0)
+    if calls:
+        total = await bot.store.run(store_db.add_serpapi_calls, time.strftime("%Y-%m", time.gmtime()), calls)
+        log.set("serpapi_month", total)
 
 
 async def first_picture(candidates, log, convert=None):
-    """(bytes, candidate) for the first of up to PICTURE_TRIES candidates that downloads (and converts); None when none do."""
+    """(bytes, candidate) for the first of up to PICTURE_TRIES candidates that downloads (and converts), trying a result's thumbnail when its original fails; None when none do."""
+    try:
+        return await _first_picture(candidates, log, convert)
+    finally:
+        await note_serpapi_spend(candidates, log)
+
+
+async def _first_picture(candidates, log, convert):
     for _ in range(PICTURE_TRIES):
         with log.stage("search"):
             candidate = await asyncio.to_thread(next, candidates, None)
         if candidate is None:
             return None
-        try:
-            with log.stage("download"):
-                data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
-                if convert:
-                    data = await asyncio.to_thread(convert, data)
-        except sources.SourceError as err:
-            log.note(f"{candidate.get('source', '?')}: {err}")
-            continue
-        log.source = candidate.get("source", "unknown")
-        return data, candidate
+        for url in [candidate["url"], *([candidate["fallback"]] if candidate.get("fallback") else [])]:
+            try:
+                with log.stage("download"):
+                    data = await asyncio.to_thread(sources.fetch_picture, get, url)
+                    if convert:
+                        data = await asyncio.to_thread(convert, data)
+            except sources.SourceError as err:
+                log.note(f"{candidate.get('source', '?')}: {err}")
+                continue
+            log.source = candidate.get("source", "unknown")
+            return data, candidate
     return None
 
 

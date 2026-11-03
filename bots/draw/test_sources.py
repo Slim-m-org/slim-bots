@@ -123,6 +123,50 @@ def test_a_failing_source_is_skipped_quietly_and_google_leads_only_when_configur
     assert found[0]["source"] == "google" and found[1]["source"] == "bing"
 
 
+# Shape from SerpAPI's google_images engine documentation: images_results items with original, thumbnail, title, source and the page `link`.
+SERP_OK = (200, json.dumps({"search_metadata": {"status": "Success"}, "images_results": [
+    {"position": 1, "thumbnail": "https://serpapi.com/t/1.jpg", "source": "nbcnews.com", "title": "Barack Obama - NBC News", "link": "https://www.nbcnews.com/obama", "original": "https://media.nbcnews.com/obama.jpg", "original_width": 1600, "original_height": 900, "is_product": False},
+    {"position": 2, "thumbnail": "https://serpapi.com/t/2.jpg", "source": "wiki.example", "title": "", "link": "https://wiki.example/obama", "original": "https://wiki.example/o.png"},
+    {"position": 3, "thumbnail": "https://serpapi.com/t/3.jpg", "title": "no original", "link": "https://x"},
+]}).encode())
+SERP_BAD_KEY = (401, json.dumps({"error": "Invalid API key. Your API key should be here: https://serpapi.com/manage-api-key"}).encode())
+
+
+def test_serpapi_results_carry_the_original_its_page_and_the_thumbnail_as_a_fallback():
+    found = sources.serpapi_candidates(web({"serpapi.com/search.json": SERP_OK}), "barack obama", "KEY123")
+    assert [c["url"] for c in found] == ["https://media.nbcnews.com/obama.jpg", "https://wiki.example/o.png"]
+    assert found[0]["title"] == "Barack Obama - NBC News" and found[0]["landing"] == "https://www.nbcnews.com/obama" and found[0]["source"] == "serpapi"
+    assert found[0]["fallback"] == "https://serpapi.com/t/1.jpg" and found[1]["title"] == "wiki.example"
+
+
+def test_serpapi_is_asked_with_the_google_images_engine_the_subject_and_the_key_and_counts_the_call():
+    calls, spent = [], []
+    sources.serpapi_candidates(web({"serpapi.com/search.json": SERP_OK}, calls), "barack obama", "KEY123", None, lambda: spent.append(1))
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(calls[0]).query)
+    assert query["engine"] == ["google_images"] and query["q"] == ["barack obama"] and query["api_key"] == ["KEY123"] and spent == [1]
+
+
+def test_a_serpapi_error_is_a_source_error_that_never_carries_the_key():
+    leaky = (401, json.dumps({"error": "Invalid API key KEY123 rejected"}).encode())
+    for answer in (SERP_BAD_KEY, leaky, (429, b""), (200, b"not json")):
+        try:
+            sources.serpapi_candidates(web({"serpapi.com/search.json": answer}), "x", "KEY123")
+        except sources.SourceError as err:
+            assert "KEY123" not in str(err) and "serpapi" in str(err)
+        else:
+            raise AssertionError("expected SourceError")
+
+
+def test_serpapi_leads_only_when_a_key_is_set_and_its_failure_is_skipped_and_noted_without_the_key():
+    said, spent = [], []
+    found = list(sources.find_pictures(web(dict(ALL, **{"serpapi.com/search.json": SERP_OK})), "x", None, said.append, "KEY123", lambda: spent.append(1)))
+    assert found[0]["source"] == "serpapi" and found[-1]["source"] == "commons" and spent == [1]
+    said.clear()
+    found = list(sources.find_pictures(web(dict(ALL, **{"serpapi.com/search.json": SERP_BAD_KEY})), "x", None, said.append, "KEY123"))
+    assert [c["source"] for c in found][0] == "bing" and any("serpapi" in s for s in said) and not any("KEY123" in s for s in said)
+    assert list(sources.find_pictures(web(ALL), "x"))[0]["source"] == "bing"
+
+
 def test_the_credit_line_leaves_out_what_the_source_did_not_say():
     assert sources.credit_line({"title": "Obama one", "creator": "", "license": "", "landing": "https://site/1"}) == '"Obama one" https://site/1'
     assert sources.credit_line({"title": "A cat", "creator": "Sam", "license": "CC BY 2.0", "landing": "https://p"}) == '"A cat" by Sam (CC BY 2.0) https://p'
