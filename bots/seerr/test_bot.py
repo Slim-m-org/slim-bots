@@ -248,7 +248,7 @@ def test_an_oversized_title_is_refused_before_touching_seerr():
     fake = seerr_api()
     with Patched(core, "api", fake):
         process(message("!request " + "x" * 200))
-    assert "between" in client.sent[-1]["content"] and fake.calls == []
+    assert "between" in client.ephemerals[-1]["content"] and fake.calls == []
 
 
 def test_the_approver_permission_must_be_a_real_slim_m_permission_name():

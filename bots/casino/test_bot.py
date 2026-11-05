@@ -110,14 +110,14 @@ def test_flip_rejects_a_bad_guess():
     client = setup()
     casino.credit(casino.bot.store.connection, "u1", 100)
     process(client, message("u1", "!flip 10 maybe", "m1"))
-    assert "call `heads`" in client.sent[-1]["content"]
+    assert "call `heads`" in client.ephemerals[-1]["content"]
     assert casino.get_balance(casino.bot.store.connection, "u1") == 100
 
 
 def test_flip_rejects_a_bad_amount():
     client = setup()
     process(client, message("u1", "!flip five heads", "m1"))
-    assert "whole number" in client.sent[-1]["content"]
+    assert "whole number" in client.ephemerals[-1]["content"]
 
 
 def test_flip_wins():
@@ -253,7 +253,7 @@ def test_rate_limiter_kicks_in_after_a_burst():
     messages = [message("u1", "!balance", f"m{i}") for i in range(casino.COMMANDS_PER_WINDOW)]
     messages.append(message("u1", "!balance", "m-over"))
     process(client, *messages)
-    assert "slow down" in client.sent[-1]["content"]
+    assert "slow down" in client.ephemerals[-1]["content"]
 
 
 def test_a_duplicate_request_id_is_a_no_op():
@@ -290,7 +290,7 @@ def test_on_ready_starts_maintenance_as_a_supervised_background_task():
 def test_a_non_ascii_digit_amount_is_refused_and_later_commands_still_work():
     client = setup()
     process(client, message("u1", "!flip \u00b2 heads", "m1"))
-    assert "whole number" in client.sent[-1]["content"]
+    assert "whole number" in client.ephemerals[-1]["content"]
     assert not casino.bot.store.connection.in_transaction
     process(client, message("u1", "!daily", "m2"))
     assert "claimed 500 chips" in client.sent[-1]["content"], client.sent[-1]
@@ -299,7 +299,7 @@ def test_a_non_ascii_digit_amount_is_refused_and_later_commands_still_work():
 def test_an_absurdly_long_amount_is_refused_and_later_commands_still_work():
     client = setup()
     process(client, message("u1", "!flip " + "9" * 5000 + " heads", "m1"))
-    assert "under" in client.sent[-1]["content"]
+    assert "under" in client.ephemerals[-1]["content"]
     assert not casino.bot.store.connection.in_transaction
     process(client, message("u1", "!daily", "m2"))
     assert "claimed 500 chips" in client.sent[-1]["content"], client.sent[-1]
