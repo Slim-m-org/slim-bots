@@ -107,6 +107,51 @@ def test_an_ffmpeg_that_exits_before_producing_anything_ends_the_session():
     assert not any("finished playing" in text for text in rig.said()), rig.said()
 
 
+def test_a_transcode_that_dies_before_its_first_frame_is_launched_again_before_the_party_ends():
+    rig = Rig("dead")
+    real = rig.session._launch_pipeline
+    launches = []
+
+    async def counted(start_seconds):
+        launches.append(start_seconds)
+        return await real(start_seconds)
+
+    rig.session._launch_pipeline = counted
+    try:
+        asyncio.run(rig.play_until_finished())
+    finally:
+        rig.close()
+    assert len(launches) == 1 + stream_session.START_RETRIES, launches
+    assert rig.session.finished
+
+
+def test_a_transcode_that_recovers_on_the_second_launch_keeps_the_party_alive():
+    rig = Rig("endless")
+    real = rig.session._launch_pipeline
+    launches = []
+
+    async def flaky(start_seconds):
+        launches.append(start_seconds)
+        os.environ["STAND_IN_MODE"] = "dead" if len(launches) == 1 else "endless"
+        return await real(start_seconds)
+
+    rig.session._launch_pipeline = flaky
+
+    async def scenario():
+        await rig.session._publish()
+        await rig.session._start_pipeline(120.0)
+        await asyncio.sleep(1.0)
+        alive = not rig.session.finished
+        await rig.session._teardown_pipeline()
+        return alive
+
+    try:
+        assert asyncio.run(scenario()), "one refused transcode ended the party"
+    finally:
+        rig.close()
+    assert launches == [120.0, 120.0]
+
+
 def test_failed_starts_do_not_pin_the_default_executor():
     rigs = [Rig("dead"), Rig("dead")]
 

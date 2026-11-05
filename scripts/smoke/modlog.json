@@ -1,0 +1,40 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!modlog",
+      "expect_contains": [
+        "sub"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!modlog stats",
+      "expect_contains": [
+        "nothing recorded"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!modlog gaps",
+      "expect_contains": [
+        "no reconnect gaps"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!modlog permissions",
+      "expect_contains": [
+        "MANAGE_MESSAGES"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!modlog nonsense",
+      "expect_contains": [
+        "must be one of"
+      ],
+      "timeout": 15
+    }
+  ]
+}

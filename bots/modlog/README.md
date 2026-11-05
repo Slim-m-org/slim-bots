@@ -1,7 +1,8 @@
 # modlog
 
-A slim-m bot that mirrors moderation actions into a channel: timeouts,
-kicks, restores, role grants, role revokes, and role definition changes.
+A slim-m bot that mirrors moderation actions into a channel as readable
+cards: timeouts, removals, restores, role grants, role revokes, and role
+creates, edits and deletes, with what changed (name, colour, permissions).
 
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`. The
 five moderation events map onto `@bot.event` handlers (`on_member_timeout`,
@@ -37,8 +38,7 @@ command traffic - never a substitute for `GET /reports/history`.
 - `!modlog gaps` - the last several reconnect gaps this bot noticed, each a
   permanent hole in the log rather than something a later event fills in.
   It also says how many times the server's moderation cursor was ahead of this log.
-- `!modlog permissions` - exactly what `MANAGE_MESSAGES` and `MANAGE_ROLES`
-  would each add, on demand.
+- `!modlog permissions` - what View moderation history would add, on demand.
 
 ## What this proves about permissions
 
@@ -59,28 +59,29 @@ the log was the only bit this bot needed.
 The trade is that three routes this bot might have wanted stayed closed the
 whole time, confirmed live with 403s against the running deployment:
 
-- `GET /roles` (needs `MANAGE_ROLES`) - the only way to list every role by
+- `GET /roles` (needs `MANAGE_ROLES` or `VIEW_MODERATION_HISTORY`) - the only way to list every role by
   id, including one nobody currently holds
-- `GET /reports/history` (needs `MANAGE_MESSAGES`) - the moderation-history
+- `GET /reports/history` (needs `MANAGE_MESSAGES` or `VIEW_MODERATION_HISTORY`) - the moderation-history
   feed, and the only thing that could ever answer "what did I miss"
 - `GET /members/removed` (needs `BAN_MEMBERS`) - the current removal list
 
 None of these were requested for this bot. The point of the example is
 showing what a permission-poor bot can and cannot do, not asking for more.
 
-## The two things the wire events do not say
+## What the wire events do not say
 
-- **`member.role_changed` carries no direction.** The event says a role and
-  a member changed, never whether it was a grant or a revoke. This bot
-  fetches the member's current role list and diffs it against what it last
-  saw to work that out. See the module docstring for the one case that
-  still comes out ambiguous.
-- **A role's name is not always resolvable without `MANAGE_ROLES`.** This
-  bot learns role names as a side effect of looking up members, which
-  covers a role with a member holding it, but not a role nobody visible to
-  it has ever held. Confirmed live: a role's own `role.changed` event for a
-  role this bot had not yet seen granted to anyone logs as a bare id, with
-  the reason stated in the log line itself, not silently.
+- **`member.role_changed` on an older server carries no direction.** A
+  current server says `granted` and the role's name. For an older one this
+  bot fetches the member's current role list and diffs it against what it
+  last saw, and says only that the member's roles changed when that is
+  ambiguous.
+- **A role's permission bits are not on the wire.** A current server puts a
+  role's name, colour, grouping and mention rule on `role.changed` (before
+  and after), because members already see them. The bits are read from
+  `GET /roles`, which the read-only `VIEW_MODERATION_HISTORY` permission
+  opens (so does `MANAGE_ROLES`, which this bot needs no part of). Without
+  either, the post still names the role and what else changed, and leaves
+  the permissions line out.
 
 ## The gap that cannot be closed - now visible, not just documented
 
@@ -94,8 +95,8 @@ What changed: this bot used to note that fact once, to its own stdout, at
 startup. Now, on every reconnect after a previous successful connection
 (never the very first connect, which is not a gap), it records the downtime
 for `!modlog gaps` to answer later, and posts it in the log only when it was
-at least five minutes. Back-to-back notices with no other log line between
-them are merged by editing the earlier one. The downtime estimate runs from the last frame this bot actually saw
+at least five minutes, as one plain line, at most once an hour. Back-to-back
+notices with no other log line between them are merged by editing the earlier one. The downtime estimate runs from the last frame this bot actually saw
 (via the framework's `on_frame`, which fires for any frame at all, not just
 the five watched types) to the moment the new connection is confirmed live -
 a decent estimate, never exact, since nothing on the wire says precisely

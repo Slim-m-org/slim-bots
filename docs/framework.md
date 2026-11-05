@@ -42,7 +42,7 @@ A bot script imports `Bot` and little else.
 
 ## Commands
 
-`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None, choices=None)` registers a function `async def name(ctx, *typed_args)`.
+`@bot.command(name=None, aliases=(), help=None, usage=None, cooldown=None, cooldown_bucket="user", requires=None, requires_message=None, check=None, choices=None, suggest=None)` registers a function `async def name(ctx, *typed_args)`.
 `requires` is a `Permissions` bit; a member without it gets a private `MissingPermissions` reply (`requires_message` if given), before the arguments are parsed.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
@@ -56,6 +56,7 @@ Arguments convert from the function's own annotations (`slimbots/commands.py`):
 `choices={"param": ("a", "b")}` fixes the values a parameter accepts: a value is matched ignoring case and handed to the function in its declared spelling, any other is a `BadArgument` naming the choices, and the composer offers them as a pick list after the command (below).
 A choice is 1-100 characters with no whitespace, a parameter has at most 25, and a command with choices takes at most 5 parameters; a name that is no parameter, or a list the server would refuse, raises when the command is declared.
 A `@group.command()` subcommand takes `choices=` and enforces it, but only a top-level command advertises its choices.
+`suggest={"param": ("a", "b")}` advertises the same pick list but enforces nothing: a value outside it is delivered and runs, which is what a command whose first word is either a mode or free text needs (`@bot.group` takes it too, so `!draw` offers `photo`, `shaded` and the rest while `!draw a cat` still works). The composer opens the list as soon as the keyword and a space are typed, no `/` needed; it shows the values only, with the parameter's name beside each, so name the parameter for what the list is.
 
 `help` is auto-generated from the registered set (name, aliases, usage, help text) unless a bot registers its own `help` command first.
 
@@ -108,6 +109,8 @@ Global versus channel-scoped follows the same test as before: an event about a c
 
 `Canvas(bot.client, channel_id)` wraps one channel's Voice Canvas: `await canvas.place(kind, x=, y=, w=, h=, props=)`, `move(object_id, x=, y=)`, `remove(object_ids)`, `clear(before_seq)`, `restore(target_op)`, `reorder(object_id, z_index)`, and `viewport(min_x=, min_y=, max_x=, max_y=)` for a bounded-rectangle read - `bot-canvas-board` is the worked example (a fixed-size sticky-note board).
 `Canvas` was never tied to "the channel a command came from" - `channel_id` is just whatever you pass it, so a bot can take commands in one channel and draw on a different one's canvas without anything special. `bot.canvas(channel_id)` is the convenience form of the same thing: `bot.canvas(channel_id)` is exactly `Canvas(bot.client, channel_id, bot=bot)`, wired for the live gateway signals (`send_cursor`/`send_stroke_preview`) too, without repeating `bot.client`/`bot=bot` at every call site.
+`await canvas.place_many([{kind, x, y, w, h, props?, id?}, ...])` places up to 200 objects in one `POST canvas/objects/batch` and returns their ids; it raises `BatchUnavailable` when the server has no such route (404 or 405) so a bot can fall back to `place`, and an ordinary `ApiError` (429 included) otherwise.
+New after 0.17.0: a bot that calls it needs the next `slim-m` release and a server with the route.
 `clear`/`restore`/`reorder` are the same `POST canvas/ops` endpoint `move`/`remove` already use, just a different `kind` - `clear` needs MANAGE_CANVAS unconditionally and a `before_seq` fence (never optional, so a lost response retried without one cannot wipe an interval it should not); `restore` names a prior `remove`/`clear` op's own id, not an object id; `reorder` takes an explicit `z_index` the caller computes (typically one above/below every value it already knows, for "bring to front"/"send to back") rather than a server-computed delta.
 `on_canvas_object_placed`, `on_canvas_objects_removed` and `on_canvas_cleared` are channel-scoped events - dispatched only for a channel in `channels`, the same gate `message.created` gets, since (unlike the member/role events) these carry a `channel_id` and are not deployment-wide.
 
@@ -214,6 +217,9 @@ A bot's steady state is awaiting the websocket, and httpx gives real connection 
 httpx was already a transitive dependency in this environment, so it costs nothing new to vet.
 `call()` retries a 429 or 5xx with exponential backoff (slim-m sends no `Retry-After`) and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
+`await bot.client.download(path, max_bytes=)` is the matching read: the raw body of a `GET` (an attachment, say) with the same auth and base URL, never reading past `max_bytes` (10 MiB by default) and giving up after the client's 15 seconds; wrap the call in `asyncio.timeout(...)` for a tighter bound.
+It raises `ApiError` for an HTTP error or a network failure and `ResponseTooLarge` (an `ApiError` with no status, `.limit` set) when the body is bigger; `FakeAsyncClient` answers it from `respond("GET", path, b"...")`.
+New in 0.17.0: a bot that calls it needs that `slim-m` release.
 
 ## Outside services
 

@@ -16,6 +16,7 @@ from .components import to_wire as components_to_wire
 from .models import Attachment, DmConversation, Message
 
 DEFAULT_TIMEOUT = 15.0
+DEFAULT_DOWNLOAD_BYTES = 10 * 1024 * 1024
 log = logging.getLogger(__name__)
 
 
@@ -31,6 +32,14 @@ class ApiError(Exception):
     def reason(self) -> str | None:
         """The server's short `error` string, when the body is the usual `{"error": ...}` shape."""
         return self.body.get("error") if isinstance(self.body, dict) else None
+
+
+class ResponseTooLarge(ApiError):
+    """A download that would pass the caller's `max_bytes`; `status` is None because no HTTP error came back."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(None, f"the response is larger than {limit} bytes")
+        self.limit = limit
 
 
 def is_token_revoked(err: BaseException) -> bool:
@@ -129,6 +138,29 @@ class AsyncClient:
                 attempt += 1
                 continue
             return response.json() if response.content else None
+
+    async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES) -> bytes:
+        """The raw body of `GET path` with `call`'s auth and base URL, within DEFAULT_TIMEOUT; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
+        chunks: list[bytes] = []
+        size = 0
+        try:
+            async with asyncio.timeout(DEFAULT_TIMEOUT), self._http.stream("GET", path) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise _error_from_response(response)
+                declared = response.headers.get("content-length")
+                if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+                    raise ResponseTooLarge(max_bytes)
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise ResponseTooLarge(max_bytes)
+                    chunks.append(chunk)
+        except TimeoutError as err:
+            raise ApiError(None, "the download timed out") from err
+        except httpx.HTTPError as err:
+            raise ApiError(None, str(err)) from err
+        return b"".join(chunks)
 
     async def me(self) -> Any:
         return await self.call("GET", "/me")
@@ -299,9 +331,10 @@ class AsyncClient:
     async def set_watch_session(
         self, channel_id: str, *, item_id: str, title: str, playing: bool, position_ms: int,
         duration_ms: int | None = None, seeked: bool = False, controller_user_id: str | None = None,
+        direct_play: dict[str, Any] | None = None,
     ) -> None:
         """States the call's watch session (decision 0050); a bot-only write that needs this bot on the call's heartbeat.
-        `seeked` moves the epoch so viewers re-read; 409 means another bot holds the channel, and is not retried."""
+        `seeked` moves the epoch, a 409 (another bot holds the channel) is not retried, and no `direct_play` withdraws the offer."""
         body: dict[str, Any] = {"item_id": item_id, "title": title, "playing": playing, "position_ms": position_ms}
         if duration_ms is not None:
             body["duration_ms"] = duration_ms
@@ -309,6 +342,8 @@ class AsyncClient:
             body["seeked"] = True
         if controller_user_id is not None:
             body["controller_user_id"] = controller_user_id
+        if direct_play is not None:
+            body["direct_play"] = direct_play
         await self.call("PUT", f"/channels/{channel_id}/watch-session", body, retries=0)
 
     async def tick_watch_session(self, channel_id: str, *, playing: bool, position_ms: int) -> None:

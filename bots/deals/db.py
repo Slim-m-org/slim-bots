@@ -19,6 +19,7 @@ def init_db(conn):
             notified_price_cents INTEGER, last_notified_at INTEGER, misses INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL, UNIQUE (user_id, app_id)
         );
+        CREATE TABLE IF NOT EXISTS digest_seen (app_id INTEGER PRIMARY KEY, at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         """
     )
@@ -98,3 +99,13 @@ def record_miss(conn, watch_id):
     conn.execute("UPDATE watches SET misses = misses + 1 WHERE id = ?", (watch_id,))
     conn.commit()
     return conn.execute("SELECT misses FROM watches WHERE id = ?", (watch_id,)).fetchone()[0]
+
+
+def recent_digest_apps(conn, since):
+    return {row[0] for row in conn.execute("SELECT app_id FROM digest_seen WHERE at >= ?", (since,))}
+
+
+def mark_digest_apps(conn, app_ids, now):
+    conn.executemany("INSERT INTO digest_seen (app_id, at) VALUES (?, ?) ON CONFLICT (app_id) DO UPDATE SET at = excluded.at", [(a, now) for a in app_ids])
+    conn.execute("DELETE FROM digest_seen WHERE at < ?", (now - 90 * 86400,))
+    conn.commit()

@@ -32,6 +32,7 @@ class WatchSync:
         self._dirty = True
         self._seeked = False
         self._controller = session.started_by_id
+        self.direct_play = None
         self._task = None
         self.gave_up = False
 
@@ -43,6 +44,12 @@ class WatchSync:
         self._dirty = True
         self._seeked = self._seeked or seeked
         self._wake.set()
+
+    def offer_direct_play(self, offer):
+        """States what a viewer can play themselves (or `None` to withdraw it); only a different offer costs a write."""
+        if offer != self.direct_play:
+            self.direct_play = offer
+            self.changed()
 
     async def end(self):
         """Stops the worker and ends the session on the server; a refusal is logged, never raised."""
@@ -99,6 +106,7 @@ class WatchSync:
         await session.bot.client.set_watch_session(
             channel_id, item_id=session.item_id, title=wire_title(session.title), playing=playing, position_ms=position_ms,
             duration_ms=int(session.duration_seconds * 1000) or None, seeked=seeked, controller_user_id=self._controller,
+            direct_play=self.direct_play,
         )
 
     async def _tick(self):

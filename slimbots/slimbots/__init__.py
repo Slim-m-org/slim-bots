@@ -4,7 +4,7 @@ from . import catchup, cursor, style
 from . import events
 from . import migrations
 from .bot import Bot
-from .canvas import Canvas
+from .canvas import BatchUnavailable, Canvas
 from .chooser import Chooser, Pick
 from .client import socket_url
 from .commands import Command, Group
@@ -22,7 +22,7 @@ from .exceptions import (
     MissingRequiredArgument,
     SlimBotsError,
 )
-from .http import ApiError
+from .http import ApiError, ResponseTooLarge
 from .http import AsyncClient
 from .interactions import Interaction
 from .limits import Cooldown, Quota, RateLimiter, ValidationError, require_int, require_len, require_range
@@ -41,6 +41,7 @@ __all__ = [
     "BadArgument",
     "Bot",
     "Button",
+    "BatchUnavailable",
     "Canvas",
     "Channel",
     "CheckFailure",
@@ -92,4 +93,5 @@ __all__ = [
     "require_range",
     "rows",
     "socket_url",
+    "ResponseTooLarge",
 ]

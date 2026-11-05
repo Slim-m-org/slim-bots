@@ -1,0 +1,15 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {"say": "!warn", "timeout": 15},
+    {"say": "!warns", "expect_contains": ["no active warns"], "timeout": 15},
+    {"say": "!unwarn 999", "expect_contains": ["no warn"], "timeout": 15},
+    {"say": "!unwarn x", "expect_contains": ["unwarn"], "timeout": 15},
+    {"say": "!warnrule", "expect_contains": ["no rules yet"], "timeout": 15},
+    {"say": "!warnrule add 3 timeout 1h", "expect_contains": ["time them out for 1h"], "timeout": 15},
+    {"say": "!warnrule list", "expect_contains": ["3 warns"], "timeout": 15},
+    {"say": "!warnrule add three", "expect_contains": ["warnrule add"], "timeout": 15},
+    {"say": "!warnrule remove 3", "expect_contains": ["removed the rule"], "timeout": 15},
+    {"say": "!warnrule remove 3", "expect_contains": ["no rule"], "timeout": 15}
+  ]
+}

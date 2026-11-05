@@ -1,0 +1,13 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!ping",
+      "expect_contains": [
+        "pong"
+      ],
+      "timeout": 15
+    }
+  ],
+  "register_wait": 0
+}

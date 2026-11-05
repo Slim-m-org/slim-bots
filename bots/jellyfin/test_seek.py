@@ -96,6 +96,8 @@ class Rig:
         await self.session._start_pipeline(at)
 
     async def press(self, action):
+        if action in controls.SKIP_STEPS:
+            self.session.request_skip(controls.SKIP_STEPS[action])
         async with self.session.control_lock:
             await controls.apply(self.session, action)
 
@@ -156,12 +158,12 @@ def test_subtitle_change_resumes_the_stream_at_the_current_position(rig):
 
 
 @with_rig
-def test_two_rapid_plus_thirty_presses_add_sixty(rig):
+def test_two_rapid_plus_thirty_presses_add_sixty_in_one_seek(rig):
     async def scenario():
         await rig.start()
         await asyncio.gather(rig.press("fwd"), rig.press("fwd"))
     rig.run(scenario())
-    assert [round(s) for s in rig.served()] == [0, 30, 60]
+    assert [round(s) for s in rig.served()] == [0, 60]
     assert round(rig.session.position_seconds) == 60
 
 
@@ -249,6 +251,41 @@ def test_a_failed_quality_change_restores_the_old_quality_and_stream(rig):
     assert calls == [original.width, 854, original.width]
     assert round(rig.served()[-1]) == 100 and rig.jf.processes[-1].returncode is None
     assert not rig.session.finished
+
+
+@with_rig
+def test_a_burst_of_skips_makes_one_seek_to_the_final_target(rig):
+    async def scenario():
+        await rig.start()
+        presses = [asyncio.ensure_future(rig.press("fwd"))]
+        await asyncio.sleep(0)
+        presses += [asyncio.ensure_future(rig.press("fwd")) for _ in range(5)]
+        await asyncio.gather(*presses)
+    rig.run(scenario())
+    assert round(rig.session.position_seconds) == 180
+    assert len(rig.jf.launches) == 2, f"six presses cost {len(rig.jf.launches) - 1} restarts"
+
+
+@with_rig
+def test_a_jump_seeks_to_a_share_of_the_runtime(rig):
+    async def scenario():
+        await rig.start()
+        await rig.press("jump:50")
+    rig.run(scenario())
+    assert round(rig.served()[-1]) == 3600
+
+
+def test_a_jump_that_is_not_an_offered_stop_is_refused():
+    rig = Rig()
+    try:
+        assert controls.preflight(rig.session, "jump:33") == "that position does not exist."
+        assert controls.preflight(rig.session, "jump:50") is None
+    finally:
+        rig.close()
+
+
+def test_the_jump_options_fit_a_call_control():
+    assert 2 <= len(controls.jump_options()) <= 8
 
 
 def test_a_new_stream_never_shares_a_transcode_with_the_previous_one():

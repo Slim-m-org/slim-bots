@@ -2,11 +2,13 @@
 """Steam Deals: posts free-to-keep Steam games and pings members when a watched Steam game hits their price; see README.md."""
 
 import asyncio
+import datetime
 import sys
 import time
 import uuid
 
 import db
+import digest
 import prices
 import search
 import sources
@@ -24,6 +26,7 @@ WATCH_INTERVAL = max(bot.setting("DEALS_WATCH_INTERVAL", 86400, type=int), 3600)
 STEAM_CC = bot.setting("DEALS_CC", "us").lower()
 STEAM_DELAY = bot.setting("DEALS_STEAM_DELAY", 1.5, type=float)
 TICK_SECONDS = bot.setting("DEALS_TICK_SECONDS", 60, type=int)
+DEFAULT_DIGEST_HOUR = 18
 
 transport = sources.urllib_transport
 CHOOSER = Chooser("dealspick:", "pricewatch", lambda game: f"{game.name} ({game.app_id})", "watch")
@@ -157,6 +160,42 @@ async def check_watches():
     return len(watches)
 
 
+def utc_today(now=None):
+    return (now or datetime.datetime.now(datetime.timezone.utc)).date().isoformat()
+
+
+async def digest_due(now=None):
+    """On, with a channel, at or past the chosen UTC hour, and not yet posted today."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    if await bot.store.run(db.get_config, "digest_on", "0") != "1" or not await configured_channel():
+        return False
+    hour = int(await bot.store.run(db.get_config, "digest_hour", DEFAULT_DIGEST_HOUR))
+    return now.hour >= hour and await bot.store.run(db.get_config, "last_digest_day", "") != utc_today(now)
+
+
+async def check_digest(now=None):
+    """Posts today's digest once: the biggest Steam discounts not featured in the last week, no pings. Returns (games posted, error)."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    channel_id, today = await configured_channel(), utc_today(now)
+    if not channel_id:
+        return 0, ""
+    deals, error = await asyncio.to_thread(digest.fetch_specials, transport, STEAM_CC)
+    if error:
+        return 0, error
+    since = int(now.timestamp()) - digest.REPEAT_AFTER_DAYS * 86400
+    seen = await bot.store.run(db.recent_digest_apps, since)
+    unseen = [d for d in deals if d.app_id not in seen]
+    text, shown = digest.render(unseen, store_link)
+    if shown:
+        embed = style.card("info", title=f"Steam deals for {today}", description=text, footer_text=style.footer(sources.STORE_NAME))
+        message_id = str(uuid.uuid5(POST_NAMESPACE, f"digest|{today}"))
+        if not await post(channel_id, "", message_id=message_id, embed=embed, fallback=f"Steam deals for {today}\n{text}"):
+            return 0, ""
+        await bot.store.run(db.mark_digest_apps, [d.app_id for d in unseen[:shown]], int(now.timestamp()))
+    await bot.store.run(db.set_config, "last_digest_day", today)
+    return shown, ""
+
+
 async def due(key, interval):
     last = int(await bot.store.run(db.get_config, key, 0))
     return time.time() - last >= interval
@@ -169,6 +208,8 @@ async def run_forever():
                 await check_freebies()
             if await due("last_watches_at", WATCH_INTERVAL):
                 await check_watches()
+            if await digest_due():
+                await check_digest()
         except Exception as err:
             if isinstance(err, ApiError) and is_token_revoked(err):
                 print("slimm bot token rejected - exiting", file=sys.stderr)
@@ -195,10 +236,10 @@ async def allowed(ctx):
     return False
 
 
-@bot.group(name="deals", help="`setup`, `now`")
+@bot.group(name="deals", help="`setup`, `digest`, `now`")
 async def deals_group(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(style.usage_text(f"{p}deals setup", f"{p}deals now", f"{p}pricewatch <game name, Steam link or app id> <target price>"))
+    await ctx.reply(style.usage_text(f"{p}deals setup", f"{p}deals digest on|off", f"{p}deals now", f"{p}pricewatch <game name, Steam link or app id> <target price>"))
 
 
 @deals_group.command(name="setup", help="Post free games and watch alerts in this channel")
@@ -208,6 +249,25 @@ async def deals_setup(ctx):
     await bot.store.run(db.set_config, "channel_id", ctx.channel_id)
     await bot.store.run(db.set_config, "last_freebies_at", 0)
     await ctx.reply(f"free games and price alerts go to this channel now; the first check runs within {max(TICK_SECONDS, 1)} seconds, then every {FREEBIES_INTERVAL // 3600 or 1}h.")
+
+
+@deals_group.command(name="digest", help="A daily list of the best Steam discounts: on, off, or the hour in UTC", usage="[on|off|<hour 0-23>]")
+async def deals_digest(ctx, setting: str = ""):
+    if not await allowed(ctx):
+        return
+    setting = setting.strip().lower()
+    if setting in ("on", "off"):
+        await bot.store.run(db.set_config, "digest_on", "1" if setting == "on" else "0")
+    elif setting.isdigit() and int(setting) < 24:
+        await bot.store.run(db.set_config, "digest_hour", int(setting))
+    elif setting:
+        await ctx.reply_ephemeral(f"use `{bot.prefix}deals digest on`, `off`, or an hour from 0 to 23 (UTC).", public_fallback=True)
+        return
+    on = await bot.store.run(db.get_config, "digest_on", "0") == "1"
+    hour = int(await bot.store.run(db.get_config, "digest_hour", DEFAULT_DIGEST_HOUR))
+    where = "" if await configured_channel() else f" Run `{bot.prefix}deals setup` in the deals channel to give it somewhere to post."
+    state = f"the daily digest is on, posted once a day after {hour:02d}:00 UTC." if on else "the daily digest is off."
+    await ctx.reply_ephemeral(state + where, public_fallback=True)
 
 
 @deals_group.command(name="now", help="Check for free games and price drops right away", cooldown=60, cooldown_bucket="deployment")

@@ -1,0 +1,6 @@
+{
+  "arrkit": "a library the radarr, sonarr and seerr bots share, not a bot of its own; their manifests cover it",
+  "github-releases": "has no commands: it only polls GitHub and posts, so there is nothing to type; its tests cover the feed",
+  "starboard": "has no commands: it reacts to reactions, which a text smoke step cannot add; its tests cover them",
+  "uptime-relay": "has no commands: it answers webhooks from an uptime monitor on its own port, outside a chat channel"
+}

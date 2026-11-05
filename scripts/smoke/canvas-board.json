@@ -1,0 +1,41 @@
+{
+  "ready_seconds": 8,
+  "channel_kind": "voice",
+  "steps": [
+    {
+      "say": "!board",
+      "timeout": 15,
+      "expect_contains": [
+        "the board is empty"
+      ]
+    },
+    {
+      "say": "!board add smoke item",
+      "timeout": 15,
+      "expect_contains": [
+        "added as #1"
+      ]
+    },
+    {
+      "say": "!board done 99",
+      "timeout": 15,
+      "expect_contains": [
+        "no item #99"
+      ]
+    },
+    {
+      "say": "!board move 99 1",
+      "timeout": 15,
+      "expect_contains": [
+        "no item #99"
+      ]
+    },
+    {
+      "say": "!board nonsense",
+      "timeout": 15,
+      "expect_contains": [
+        "commands"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "ready_seconds": 8,
+  "channel_kind": "voice",
+  "env": {"HOMELAB_JELLYFIN_URL": "http://127.0.0.1:9", "HOMELAB_JELLYFIN_KEY": "smoke"},
+  "steps": [
+    {"say": "!homelab", "expect_contains": ["jellyfin"], "timeout": 20},
+    {"say": "!homelab redraw", "expect_contains": ["jellyfin"], "timeout": 30},
+    {"say": "!homelab sideways", "timeout": 15}
+  ]
+}

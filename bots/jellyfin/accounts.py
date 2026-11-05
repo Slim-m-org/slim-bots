@@ -47,6 +47,16 @@ def verified_link(conn, slimm_user_id):
     return (row[0], row[1]) if row else None
 
 
+def link_kinds(conn, slimm_user_ids):
+    """`{member: verified}` for each given member who holds a link."""
+    ids = list(slimm_user_ids)
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = conn.execute(f"SELECT slimm_user_id, verified FROM user_links WHERE slimm_user_id IN ({marks})", ids).fetchall()
+    return {row[0]: bool(row[1]) for row in rows}
+
+
 def owner_of(conn, jellyfin_user_id):
     row = conn.execute("SELECT slimm_user_id FROM user_links WHERE jellyfin_user_id = ?", (jellyfin_user_id,)).fetchone()
     return row[0] if row else None

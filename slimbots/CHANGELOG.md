@@ -3,10 +3,26 @@
 All notable changes to `slim-m` (the `slimbots` package) are recorded here.
 This project does not yet follow strict semantic versioning - it is pre-1.0, and a minor version can carry a breaking change, called out below.
 
-## 0.15.1
+## Unreleased
+
+## 0.19.0
 
 - A command typed while the bot was offline is no longer run when it reconnects. A replayed command older than `max_replay_age` (default 300 seconds) is skipped with one log line and the cursor still moves past it; plain messages still reach `on_message`. Pass `Bot(max_replay_age=None)` to replay every command.
 - A bot without `channels=` now catches up the same way as a scoped one, over every channel it can see, so an outage no longer drops its commands or its `on_message` backlog silently.
+
+## 0.18.0
+
+- `@bot.command`, `@bot.group` and `@group.command` take `suggest={"param": ("a", "b")}`: the composer shows the values as a pick list after the keyword, exactly like `choices=`, but a value outside the list is delivered and runs, so a free-text first argument still works. Needs the server's command options (slim-m 0.135 or later); an older server ignores them.
+- `Canvas.place_many(objects)` places up to 200 objects in one request to `canvas/objects/batch` and returns their ids; `BatchUnavailable` is raised when the server lacks the route. Needs a server with the batch route.
+
+## 0.17.0
+
+- Requires Python 3.11 or later (was 3.9), because `download` bounds its read with `asyncio.timeout`. The bots and CI already ran on 3.12.
+- `AsyncClient.download(path, max_bytes=)` reads the raw body of a `GET`, such as an attachment, with the client's auth and base URL, a size bound and a 15 second limit (wrap in `asyncio.timeout` for less); `ResponseTooLarge` is raised past the bound. `FakeAsyncClient.download` answers it from a stubbed bytes response. Needs the next `slim-m` release (0.17.0).
+
+## 0.16.0
+
+- `AsyncClient.set_watch_session` takes an optional `direct_play` body, the offer that lets each viewer play the title on their own device (slim-m decision 0050). Leaving it out withdraws the offer. Needs slim-m 0.120 or later; an older server ignores the field.
 
 ## 0.15.0
 

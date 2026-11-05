@@ -1,0 +1,10 @@
+{
+  "ready_seconds": 8,
+  "channel_kind": "voice",
+  "steps": [
+    {"say": "!draw", "expect_contains": ["draw undo"], "timeout": 15},
+    {"say": "!draw undo", "expect_contains": ["no drawing to undo"], "timeout": 15, "pause": 3},
+    {"say": "!draw clear", "expect_contains": ["removed 0 drawings"], "timeout": 15, "pause": 3},
+    {"say": "!draw aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expect_contains": ["under 60 characters"], "timeout": 15, "pause": 3}
+  ]
+}

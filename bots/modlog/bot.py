@@ -10,10 +10,14 @@ from slimbots import ApiError, Bot, style
 from slimbots.http import is_forbidden
 from slimbots.text import format_duration
 
+import render
+
 # Every gap over the record threshold is kept for `!modlog gaps`; only a longer one is worth a channel post.
 GAP_RECORD_THRESHOLD_SECONDS = 5
 # Five minutes: shorter drops are gateway blips, and a notice for each buried the log in noise.
 GAP_NOTICE_THRESHOLD_SECONDS = 300
+# One notice per window: a flapping connection reconnects many times, and each is the same news.
+GAP_NOTICE_COOLDOWN_SECONDS = 3600
 MAX_GAPS_SHOWN = 10
 # A moderation frame at or below the hello head can still land just after it, so a hole is judged only after this wait.
 MODERATION_SETTLE_SECONDS = 5
@@ -55,12 +59,16 @@ bot = Bot(prefix="!", require_channels=True, default_data_path="modlog.db", stor
 
 # user_id -> set of role_ids last observed, used to infer a member.role_changed event's direction.
 _last_roles = {}
-# role_id -> role name, learned only from member profiles (GET /roles needs MANAGE_ROLES, deliberately not held).
+# role_id -> role name, learned from role events and member profiles.
 _role_names = {}
+# role_id -> permission bits last read, only while this bot can read the role list.
+_role_bits = {}
 # Wall-clock time this bot last knew for certain it was connected - None until the first successful connect.
 _last_seen_at = None
 # The gap notice that is still the newest post in the channel, as [message_id, notices_so_far, total_downtime].
 _open_gap_notice: "list | None" = None
+# When a gap notice was last posted, for the cooldown.
+_last_notice_at = None
 
 
 def format_until(until_ms):
@@ -78,12 +86,15 @@ def record_event(conn, kind, text):
     conn.commit()
 
 
-async def post(kind, text):
-    """Posts a log line under a fresh id every call - two different events can produce identical text,
+async def post(kind, title, fields=(), *, tone="info", description=None):
+    """Posts an embed under a fresh id every call - two different events can produce identical text,
     so there is nothing here worth deduplicating against the way a command reply is."""
     global _open_gap_notice
     _open_gap_notice = None
-    embed = style.card("neutral", footer_text=kind)
+    embed = style.card(tone, title=title, description=description, timestamp=int(time.time() * 1000))
+    for name, value in fields:
+        embed.add_field(name, value, inline=True)
+    text = render.plain_text(title, fields)
     await bot.client.send(bot.channel, text, message_id=str(uuid.uuid4()), **style.send_kwargs(embed, text))
     await bot.store.run(record_event, kind, text)
 
@@ -184,16 +195,13 @@ async def check_moderation_cursor():
 
 
 def gap_notice_text(count, downtime):
-    if count == 1:
-        lead = f"reconnected after approximately {format_duration(downtime, "compact")} offline"
-    else:
-        lead = f"reconnected {count} times, approximately {format_duration(downtime, "compact")} offline in total"
-    return f"{lead} - moderation events during that gap are not recorded here (`{bot.prefix}modlog permissions` says what would close it)"
+    total = "" if count == 1 else " in total"
+    return f"Mod log was offline for about {format_duration(downtime, "compact")}{total}; events in that time were not recorded."
 
 
 async def report_reconnect_gap():
-    """Records downtime since the last frame seen; posts a notice only for a long gap, editing the previous notice if nothing was posted since."""
-    global _last_seen_at, _open_gap_notice
+    """Records downtime since the last frame seen; posts a notice only for a long gap, at most once per cooldown, editing it in place if nothing was posted since."""
+    global _last_seen_at, _open_gap_notice, _last_notice_at
     assert bot.client is not None and bot.channel is not None, "report_reconnect_gap runs only once connected"
     client, channel = bot.client, bot.channel
     if _last_seen_at is None:
@@ -214,11 +222,14 @@ async def report_reconnect_gap():
         else:
             _open_gap_notice = [message_id, count, total]
             return
+    if _last_notice_at is not None and time.time() - _last_notice_at < GAP_NOTICE_COOLDOWN_SECONDS:
+        return
     text = gap_notice_text(1, downtime)
     message_id = str(uuid.uuid4())
     await client.send(channel, text, message_id=message_id)
     await bot.store.run(record_event, "gap", text)
     _open_gap_notice = [message_id, 1, downtime]
+    _last_notice_at = time.time()
 
 
 async def resolve_member(user_id):
@@ -234,32 +245,60 @@ async def resolve_member(user_id):
     return member
 
 
-def name_of(user_id):
-    member = bot.space.members.get(user_id)
-    return member.display_name if member else user_id
+def member_label(user_id):
+    """`Nick (@nick)` for a member the Space knows, else a plain stand-in; never the id."""
+    return render.person(bot.space.members.get(user_id))
 
 
 def role_name_of(role_id):
     return _role_names.get(role_id)
 
 
-async def handle_role_change(user_id, role_id):
-    """`member.role_changed` never says grant or revoke; infer it from the member's role set against what was last seen."""
+async def handle_role_change(frame):
+    """The frame says grant or revoke itself on a current server; an older one is inferred from the member's role set."""
+    user_id, role_id = frame["user_id"], frame["role_id"]
     member = await resolve_member(user_id)
     current = set(member.role_ids) if member else set()
     previous = _last_roles.get(user_id)
     _last_roles[user_id] = current
-    label = role_name_of(role_id) or f"role {role_id}"
-
-    if previous is None:
-        verb = "now holds" if role_id in current else "does not hold"
-    elif role_id in current and role_id not in previous:
-        verb = "was granted"
-    elif role_id not in current and role_id in previous:
-        verb = "was revoked from"
+    if frame.get("role_name"):
+        _role_names[role_id] = frame["role_name"]
+    granted = frame.get("granted")
+    if granted is None and previous is not None and (role_id in current) != (role_id in previous):
+        granted = role_id in current
+    role = role_name_of(role_id) or "Unknown role"
+    fields = [("Member", member_label(user_id)), ("Role", role)]
+    if granted is None:
+        await post("member.role_changed", "Member roles changed", fields)
+    elif granted:
+        await post("member.role_changed", "Role granted", fields, tone="success")
     else:
-        verb = "role membership changed for"  # two changes to this role collapsed between our two reads
-    await post("member.role_changed", f"{name_of(user_id)} {verb} {label}")
+        await post("member.role_changed", "Role revoked", fields, tone="warn")
+
+
+async def read_role_bits():
+    """role_id -> permission bits while this bot may list roles, else None (a missing right and a failed call read the same)."""
+    try:
+        roles = await bot.client.call("GET", "/roles")
+    except ApiError:
+        return None
+    return {role["id"]: role["permissions"] for role in roles}
+
+
+async def role_permission_line(role_id, change):
+    """The Permissions field text for this role change, or None when this bot cannot see the bits."""
+    global _role_bits
+    before = _role_bits.get(role_id)
+    current = await read_role_bits()
+    if current is None:
+        return None
+    _role_bits = current
+    after = current.get(role_id)
+    if change == "created" and after is not None:
+        return ", ".join(render.permission_names(after)) or "None"
+    if change == "deleted" or before is None or after is None:
+        return None
+    return render.permission_diff(before, after)
 
 
 def _fetch_stats(conn):
@@ -311,11 +350,9 @@ async def show_gaps(ctx):
 
 async def show_permissions(ctx):
     await ctx.reply(
-        "I hold only VIEW_CHANNEL and SEND_MESSAGES on this channel. Two more would change what I can do:\n"
-        "- MANAGE_MESSAGES: GET /reports/history becomes readable, which is the reason text behind a timeout "
-        "or removal, and a way to actually backfill a reconnect gap instead of leaving it permanent.\n"
-        "- MANAGE_ROLES: GET /roles becomes readable, so a role's name resolves even for one nobody currently "
-        "holds, instead of only through a member profile that happens to carry it."
+        "I hold only View channels and Send messages on this channel. One more would change what I can do:\n"
+        "- View moderation history: I could show what a role's permissions changed, read the reason behind a "
+        "timeout or removal, and fill in a reconnect gap instead of leaving it permanent. It is read-only."
     )
 
 
@@ -338,6 +375,8 @@ async def on_frame(frame):
 
 @bot.event
 async def on_ready():
+    global _role_bits
+    _role_bits = await read_role_bits() or {}
     await check_moderation_cursor()
 
 
@@ -346,43 +385,49 @@ async def on_member_timeout(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
     until = frame.get("until")
+    fields = [("Member", member_label(user_id))]
     if until is None:
-        await post("member.timeout", f"{name_of(user_id)}'s timeout was lifted")
+        await post("member.timeout", "Timeout lifted", fields, tone="success")
     else:
-        await post("member.timeout", f"{name_of(user_id)} was timed out {format_until(until)}")
+        await post("member.timeout", "Member timed out", [*fields, ("Until", format_until(until))], tone="warn")
 
 
 @bot.event
 async def on_member_removed(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
-    await post("member.removed", f"{name_of(user_id)} was removed from the Space")
+    await post("member.removed", "Member removed", [("Member", member_label(user_id))], tone="error")
 
 
 @bot.event
 async def on_member_restored(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
-    await post("member.restored", f"{name_of(user_id)} was let back into the Space")
+    await post("member.restored", "Member restored", [("Member", member_label(user_id))], tone="success")
 
 
 @bot.event
 async def on_member_role_changed(frame):
-    await handle_role_change(frame["user_id"], frame["role_id"])
+    await handle_role_change(frame)
+
+
+ROLE_TITLES = {"created": ("Role created", "success"), "deleted": ("Role deleted", "error")}
 
 
 @bot.event
 async def on_role_changed(frame):
-    role_id = frame["role_id"]
-    name = role_name_of(role_id)
-    if name is not None:
-        await post("role.changed", f"role '{name}' ({role_id}) changed - created, renamed, re-permissioned, or deleted")
-    else:
-        await post(
-            "role.changed",
-            f"role {role_id} changed, but its name cannot be resolved here - GET /roles needs MANAGE_ROLES, "
-            "which this bot does not hold",
-        )
+    role_id, change = frame["role_id"], frame.get("change")
+    name = frame.get("name") or role_name_of(role_id)
+    if name and change != "deleted":
+        _role_names[role_id] = name
+    title, tone = ROLE_TITLES.get(change, ("Role changed", "info"))
+    fields = [("Role", name or "Unknown role")]
+    fields += render.role_look_diff(frame.get("before"), frame.get("after"))
+    permissions = await role_permission_line(role_id, change)
+    if permissions:
+        fields.append(("Permissions", permissions))
+    description = None if change or len(fields) > 1 else "Its position or access was adjusted."
+    await post("role.changed", title, fields, tone=tone, description=description)
 
 
 async def announce_catchup_capability():
