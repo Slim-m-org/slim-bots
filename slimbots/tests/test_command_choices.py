@@ -39,7 +39,12 @@ def _entry(bot, name):
 
 
 async def send(bot, client, content):
+    """The command's reply, public or private: errors answer only the invoker."""
+    public, private = len(client.sent), len(client.ephemerals)
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": content})
+    if len(client.ephemerals) > private:
+        return client.ephemerals[-1]["content"]
+    assert len(client.sent) > public, "the command sent no reply at all"
     return client.sent[-1]["content"]
 
 

@@ -200,7 +200,7 @@ def test_recent_reports_a_summary():
 def test_recent_rejects_an_out_of_range_day_count():
     client = setup()
     process(client, message("!jellyfin recent 999"))
-    assert "at most" in client.sent[-1]["content"]
+    assert "at most" in client.ephemerals[-1]["content"]
 
 
 def test_unrecognised_subcommand_shows_help():

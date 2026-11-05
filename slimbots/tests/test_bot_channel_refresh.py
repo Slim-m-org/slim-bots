@@ -49,7 +49,7 @@ async def test_voice_channel_created_after_connect_gets_a_reply(monkeypatch):
     await bot._handle_frame({"type": "channel.created", "channel": voice_dto("late")})
     await bot._handle_frame(help_frame("late"))
     await drain(bot)
-    assert [m["channel_id"] for m in client.sent] == ["late"]
+    assert [m["channel_id"] for m in client.ephemerals] == ["late"]
 
 
 async def test_deleted_channel_stops_being_listened_to(monkeypatch):
@@ -70,7 +70,7 @@ async def test_channel_updated_to_voice_is_picked_up(monkeypatch):
     await bot._handle_frame({"type": "channel.updated", "channel": voice_dto("c")})
     await bot._handle_frame(help_frame("c"))
     await drain(bot)
-    assert [m["channel_id"] for m in client.sent] == ["c"]
+    assert [m["channel_id"] for m in client.ephemerals] == ["c"]
 
 
 async def test_overwrite_change_refreshes_so_a_newly_visible_channel_is_heard(monkeypatch):
@@ -79,7 +79,7 @@ async def test_overwrite_change_refreshes_so_a_newly_visible_channel_is_heard(mo
     await bot._handle_frame({"type": "overwrite.changed", "channel_id": "hidden"})
     await bot._handle_frame(help_frame("hidden"))
     await drain(bot)
-    assert [m["channel_id"] for m in client.sent] == ["hidden"]
+    assert [m["channel_id"] for m in client.ephemerals] == ["hidden"]
 
 
 async def test_role_change_for_another_member_does_not_refresh(monkeypatch):
@@ -95,7 +95,7 @@ async def test_miss_backstop_finds_a_channel_the_frames_never_announced(monkeypa
     listed.append(voice_dto("late"))
     await bot._handle_frame(help_frame("late"))
     await drain(bot)
-    assert [m["channel_id"] for m in client.sent] == ["late"]
+    assert [m["channel_id"] for m in client.ephemerals] == ["late"]
 
 
 async def test_miss_backstop_does_not_refetch_within_the_rate_window(monkeypatch):

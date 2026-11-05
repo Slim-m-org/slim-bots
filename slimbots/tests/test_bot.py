@@ -49,7 +49,7 @@ async def test_bad_argument_is_a_reply_not_a_crash(bot, client):
         await ctx.reply("should not run")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!give notanumber @nick"})
-    assert "whole number" in client.sent[-1]["content"]
+    assert "whole number" in client.ephemerals[-1]["content"]
 
 
 async def test_missing_required_argument(bot, client):
@@ -58,7 +58,7 @@ async def test_missing_required_argument(bot, client):
         await ctx.reply("should not run")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!give"})
-    assert "missing a value" in client.sent[-1]["content"]
+    assert "missing a value" in client.ephemerals[-1]["content"]
 
 
 async def test_rest_of_message_string_argument(bot, client):
@@ -79,7 +79,7 @@ async def test_cooldown_blocks_second_call(bot, client):
     assert client.sent[-1]["content"] == "chips granted"
 
     await bot.process_message({"id": "m2", "author_id": "u1", "channel_id": "c1", "content": "!daily"})
-    assert "try again" in client.sent[-1]["content"]
+    assert "try again" in client.ephemerals[-1]["content"]
 
 
 async def test_bot_authors_are_ignored_by_default(bot, client):
@@ -167,8 +167,8 @@ async def test_help_lists_registered_commands(bot, client):
         await ctx.reply("hi")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!help"})
-    assert "!hello" in client.sent[-1]["content"]
-    assert "says hi" in client.sent[-1]["content"]
+    assert "!hello" in client.ephemerals[-1]["content"]
+    assert "says hi" in client.ephemerals[-1]["content"]
 
 
 async def test_forbidden_from_the_bots_own_action_replies_clearly(bot, client):
@@ -178,8 +178,8 @@ async def test_forbidden_from_the_bots_own_action_replies_clearly(bot, client):
 
     client.respond("PUT", "/members/u1/roles/r-missing", ApiError(403, {"error": "cannot grant a permission you do not hold"}))
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!grant @nick"})
-    assert "can't do that" in client.sent[-1]["content"]
-    assert "cannot grant a permission" in client.sent[-1]["content"]
+    assert "can't do that" in client.ephemerals[-1]["content"]
+    assert "cannot grant a permission" in client.ephemerals[-1]["content"]
 
 
 async def test_global_check_can_refuse_before_any_command_runs(bot, client):
@@ -192,7 +192,7 @@ async def test_global_check_can_refuse_before_any_command_runs(bot, client):
         await ctx.reply("pong")
 
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!ping"})
-    assert client.sent[-1]["content"] == "not right now"
+    assert client.ephemerals[-1]["content"] == "not right now"
 
 
 async def test_member_conversion_falls_back_to_a_live_fetch_by_id(bot, client):
