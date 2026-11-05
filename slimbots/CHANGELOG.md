@@ -5,6 +5,11 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.19.0
+
+- A command typed while the bot was offline is no longer run when it reconnects. A replayed command older than `max_replay_age` (default 300 seconds) is skipped with one log line and the cursor still moves past it; plain messages still reach `on_message`. Pass `Bot(max_replay_age=None)` to replay every command.
+- A bot without `channels=` now catches up the same way as a scoped one, over every channel it can see, so an outage no longer drops its commands or its `on_message` backlog silently.
+
 ## 0.18.0
 
 - `@bot.command`, `@bot.group` and `@group.command` take `suggest={"param": ("a", "b")}`: the composer shows the values as a pick list after the keyword, exactly like `choices=`, but a value outside the list is delivered and runs, so a free-text first argument still works. Needs the server's command options (slim-m 0.135 or later); an older server ignores them.

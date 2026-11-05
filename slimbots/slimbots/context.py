@@ -58,6 +58,11 @@ class Context:
         self.raw_args = raw_args
 
     @property
+    def replayed(self) -> bool:
+        """True when this command was typed while the bot was offline and is being run on reconnect."""
+        return self.bot.is_replay(self.message)
+
+    @property
     def channel(self) -> Any:
         assert self.bot.space is not None
         return self.bot.space.channels.get(self.channel_id or "")
