@@ -173,8 +173,9 @@ def test_the_0_8_features_need_a_0_8_pin(tmp_path, code):
     ("0.19.0", "bot = Bot(max_replay_age=None)\n"),
     ("0.19.0", "if ctx.replayed:\n    return\n"),
     ("0.19.0", "if bot.is_replay(message):\n    return\n"),
+    ("0.20.0", "voice_session.on_disconnect(lambda: session.stop(reason='gone'))\n"),
 ])
-def test_the_0_11_to_0_19_features_need_their_release(tmp_path, needed, code):
+def test_the_0_11_to_0_20_features_need_their_release(tmp_path, needed, code):
     below = ".".join(map(str, (c.parse_version(needed)[0], c.parse_version(needed)[1] - 1, 0)))
     (problem,) = c.check_bot(make_bot(tmp_path, "b", req=f"slim-m>={below}\n", code=code))
     assert f"needs >={needed}" in problem
@@ -188,6 +189,7 @@ def test_the_0_11_to_0_19_features_need_their_release(tmp_path, needed, code):
     "name = 'suggest='\n",
     "self.direct_play = None\n",
     "replayed = 0\n",
+    "self.on_disconnected = None\n",
 ])
 def test_lookalike_names_do_not_demand_a_newer_pin(tmp_path, code):
     assert c.check_bot(make_bot(tmp_path, "b", req="slim-m>=0.10.0\n", code=code)) == []

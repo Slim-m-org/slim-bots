@@ -124,6 +124,7 @@ A session can also end without the bot asking: a moderator kicks or moves the bo
 Either way only that session ends: it stops heartbeating, leaves the room, sets `session.lost`, and runs whatever was registered with `session.on_disconnect(callback)`, an `async def callback()` that stops the player (`bot-music` and `bot-jellyfin` both do).
 A heartbeat that fails for any other reason (a network error, a 5xx) is logged and tried again 15 seconds later; a revoked token (401) is still fatal, like any background task.
 A handler added after the session was lost runs at once, and one that raises is logged without stopping the bot.
+New in 0.20.0: `session.lost` and `on_disconnect` need that `slim-m` release, and `scripts/check_bot_pr.py` holds a bot that calls `on_disconnect` to it.
 `Bot.start()` leaves every open session (best effort, 5 seconds) before it closes the client, so a redeploy does not leave the bot on the call until LiveKit times it out; `FakeVoiceSession.simulate_disconnect()` is the test hook for the dropped-room case.
 
 The real work happens through `livekit.rtc`, loaded dynamically (`importlib.import_module`, not a static `import`) so neither pyright nor a bot that never touches voice needs the package installed - `bot-jellyfin`'s `!watch` (`stream_session.py`) is the worked example: Jellyfin transcodes server-side, a local `ffmpeg` decodes to raw frames, and those get pushed into the sources `publish_screen_share` returns at the source's own pace.

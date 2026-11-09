@@ -16,6 +16,7 @@ EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+    (r"\.on_disconnect\(", "VoiceSession.on_disconnect", (0, 20, 0)),
     (r"\bmax_replay_age\b|\bctx\.replayed\b|\.is_replay\(", "max_replay_age, ctx.replayed and is_replay", (0, 19, 0)),
     (
         r"(?s)\.(?:command|group)\(.{0,400}?\bsuggest\s*=|\.place_many\(|\bBatchUnavailable\b",
