@@ -36,7 +36,7 @@ To keep it apart from other bots in a shared channel, set `SLIMM_PREFIX` (for ex
 `JELLYFIN_API_KEY` comes from Jellyfin's own Dashboard -> API Keys, as a
 Jellyfin server administrator. It is a credential exactly like a slim-m bot
 token: keep it in the environment, never in source, and this bot never logs
-it or puts it in a URL. It goes in an `Authorization: MediaBrowser
+it or puts it in a URL or on a command line. It goes in an `Authorization: MediaBrowser
 Token="..."` header - confirmed against a real Jellyfin 12.0.0 server that
 this is the only one of four commonly documented forms that works there:
 `X-Emby-Token`, `X-MediaBrowser-Token` and an `api_key` query parameter all
@@ -174,9 +174,11 @@ empties - checked on `on_voice_activity` when the LiveKit webhook (decision
 works even on a deployment that has not wired up the webhook.
 
 Video is Jellyfin's own server-side transcode
-(`/Videos/{id}/stream?VideoCodec=h264&AudioCodec=aac...`), decoded by a
-local `ffmpeg` (a system binary - not pip-installed, and not in the
-hash-locked CI requirements since the test suite never spawns it) into
+(`/Videos/{id}/stream?VideoCodec=h264&AudioCodec=aac...`), fetched by the bot itself and fed to a
+local `ffmpeg` on its stdin (`transcode_feed.py`), so the API key is a header of the bot's own request and never in ffmpeg's command line, where any user on the host could read it with `ps`.
+The feed does not follow redirects, stops reading from Jellyfin while the party is paused, and closes ffmpeg's input when the request fails, which ends or retries the start the same way a failed ffmpeg did.
+`ffmpeg` is a system binary - not pip-installed, and not in the
+hash-locked CI requirements, since the suite only spawns a real one when it finds it on `PATH` - and decodes the stream into
 raw I420 frames letterboxed to `JELLYFIN_STREAM_WIDTH`x`JELLYFIN_STREAM_HEIGHT`
 and PCM audio (one ffmpeg, video on stdout and audio on a second pipe), published through `bot.voice`'s `SOURCE_SCREENSHARE`/
 `SOURCE_SCREENSHARE_AUDIO` tracks - see `stream_session.py`.

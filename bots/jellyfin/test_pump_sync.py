@@ -112,7 +112,7 @@ class Rig:
 
     async def _launch(self, _start_seconds):
         self.video_pipe, self.sound_pipe = asyncio.StreamReader(), asyncio.StreamReader()
-        return SimpleNamespace(stdout=self.video_pipe), SimpleNamespace(stdout=self.sound_pipe) if self.has_sound else None
+        return SimpleNamespace(stdout=self.video_pipe), SimpleNamespace(stdout=self.sound_pipe) if self.has_sound else None, None
 
     def play(self, seconds, *, video, sound=None, pauses=(), sound_ends=None, sound_after_frames=None):
         """Plays `seconds` of the title with ffmpeg producing frames and sound chunks at the `video` and `sound` times (seconds after the start);

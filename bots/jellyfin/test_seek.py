@@ -20,6 +20,7 @@ TICKS = 10_000_000
 class FakeProcess:
     def __init__(self):
         self.returncode = None
+        self.stdin = None
 
     def kill(self):
         self.returncode = -9
@@ -48,11 +49,15 @@ class FakeJellyfin:
     async def create_subprocess_exec(self, *args, **_kwargs):
         if self.fail_launch_after is not None and len(self.launches) >= self.fail_launch_after:
             raise stream_session.StreamError("ffmpeg is not on PATH")
-        url = args[args.index("-i") + 1]
-        self.launches.append(url)
+        assert args[args.index("-i") + 1] == "pipe:0" and not any("Token" in str(arg) for arg in args), "the key must not be on the command line"
         process = FakeProcess()
         self.processes.append(process)
         return process
+
+    def start_feed(self, url, _stdin):
+        """The transcode request a launch makes; its address is what Jellyfin would have served."""
+        self.launches.append(url)
+        return asyncio.ensure_future(asyncio.sleep(0))
 
 
 async def _idle(self, _fifo_path):
@@ -67,7 +72,9 @@ class Rig:
             stream_session.ffmpeg_binary, stream_session.asyncio.create_subprocess_exec,
             stream_session.WatchSession._pump_video, stream_session.WatchSession._pump_audio,
             playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode,
+            stream_session.transcode_feed.start,
         )
+        stream_session.transcode_feed.start = self.jf.start_feed
         stream_session.ffmpeg_binary = lambda: "ffmpeg"
         stream_session.asyncio.create_subprocess_exec = self.jf.create_subprocess_exec
         stream_session.WatchSession._pump_video = _idle
@@ -88,7 +95,8 @@ class Rig:
     def close(self):
         (stream_session.ffmpeg_binary, stream_session.asyncio.create_subprocess_exec,
          stream_session.WatchSession._pump_video, stream_session.WatchSession._pump_audio,
-         playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode) = self.originals
+         playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode,
+         stream_session.transcode_feed.start) = self.originals
         session_registry.clear()
 
     async def start(self, at=0.0):

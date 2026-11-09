@@ -20,6 +20,7 @@ import dock_state
 import jellyfin_core
 import playback_progress
 import tracks
+import transcode_feed
 from direct_play import DirectPlayHost
 from pump_sync import AudioPipe, MediaClock, StartLine, wait_for_frame
 from quality import Quality, configured_default, playback_fps
@@ -41,13 +42,14 @@ def ffmpeg_binary():
     return media.ffmpeg_binary(StreamError)
 
 
-def build_args(url, headers, *, width, height, fps, audio_fd=None):
+def build_args(*, width, height, fps, audio_fd=None):
     """One ffmpeg for both tracks: letterboxed WxH I420 on stdout, and s16le PCM on `audio_fd` when the title has audio.
     Two processes read and demuxed the same transcode twice over HTTPS, for one extra process's memory and nothing else."""
+    # The transcode arrives on stdin (transcode_feed.py), so the API key is never in this command line.
     filters = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
     args = [
         ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-threads", str(DECODE_THREADS),
-        "-headers", headers, "-i", url, "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
+        "-i", "pipe:0", "-map", "0:v:0", "-an", "-vf", filters, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
     ]
     if audio_fd is not None:
         args += [
@@ -104,6 +106,7 @@ class WatchSession:
         self._audio_pipe = None
         self._video_task = None
         self._audio_task = None
+        self._feed_task = None
         self._monitor_task = None
         self._start_line = StartLine()
         self._media_clock = MediaClock(None)
@@ -194,13 +197,12 @@ class WatchSession:
             subtitle_stream_index=self.subtitle_stream_index, max_width=self.quality.width,
             video_bitrate=self.quality.video_bitrate, play_session_id=uuid.uuid4().hex,
         )
-        headers = f"Authorization: {jellyfin_core.jellyfin_auth_header()}\r\n"
         width, height = self.quality.frame_size
         read_fd, write_fd = os.pipe() if has_audio(self.item) else (None, None)
         try:
-            args = build_args(url, headers, width=width, height=height, fps=self.fps, audio_fd=write_fd)
+            args = build_args(width=width, height=height, fps=self.fps, audio_fd=write_fd)
             process = await asyncio.create_subprocess_exec(
-                *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                 pass_fds=() if write_fd is None else (write_fd,),
             )
         except BaseException:
@@ -210,7 +212,8 @@ class WatchSession:
         finally:
             if write_fd is not None:
                 os.close(write_fd)
-        return process, None if read_fd is None else await AudioPipe.open(read_fd)
+        audio_pipe = None if read_fd is None else await AudioPipe.open(read_fd)
+        return process, audio_pipe, transcode_feed.start(url, process.stdin)
 
     async def _start_pipeline(self, start_seconds):
         """Replaces the running pipeline only once the new one has launched, so a failed launch leaves playback alone."""
@@ -219,9 +222,9 @@ class WatchSession:
             self._seek_base = start_seconds
             self._segment_started_at = time.monotonic()
             return
-        process, audio_pipe = await self._launch_pipeline(start_seconds)
+        process, audio_pipe, feed_task = await self._launch_pipeline(start_seconds)
         await self._teardown_pipeline()
-        self._video_process, self._audio_pipe = process, audio_pipe
+        self._video_process, self._audio_pipe, self._feed_task = process, audio_pipe, feed_task
         self._seek_base = start_seconds
         self._segment_started_at = time.monotonic()
         self._frames_seen = False
@@ -340,13 +343,17 @@ class WatchSession:
             if task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+        if self._feed_task is not None:
+            self._feed_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._feed_task
         if self._video_process is not None:
             await reap(self._video_process)
         if self._audio_pipe is not None:
             self._audio_pipe.close()
         if self._audio_source is not None:
             self._audio_source.clear_queue()
-        self._video_task = self._audio_task = None
+        self._video_task = self._audio_task = self._feed_task = None
         self._video_process = self._audio_pipe = None
 
     def pause(self):
