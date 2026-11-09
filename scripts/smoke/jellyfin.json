@@ -76,6 +76,13 @@
       "timeout": 15
     },
     {
+      "say": "!audio",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
       "say": "!quality",
       "expect_contains": [
         "nothing is playing"
