@@ -9,7 +9,7 @@ from slimbots.http import ApiError
 from slimbots.bot import Bot
 from slimbots.space import Space
 from slimbots.testing import FakeAsyncClient
-from slimbots.ui import UiEntry, UiOption, register_ui
+from slimbots.ui import ICONS, UiEntry, UiOption, register_ui
 
 
 def frame(kind, entry_id, **extra):
@@ -78,6 +78,12 @@ def test_the_caps_and_shapes_are_checked_before_the_server_sees_them():
         UiEntry("a", "x", icon="skull")
     with pytest.raises(ValueError):
         bot._ui.add("message_menu", UiEntry("i", "x", icon="play"), lambda interaction: None)
+
+
+def test_every_glyph_the_server_lists_is_accepted_for_a_call_control_and_captions_is_one():
+    for icon in ICONS:
+        assert UiEntry("a", "x", icon=icon).to_wire()["icon"] == icon
+    assert "captions" in ICONS
 
 
 async def test_a_menu_use_runs_its_handler_with_the_message_and_is_acked_for_it():

@@ -1,4 +1,4 @@
-"""bot-jellyfin's `!pause`/`!resume`/`!seek`/`!np`/`!stop`/`!subs`/`!quality` commands and the `!watch` entry point; see README.md."""
+"""bot-jellyfin's `!pause`/`!resume`/`!seek`/`!np`/`!stop`/`!subs`/`!audio`/`!quality` commands and the `!watch` entry point; see README.md."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import panel
 import picker
 import quality
 import session_registry
+import tracks
 import watch_start
 from stream_session import StreamError
 
@@ -104,26 +105,62 @@ async def run_subs(ctx, language):
         await answers.tell(ctx, "only the person who started this, or a channel manager, can change subtitles.")
         return
     language = (language or "").strip()
-    if not language or language.lower() == "off":
-        async with session.control_lock:
-            if session.finished:
-                await answers.tell(ctx, ENDED)
-                return
-            await session.set_subtitle(None, None)
-        await answers.tell(ctx, "subtitles off.")
-        await answers.tidy(ctx)
-        await session.refresh_panel()
+    track = None
+    if language.lower() == "next":
+        if not jellyfin_core.subtitle_streams(session.item):
+            await answers.tell(ctx, "this title has no subtitle tracks.")
+            return
+        track = tracks.next_subtitle(session.item, session.subtitle_stream_index)
+    elif language and language.lower() != tracks.OFF:
+        track = jellyfin_core.find_subtitle_stream(session.item, language)
+        if track is None:
+            await answers.tell(ctx, f'no subtitle track matching "{language}".')
+            return
+    async with session.control_lock:
+        if session.finished:
+            await answers.tell(ctx, ENDED)
+            return
+        await controls.show_subtitle(session, track)
+    await answers.tell(ctx, "subtitles off." if track is None else f"subtitles set to {session.subtitle_label}.")
+    await answers.tidy(ctx)
+    await session.refresh_panel()
+
+
+def _audio_listing(session):
+    heard = tracks.playing_audio(session.item, session.audio_stream_index)
+    named = [f"{tracks.label(a)}{' (playing)' if a is heard else ''}" for a in tracks.streams(session.item, "Audio")]
+    if not named:
+        return "this title lists no audio tracks."
+    return f"audio tracks: {', '.join(named)}. change it with `{session.bot.prefix}audio <language|next>`."
+
+
+async def run_audio(ctx, language):
+    session = await session_registry.resolve_session(ctx)
+    if session is None:
         return
-    stream = jellyfin_core.find_subtitle_stream(session.item, language)
-    if stream is None:
-        await answers.tell(ctx, f'no subtitle track matching "{language}".')
+    language = (language or "").strip()
+    if not language:
+        await answers.tell(ctx, _audio_listing(session))
+        return
+    if not _may_control(ctx, session):
+        await answers.tell(ctx, "only the person who started this, or a channel manager, can change the audio.")
+        return
+    if len(tracks.streams(session.item, "Audio")) < 2:
+        await answers.tell(ctx, "this title has no other audio track.")
+        return
+    if language.lower() == "next":
+        track = tracks.next_audio(session.item, session.audio_stream_index)
+    else:
+        track = tracks.find_audio(session.item, language)
+    if track is None:
+        await answers.tell(ctx, f'no audio track matching "{language}".')
         return
     async with session.control_lock:
         if session.finished:
             await answers.tell(ctx, ENDED)
             return
-        await session.set_subtitle(stream["Index"], stream.get("DisplayTitle") or stream.get("Language") or language)
-    await answers.tell(ctx, f"subtitles set to {session.subtitle_label}.")
+        await session.set_audio(track["Index"])
+    await answers.tell(ctx, f"audio set to {tracks.label(track)}.")
     await answers.tidy(ctx)
     await session.refresh_panel()
 
@@ -183,9 +220,13 @@ def setup(bot):
     async def now_playing(ctx):
         await run_now_playing(ctx)
 
-    @bot.command(name="subs", help="Set or turn off burned-in subtitles", usage="<lang|off>")
+    @bot.command(name="subs", help="Set or turn off burned-in subtitles", usage="<lang|next|off>")
     async def subs(ctx, language: str = ""):
         await run_subs(ctx, language)
+
+    @bot.command(name="audio", help="List the audio tracks, or switch to one", usage="[language|next]")
+    async def audio(ctx, language: str = ""):
+        await run_audio(ctx, language)
 
     @bot.command(name="quality", help="Show or change the stream quality", usage="[low|medium|high]")
     async def quality_command(ctx, preset: str = ""):
@@ -201,6 +242,12 @@ def setup(bot):
     bot.call_control(
         controls.JUMP_CONTROL_ID, "Jump to", icon="list", options=controls.jump_options(),
     )(controls.on_jump_control)
+    bot.call_control(
+        controls.CAPTIONS_CONTROL_ID, "Captions", icon="captions", options=controls.captions_options(),
+    )(controls.on_captions_control)
+    bot.call_control(
+        controls.AUDIO_CONTROL_ID, "Audio", icon="volume", options=controls.audio_options(),
+    )(controls.on_audio_control)
 
     @bot.event
     async def on_voice_activity(event):

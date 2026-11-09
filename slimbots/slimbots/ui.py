@@ -21,6 +21,7 @@ MAX_ID = 64
 MAX_OPTIONS = 8
 ICONS = (
     "play", "pause", "stop", "skip_next", "skip_previous", "volume", "volume_off", "repeat", "shuffle", "list", "settings",
+    "captions",
 )
 _ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
 

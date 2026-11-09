@@ -8,9 +8,11 @@ from slimbots import ApiError
 from slimbots.voice import VoiceError
 
 import jellyfin_core
+import languages
 import playback_progress
 import quality
 import session_registry
+import tracks
 from panel import ID_PREFIX, SKIP_SECONDS
 from stream_session import StreamError
 
@@ -21,6 +23,9 @@ def preflight(session, action):
         return "that episode has finished - press Next episode, or Stop."
     if action == "subs" and session.subtitle_stream_index is None and not jellyfin_core.subtitle_streams(session.item):
         return "this title has no subtitle tracks."
+    plan = _plan(session, action)
+    if plan is not None and plan.problem:
+        return plan.problem
     if action.startswith("q:") and quality.find_preset(action[2:]) is None:
         return "that quality does not exist."
     if action.startswith("jump:") and jump_fraction(action) is None:
@@ -50,10 +55,39 @@ def jump_options():
 SKIP_STEPS = {"back": -SKIP_SECONDS, "fwd": SKIP_SECONDS}
 
 
-def _default_subtitle(item):
-    tracks = jellyfin_core.subtitle_streams(item)
-    preferred = [t for t in tracks if (t.get("Language") or "").lower() in ("eng", "en")]
-    return (preferred or tracks)[0]
+def _plan(session, action):
+    """The dock's captions or audio choice resolved against this title, or None for any other action."""
+    kind, _, option = action.partition(":")
+    preferred = jellyfin_core.SUBTITLE_LANGUAGE
+    if kind == "cc":
+        return tracks.plan_captions(
+            session.item, option, preferred=preferred, subtitle_index=session.subtitle_stream_index, audio_index=session.audio_stream_index,
+        )
+    if kind == "au":
+        return tracks.plan_audio(session.item, option, preferred=preferred, audio_index=session.audio_stream_index)
+    return None
+
+
+def _default_subtitle(session):
+    """The Subtitles button's track: the language already chosen for this party, else the preferred one, else the best there is."""
+    chosen = session.caption_choice if session.caption_choice != tracks.OFF else None
+    return tracks.default_subtitle(session.item, chosen, jellyfin_core.SUBTITLE_LANGUAGE)
+
+
+async def show_subtitle(session, track):
+    """Shows `track`, or no subtitles for None."""
+    await session.set_subtitle(None if track is None else track["Index"], None if track is None else tracks.label(track))
+
+
+async def _apply_track_choice(session, action):
+    plan = _plan(session, action)
+    if plan.problem:
+        return plan.problem
+    if action.startswith("cc:"):
+        await show_subtitle(session, plan.track)
+    else:
+        await session.set_audio(plan.track["Index"])
+    return None
 
 
 async def _next_episode(session):
@@ -85,11 +119,9 @@ async def apply(session, action, who="a member"):
     elif action.startswith("q:"):
         await session.set_quality(quality.PRESETS[action[2:]])
     elif action == "subs":
-        if session.subtitle_stream_index is not None:
-            await session.set_subtitle(None, None)
-        else:
-            track = _default_subtitle(session.item)
-            await session.set_subtitle(track["Index"], track.get("DisplayTitle") or track.get("Language") or "on")
+        await show_subtitle(session, None if session.subtitle_stream_index is not None else _default_subtitle(session))
+    elif action.startswith(("cc:", "au:")):
+        return await _apply_track_choice(session, action)
     elif action == "next":
         return await _play_next(session)
     return None
@@ -145,6 +177,21 @@ CALL_CONTROLS = (
 
 
 QUALITY_CONTROL_ID = "jf-quality"
+CAPTIONS_CONTROL_ID = "jf-captions"
+AUDIO_CONTROL_ID = "jf-audio"
+
+
+def captions_options():
+    """The dock's Captions choice: the options cannot follow a title, so each one names a rule the title is checked against."""
+    preferred = jellyfin_core.SUBTITLE_LANGUAGE
+    named = [("preferred", languages.language_name(preferred))] if preferred else []
+    return [(tracks.OFF, "Off"), *named, ("audio", "Audio language"), ("next", "Next track")]
+
+
+def audio_options():
+    preferred = jellyfin_core.SUBTITLE_LANGUAGE
+    named = [("preferred", languages.language_name(preferred))] if preferred else []
+    return [("original", "Original language"), *named, ("next", "Next track")]
 
 
 def quality_options():
@@ -173,21 +220,21 @@ def call_control_handler(action):
     return handler
 
 
-async def on_jump_control(interaction):
-    """The dock's Jump to choice; the pick is a share of the runtime, through the panel's own seek path."""
-    if interaction.option_id is None:
-        await _refuse(interaction, "pick a position from the list.")
-        return
-    session = await _session_for(interaction)
-    if session is not None:
-        await run_control(interaction, session, f"jump:{interaction.option_id}")
+def option_control_handler(prefix, noun):
+    """A dock control that offers options; the pick is the part after `prefix:` of the action, through the panel's own path."""
+
+    async def handler(interaction):
+        if interaction.option_id is None:
+            await _refuse(interaction, f"pick {noun} from the list.")
+            return
+        session = await _session_for(interaction)
+        if session is not None:
+            await run_control(interaction, session, f"{prefix}:{interaction.option_id}")
+
+    return handler
 
 
-async def on_quality_control(interaction):
-    """The dock's Quality choice; the pick is the preset, through the panel's own quality path."""
-    if interaction.option_id is None:
-        await _refuse(interaction, "pick a quality from the list.")
-        return
-    session = await _session_for(interaction)
-    if session is not None:
-        await run_control(interaction, session, f"q:{interaction.option_id}")
+on_jump_control = option_control_handler("jump", "a position")
+on_quality_control = option_control_handler("q", "a quality")
+on_captions_control = option_control_handler("cc", "a captions choice")
+on_audio_control = option_control_handler("au", "an audio track")

@@ -19,6 +19,7 @@ from slimbots.voice import watch_empty
 import dock_state
 import jellyfin_core
 import playback_progress
+import tracks
 from direct_play import DirectPlayHost
 from pump_sync import AudioPipe, MediaClock, StartLine, wait_for_frame
 from quality import Quality, configured_default, playback_fps
@@ -73,6 +74,8 @@ class WatchSession:
         self.bot = bot
         self.text_channel_id = text_channel_id
         self.voice_channel_id = voice_channel_id
+        self.audio_choice = None
+        self.caption_choice = None
         self._set_item(item)
         self.started_by_id = started_by_id
         self.voice_session = voice_session
@@ -112,9 +115,16 @@ class WatchSession:
         self.title = item.get("Name") or "Unknown title"
         self.duration_seconds = (item.get("RunTimeTicks") or 0) / 10_000_000
         self.fps = playback_fps(item, jellyfin_core.JELLYFIN_STREAM_FPS)
-        self.audio_stream_index = None
-        self.subtitle_stream_index = None
-        self.subtitle_label = None
+        self.audio_stream_index = tracks.pick_audio(item, self.audio_choice)
+        self._pick_subtitle()
+
+    def _pick_subtitle(self):
+        """Resolves the standing caption choice against this title, so the captions picked for one episode carry to the next."""
+        track = tracks.pick_subtitle(
+            self.item, self.caption_choice, preferred=jellyfin_core.SUBTITLE_LANGUAGE, audio_index=self.audio_stream_index,
+        )
+        self.subtitle_stream_index = None if track is None else track["Index"]
+        self.subtitle_label = None if track is None else tracks.label(track)
 
     @property
     def position_seconds(self):
@@ -428,9 +438,24 @@ class WatchSession:
 
     async def set_subtitle(self, stream_index, label):
         position = self.position_seconds
+        self.caption_choice = tracks.caption_choice_for(self.item, stream_index)
+        changed = stream_index != self.subtitle_stream_index
         self.subtitle_stream_index = stream_index
         self.subtitle_label = label
-        await self.seek(position)
+        if changed:
+            await self.seek(position)
+
+    async def set_audio(self, stream_index):
+        """Plays another audio track from here; captions the bot chose for the old track are chosen again for the new one."""
+        position = self.position_seconds
+        self.audio_choice = tracks.audio_choice_for(self.item, stream_index)
+        heard = tracks.playing_audio(self.item, self.audio_stream_index)
+        before = None if heard is None else heard.get("Index"), self.subtitle_stream_index
+        self.audio_stream_index = stream_index
+        if self.caption_choice is None:
+            self._pick_subtitle()
+        if before != (stream_index, self.subtitle_stream_index):
+            await self.seek(position)
 
     def _cancel_next_timer(self):
         timer, self._next_timer = self._next_timer, None

@@ -254,14 +254,14 @@ def use_control(client, session, control_id, *, user_id="u1", channel_id="v1", o
     asyncio.run(deliver())
 
 
-def test_the_call_dock_registers_play_pause_skips_stop_a_quality_choice_and_a_jump():
+def test_the_call_dock_registers_play_pause_skips_stop_choices_for_quality_jump_captions_and_audio():
     asyncio.run(jellyfin.bot.update_call_control("jf-playpause", icon="pause", label="Pause"))
     entries = [entry.to_wire() for entry, _ in jellyfin.bot._ui.controls.values()]
     assert [(e["id"], e["icon"]) for e in entries] == [
         ("jf-playpause", "pause"), ("jf-back", "skip_previous"), ("jf-forward", "skip_next"), ("jf-stop", "stop"),
-        ("jf-quality", "settings"), ("jf-jump", "list"),
+        ("jf-quality", "settings"), ("jf-jump", "list"), ("jf-captions", "captions"), ("jf-audio", "volume"),
     ]
-    assert entries[-2]["options"] == [
+    assert entries[4]["options"] == [
         {"id": "low", "label": "Low 480p"}, {"id": "medium", "label": "Medium 720p"}, {"id": "high", "label": "High 1080p"},
     ]
 
