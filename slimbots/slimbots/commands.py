@@ -136,7 +136,15 @@ class Command:
         self.params = _handler_params(func)
         self.choices = validate_choices(self.params, choices)
         self.suggested = validate_choices(self.params, suggest)
-        self.usage = usage or " ".join(_usage_token(p) for p in self.params)
+        self._usage = usage
+
+    @property
+    def usage(self) -> str:
+        return self._usage or " ".join(_usage_token(p) for p in self.params)
+
+    @usage.setter
+    def usage(self, value: str | None) -> None:
+        self._usage = value
 
     @property
     def names(self) -> list[str]:
@@ -205,11 +213,15 @@ class Command:
             i += 1
         return values
 
-    async def invoke(self, ctx: Context) -> Any:
+    async def _gate(self, ctx: Context) -> None:
+        """Raises unless `ctx`'s author may run this now: the permission, the cooldown, then the custom check."""
         self.check_permission(ctx.author)
         self.check_cooldown(ctx)
         if self.check is not None and not await _maybe_await(self.check(ctx)):
             raise CheckFailure("you can't use that command right now")
+
+    async def invoke(self, ctx: Context) -> Any:
+        await self._gate(ctx)
         args = await self.convert_args(ctx, ctx.raw_args)
         return await self.func(ctx, *args)
 
@@ -227,18 +239,10 @@ class Group(Command):
         requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
         suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        self.func = func
-        self.name = name
-        self.aliases = list(aliases)
-        self.help = help or ""
-        self.requires = requires
-        self.requires_message = requires_message
-        self.check = check
-        self.cooldown = Cooldown(cooldown) if cooldown else None
-        self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
-        self.params = _handler_params(func)
-        self.choices: dict[str, tuple[str, ...]] = {}
-        self.suggested = validate_choices(self.params, suggest)
+        super().__init__(
+            func, name=name, aliases=aliases, help=help, cooldown=cooldown, cooldown_bucket=cooldown_bucket,
+            requires=requires, requires_message=requires_message, check=check, suggest=suggest,
+        )
         self.subcommands: dict[str, Command] = {}
         self._unique_subcommands: list[Command] = []
 
@@ -273,10 +277,7 @@ class Group(Command):
 
     async def invoke(self, ctx: Context) -> Any:
         """Dispatches by the first token of `ctx.raw_args`; anything else falls to the group's own handler."""
-        self.check_permission(ctx.author)
-        self.check_cooldown(ctx)
-        if self.check is not None and not await _maybe_await(self.check(ctx)):
-            raise CheckFailure("you can't use that command right now")
+        await self._gate(ctx)
         name_token, remainder = split_first_word(ctx.raw_args)
         subcommand = self.subcommands.get(name_token) if name_token else None
         if subcommand is None:
