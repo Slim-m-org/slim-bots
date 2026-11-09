@@ -9,6 +9,7 @@ import importlib
 import importlib.metadata
 import logging
 import os
+import random
 import sqlite3
 import sys
 import time
@@ -28,6 +29,7 @@ from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
 from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_with_shutdown
 from .models import Member
+from .reconnect import Backoff
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
@@ -162,6 +164,7 @@ class Bot:
         self.moderation_head: int | None = None
         self._clock: Callable[[], float] = time.monotonic
         self._wall_clock: Callable[[], float] = time.time
+        self._jitter: Callable[[float, float], float] = random.uniform
         self._channel_miss_at: dict[str, float] = {}
         self.store: Store | None = None
         self._extensions: dict[str, ModuleType] = {}
@@ -750,7 +753,7 @@ class Bot:
             return False
         return self._wall_clock() * 1000 - created_at > self.max_replay_age * 1000
 
-    async def _connect_once(self, reset_delay: Callable[[], None]) -> None:
+    async def _connect_once(self, mark_ready: Callable[[], None]) -> None:
         assert self.client is not None and self.space is not None, "_connect_once needs start() to have run"
         me = await self.client.me()
         self.me_id = me["id"]
@@ -770,16 +773,16 @@ class Bot:
             head = gateway.hello.get("moderation_seq")
             self.moderation_head = head if isinstance(head, int) else None
             try:
-                await self._serve(gateway, reset_delay)
+                await self._serve(gateway, mark_ready)
             finally:
                 self._gateway = None
                 self._held_live = None
 
-    async def _serve(self, gateway: Gateway, reset_delay: Callable[[], None]) -> None:
+    async def _serve(self, gateway: Gateway, mark_ready: Callable[[], None]) -> None:
         """Runs the frame loop and the backlog replay side by side, so a replayed command has a live socket."""
         self._held_live = []
         self._replayed_ids.clear()
-        ready = asyncio.create_task(self._catch_up_then_ready(reset_delay))
+        ready = asyncio.create_task(self._catch_up_then_ready(mark_ready))
         pump = asyncio.create_task(self._pump_frames(gateway))
         pending = {ready, pump}
         try:
@@ -796,10 +799,10 @@ class Bot:
         async for frame in gateway.frames():
             await self._handle_frame(frame)
 
-    async def _catch_up_then_ready(self, reset_delay: Callable[[], None]) -> None:
+    async def _catch_up_then_ready(self, mark_ready: Callable[[], None]) -> None:
         await self._catch_up()
         self._release_held_messages()
-        reset_delay()
+        mark_ready()
         await self._dispatch_event("on_ready")
 
     def _release_held_messages(self) -> None:
@@ -822,15 +825,12 @@ class Bot:
         await self.send_frame({"type": "typing", "channel_id": channel_id})
 
     async def _run_forever(self):
-        delay = self.base_delay
-
-        def reset_delay():
-            nonlocal delay
-            delay = self.base_delay
-
+        backoff = Backoff(self.base_delay, self.max_delay, clock=self._clock, jitter=self._jitter)
         while True:
+            backoff.connecting()
+            failure = None
             try:
-                await self._connect_once(reset_delay)
+                await self._connect_once(backoff.ready)
             except RegistrationRejected as err:
                 print(f"the server refused this bot's registration at {err.route}: {err.reason or err.body}", file=sys.stderr)
                 return 1
@@ -838,9 +838,11 @@ class Bot:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
-                log_failure(log, err, "connection failed, retrying in %ss", delay)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, self.max_delay)
+                failure = err
+            wait = backoff.next_wait()
+            if failure is not None:
+                log_failure(log, failure, "connection failed, retrying in %.1fs", wait)
+            await asyncio.sleep(wait)
 
     def _resolve_channels_from_env(self):
         raw = os.environ.get("SLIMM_CHANNELS", "")

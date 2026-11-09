@@ -38,6 +38,9 @@ bot.run()  # reads SLIMM_URL and SLIMM_BOT_TOKEN from the environment
 `bot.run_cli(check=...)` is the `__main__` entry point: it runs each pre-flight check (a function returning a problem string or `None`), then `run()`, and turns a failed check or a config `RuntimeError` into the process's exit message.
 
 `Bot(...)` owns config, auth, the websocket, reconnect with backoff, the `seq`-less full-roster refresh, command registration, graceful SIGTERM, and `run()`/`start()`.
+A dropped connection is retried after `base_delay` (1s), doubling to `max_delay` (60s), each wait jittered to between half and one and a half times that, so bots that lost the server together do not return together.
+The wait starts over only for a connection that stayed ready for 30 seconds, so a server that accepts the socket and drops it again keeps being retried at the longer wait.
+A hello the server never answers is given up on after 15 seconds and retried like any other failed connection.
 A bot script imports `Bot` and little else.
 
 ## Commands
