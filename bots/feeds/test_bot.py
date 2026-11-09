@@ -6,6 +6,7 @@ import asyncio
 import bot as feeds
 import db
 import fixtures
+import parse as parsemod
 from slimbots.http import ApiError
 from slimbots.permissions import Permissions
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
@@ -255,6 +256,24 @@ def test_seen_entries_are_pruned_to_a_bound():
     rig.sql(db.add_feed, "c1", URL, "n", "", 600, "u")
     rig.sql(db.mark_seen, 1, [f"k{i}" for i in range(db.KEEP_SEEN + 50)])
     assert len(rig.sql(db.seen_keys, 1)) == db.KEEP_SEEN
+
+
+def test_an_item_without_a_link_posts_its_title_without_a_live_mention():
+    rig = Rig()
+    feed = {"id": 1, "channel_id": "c1"}
+    asyncio.run(feeds.post_entry(feed, parsemod.Entry("k1", "Hi @everyone and @[Core Team]", ""), "Src"))
+    sent = rig.client.sent[-1]
+    assert sent["content"] == "Hi \\@everyone and \\@[Core Team]"
+    assert sent["embeds"][0]["title"] == "Hi @everyone and @[Core Team]", "the card is not read for mentions"
+
+
+def test_a_feed_that_names_itself_with_a_mention_cannot_ping_on_add_or_list():
+    rig = Rig()
+    rig.serve(fixtures.rss_with(("g-1", "One", "x"), title="@everyone news"))
+    rig.say(f"!feed add {URL}")
+    assert "\\@everyone news" in rig.last_reply() and "**@everyone" not in rig.last_reply()
+    rig.say("!feed list")
+    assert "\\@everyone news" in rig.last_reply()
 
 
 if __name__ == "__main__":

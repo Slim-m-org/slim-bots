@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The notes condenser and message renderer on real release-please bodies; run directly: python3 test_notes.py."""
 
+import re
 import time
 
 import fixtures
@@ -102,6 +103,14 @@ def test_a_huge_whitespace_run_does_not_stall_the_cleanup():
 def test_a_closes_clause_with_a_comma_and_extra_spaces_is_still_dropped():
     line = "* tidy it up ([#9](https://x/9)),   closes   [#7](https://x/7)"
     assert notes.bullets(line) == ["tidy it up"]
+
+
+def test_a_commit_title_or_scoped_tag_cannot_ping_anyone():
+    body = "### Features\n\n* **client:** thanks @everyone and @[Core Team], cc @nick\n"
+    message = notes.render("@scope/pkg", "@scope/pkg@1.2.0", URL, body)
+    assert re.search(r"(?<!\\)@", message) is None
+    assert "- thanks \\@everyone and \\@[Core Team], cc \\@nick" in message
+
 
 if __name__ == "__main__":
     run_module_tests(globals())

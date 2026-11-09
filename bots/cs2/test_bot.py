@@ -122,7 +122,8 @@ def test_lfg_pings_only_when_enough_linked_members_are_online_and_free():
     rig.players[ID_BOB] = ("Bob", 1, "")
     rig.say("!cs2 lfg tonight @everyone")
     text = rig.client.sent[-1]["content"]
-    assert "@ann" in text and "@bob" in text and "@cal" not in text.split("Free now:")[1] and "@everyone" not in text
+    assert "@ann" in text and "@bob" in text and "@cal" not in text.split("Free now:")[1]
+    assert "tonight \\@everyone" in text and text.count("@everyone") == 1
 
 
 def test_lfg_pings_the_role_when_one_is_set():

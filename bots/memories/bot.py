@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import history
 from slimbots import ApiError, Bot
+from slimbots.text import escape_mentions
 
 bot = Bot(prefix="!", default_data_path="memories.db")
 
@@ -35,7 +36,7 @@ def age_label(months):
 
 
 def quote_block(text):
-    return "\n".join("> " + line for line in text.replace("@", " at ").splitlines() if line.strip())
+    return "\n".join("> " + escape_mentions(line) for line in text.splitlines() if line.strip())
 
 
 async def find_memory(today):

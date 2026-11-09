@@ -100,7 +100,7 @@ def test_onthisday_quotes_a_public_message_from_a_year_ago_and_defuses_mentions(
     client = setup({"c-gen": [old], "c-priv": [private]})
     say("!onthisday")
     text = client.sent[-1]["content"]
-    assert "1 year ago, in #general" in text and "watch that film again" in text and "@everyone" not in text
+    assert "1 year ago, in #general" in text and "watch that film again" in text and "\\@everyone" in text and text.count("@everyone") == 1
     assert "c-priv" not in client.pages and "c-unk" not in client.pages
 
 

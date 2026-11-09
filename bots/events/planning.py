@@ -3,6 +3,8 @@
 import shlex
 from datetime import datetime, time, timedelta
 
+from slimbots.text import escape_mentions
+
 WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_DAYS_AHEAD = 60
 MAX_TITLE = 80
@@ -63,4 +65,4 @@ def parse_event(text, now):
         raise ValueError(f"keep events within {MAX_DAYS_AHEAD} days.")
     if not title or len(title) > MAX_TITLE:
         raise ValueError(f"the title must be 1 to {MAX_TITLE} characters.")
-    return title.replace("@", " at "), start
+    return escape_mentions(title), start
