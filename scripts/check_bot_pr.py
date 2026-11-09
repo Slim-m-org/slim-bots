@@ -16,6 +16,14 @@ EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+    (r"\bmax_replay_age\b|\bctx\.replayed\b|\.is_replay\(", "max_replay_age, ctx.replayed and is_replay", (0, 19, 0)),
+    (
+        r"(?s)\.(?:command|group)\(.{0,400}?\bsuggest\s*=|\.place_many\(|\bBatchUnavailable\b",
+        "suggest= on a command and Canvas.place_many",
+        (0, 18, 0),
+    ),
+    (r"\bclient\.download\(|\bResponseTooLarge\b", "AsyncClient.download", (0, 17, 0)),
+    (r"(?s)\bset_watch_session\(.{0,400}?\bdirect_play\s*=", "set_watch_session direct_play", (0, 16, 0)),
     (r"\bfrom slimbots import [^\n]*\bstyle\b|\bslimbots\.style\b|\bchoices=\{", "slimbots.style and command choices", (0, 15, 0)),
     (r"\.run_cli\(|\.every\(|\brequires_message=|\b(?:KeyValueTable|LedgerTable)\b", "run_cli, every, requires_message and the kv/ledger tables", (0, 13, 0)),
     (
@@ -23,6 +31,8 @@ FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
         "slimbots.web, urlpolicy, chooser, media, text and the shared voice helpers",
         (0, 13, 0),
     ),
+    (r"\bupdate_call_control\b", "bot.update_call_control", (0, 12, 0)),
+    (r"(?s)\bcall_control\(.{0,400}?\boptions\s*=", "call controls that open a choice (options=)", (0, 11, 0)),
     (r"\baudio_queue_ms\b|\bvideo_encoder=", "publish_screen_share audio_queue_ms, video_codec and video_encoder", (0, 9, 7)),
     (r"\bslimbots\.hidden_chars\b|\bis_hidden_char\b|\bhas_hidden_char\b", "slimbots.hidden_chars", (0, 9, 4)),
     (r"\b(?:set|tick|end)_watch_session\b", "AsyncClient watch-session routes", (0, 9, 4)),
@@ -45,6 +55,14 @@ FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
     (r"\.voice\.find_member\b", "bot.voice.find_member", (0, 4, 1)),
     (r"\bensure_columns\b|\bbot\.canvas\(|\bbot\.voice\.join\b", "ensure_columns / bot.canvas / bot.voice.join", (0, 4, 0)),
 )
+
+# A minor in slimbots/CHANGELOG.md with no row above, and why none applies.
+RELEASES_WITHOUT_A_FEATURE: dict[tuple[int, int], str] = {
+    (0, 2): "pre-framework, before any pin this gate reads",
+    (0, 3): "the framework rewrite, which every bot here already runs on",
+    (0, 10): "fixes and a breaking AuthorFilter change, nothing a bot opts into",
+    (0, 14): "an error-reply behaviour change, nothing a bot opts into",
+}
 
 PIN = re.compile(r"^\s*slim-m\s*(?P<op>>=|==|~=|>|<=|<|!=)?\s*(?P<ver>\d[\d.a-z]*)?", re.IGNORECASE)
 

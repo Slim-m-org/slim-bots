@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -155,3 +156,55 @@ def test_the_0_8_features_need_a_0_8_pin(tmp_path, code):
     (problem,) = c.check_bot(make_bot(tmp_path, "b", req="slim-m>=0.7.1\n", code=code))
     assert "needs >=0.8.0" in problem
     assert c.check_bot(make_bot(tmp_path / "ok", "b", req="slim-m>=0.8.0\n", code=code)) == []
+
+
+@pytest.mark.parametrize("needed, code", [
+    ("0.11.0", "@bot.call_control('pick', 'Pick', options=[('a', 'A'), ('b', 'B')])\n"),
+    ("0.11.0", "bot.call_control(\n    'pick',\n    'Pick',\n    options=opts,\n)\n"),
+    ("0.12.0", "await bot.update_call_control('play', icon='pause')\n"),
+    ("0.16.0", "await client.set_watch_session(ch, item_id=i, direct_play=offer)\n"),
+    ("0.16.0", "await client.set_watch_session(\n    ch,\n    item_id=i,\n    direct_play=offer,\n)\n"),
+    ("0.17.0", "data = await bot.client.download(path, max_bytes=5)\n"),
+    ("0.17.0", "except ResponseTooLarge:\n    pass\n"),
+    ("0.18.0", "@bot.command(suggest={'mode': ('a', 'b')})\nasync def f(ctx, mode): ...\n"),
+    ("0.18.0", "@group.command(\n    name='x',\n    suggest={'mode': MODES},\n)\nasync def f(ctx, mode): ...\n"),
+    ("0.18.0", "ids = await canvas.place_many(objects)\n"),
+    ("0.18.0", "except BatchUnavailable:\n    pass\n"),
+    ("0.19.0", "bot = Bot(max_replay_age=None)\n"),
+    ("0.19.0", "if ctx.replayed:\n    return\n"),
+    ("0.19.0", "if bot.is_replay(message):\n    return\n"),
+])
+def test_the_0_11_to_0_19_features_need_their_release(tmp_path, needed, code):
+    below = ".".join(map(str, (c.parse_version(needed)[0], c.parse_version(needed)[1] - 1, 0)))
+    (problem,) = c.check_bot(make_bot(tmp_path, "b", req=f"slim-m>={below}\n", code=code))
+    assert f"needs >={needed}" in problem
+    assert c.check_bot(make_bot(tmp_path / "ok", "b", req=f"slim-m>={needed}\n", code=code)) == []
+
+
+@pytest.mark.parametrize("code", [
+    "downloader.download(url)\n",
+    "await httpx_client.download(url)\n",
+    "suggest = pick_one(words)\n",
+    "name = 'suggest='\n",
+    "self.direct_play = None\n",
+    "replayed = 0\n",
+])
+def test_lookalike_names_do_not_demand_a_newer_pin(tmp_path, code):
+    assert c.check_bot(make_bot(tmp_path, "b", req="slim-m>=0.10.0\n", code=code)) == []
+
+
+def changelog_minors() -> set[tuple[int, int]]:
+    headings = re.findall(r"^## (\d+)\.(\d+)\.\d+", (c.ROOT / "slimbots" / "CHANGELOG.md").read_text(), re.MULTILINE)
+    return {(int(major), int(minor)) for major, minor in headings}
+
+
+def test_every_changelog_minor_has_a_feature_row_or_a_reason_it_has_none():
+    covered = {needed[:2] for _pattern, _label, needed in c.FEATURES}
+    uncovered = changelog_minors() - covered - set(c.RELEASES_WITHOUT_A_FEATURE)
+    assert not uncovered, f"add a FEATURES row (or a reason in RELEASES_WITHOUT_A_FEATURE) for {sorted(uncovered)}"
+
+
+def test_no_exemption_outlives_the_row_that_replaced_it():
+    covered = {needed[:2] for _pattern, _label, needed in c.FEATURES}
+    assert not covered & set(c.RELEASES_WITHOUT_A_FEATURE)
+    assert set(c.RELEASES_WITHOUT_A_FEATURE) <= changelog_minors()

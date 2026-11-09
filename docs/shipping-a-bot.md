@@ -58,6 +58,7 @@ Adversarial pass, told to break it, at least:
 It is a heuristic: a table of feature names to first release in the script, matched against the bot's non-test source with comments and strings stripped.
 It does not see features missing from the table, calls made through an alias, or a pin that is high enough but wrong for other reasons.
 Add a row to the table when the library gains a feature.
+`scripts/tests/test_check_bot_pr.py` fails when a minor in `slimbots/CHANGELOG.md` has neither a row nor a reason in `RELEASES_WITHOUT_A_FEATURE`.
 Passes 1 and 3 to 6 are not machine-checked; the PR template is the only enforcement, and no CI step calls a model or needs an API key.
 
 ## What CI runs on every PR
