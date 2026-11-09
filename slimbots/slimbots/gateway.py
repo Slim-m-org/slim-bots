@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
     from .http import AsyncClient
 
 PROTOCOL = 1
+HELLO_TIMEOUT = 15.0
 
 
 class Gateway:
@@ -21,12 +23,13 @@ class Gateway:
         self.hello: dict[str, Any] = hello or {}
 
     @classmethod
-    async def open(cls, client: AsyncClient, *, protocol: int = PROTOCOL) -> Gateway:
+    async def open(cls, client: AsyncClient, *, protocol: int = PROTOCOL, hello_timeout: float = HELLO_TIMEOUT) -> Gateway:
         ticket = await client.ws_ticket()
         socket = await websockets.connect(client.socket_url(), user_agent_header=client.user_agent)
         try:
-            await socket.send(json.dumps({"type": "hello", "ticket": ticket, "protocol": protocol}))
-            hello = json.loads(await socket.recv())
+            async with asyncio.timeout(hello_timeout):
+                await socket.send(json.dumps({"type": "hello", "ticket": ticket, "protocol": protocol}))
+                hello = json.loads(await socket.recv())
             if hello.get("type") != "hello":
                 raise RuntimeError(f"expected a hello back, got {hello}")
         except BaseException:
