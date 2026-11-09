@@ -1,4 +1,5 @@
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -170,3 +171,145 @@ def test_waiting_for_registration_gives_up_at_its_limit_and_survives_a_failed_po
 
     assert not s.wait_until_registered(failing, 3, sleep=slept.append)
     assert len(slept) == 3
+
+
+def test_a_non_json_registration_probe_is_a_failed_poll_not_a_crash():
+    answers = iter([ValueError("not json"), True])
+
+    def probe():
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    assert s.wait_until_registered(probe, 5, sleep=lambda _d: None)
+
+
+@pytest.mark.parametrize("body, expected", [
+    ({"commands": [{"name": "help"}]}, True),
+    ({"commands": []}, False),
+    ({}, False),
+    ([], False),
+    (None, False),
+    ("<html>", False),
+])
+def test_only_a_commands_object_with_entries_counts_as_registered(body, expected):
+    assert s.has_commands(body) is expected
+
+
+class FakeResponse:
+    def __init__(self, body):
+        self._body = body
+
+    def raise_for_status(self):
+        return self
+
+    def json(self):
+        return self._body
+
+
+class FakeHttp:
+    def __init__(self, *_args, **_kwargs):
+        self.sent = []
+
+    def get(self, path, **_kwargs):
+        if path == "/me":
+            return FakeResponse({"id": "tester"})
+        return FakeResponse([{"id": self.sent[-1], "author_id": "tester"}] if self.sent else [])
+
+    def post(self, _path, json=None, **_kwargs):
+        self.sent.append(json["id"])
+        return FakeResponse({})
+
+
+class FakePrivate:
+    def __init__(self, *_args):
+        self.closed = False
+
+    def replies_to(self, _sent_id):
+        return []
+
+    def close(self):
+        self.closed = True
+
+
+def stubborn_bot_repo(root):
+    bot_dir = root / "bots" / "stubborn"
+    bot_dir.mkdir(parents=True)
+    (bot_dir / "bot.py").write_text("import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)\n")
+    manifest = root / "scripts" / "smoke" / "stubborn.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"ready_seconds": 0.01, "steps": [{"say": "!x", "timeout": 1}]}))
+    return bot_dir, manifest
+
+
+@pytest.fixture
+def smoke_run(tmp_path, monkeypatch):
+    """Wires main() to a fake server and a real SIGTERM-ignoring bot process; returns the processes and fake sockets it started."""
+    bot_dir, manifest = stubborn_bot_repo(tmp_path)
+    started, sockets = [], []
+    real_popen = s.subprocess.Popen
+
+    def recording_popen(*args, **kwargs):
+        started.append(real_popen(*args, **kwargs))
+        return started[-1]
+
+    def recording_private(*args):
+        sockets.append(FakePrivate(*args))
+        return sockets[-1]
+
+    for key, value in GOOD_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("SLIMM_SMOKE_BOT_ID", raising=False)
+    monkeypatch.setattr(s, "bot_paths", lambda *_a, **_k: ("stubborn", bot_dir, manifest))
+    monkeypatch.setattr(s, "TRANSCRIPT_DIR", tmp_path / "transcripts")
+    monkeypatch.setattr(s, "STOP_GRACE", 0.5)
+    monkeypatch.setattr(s.httpx, "Client", FakeHttp)
+    monkeypatch.setattr(s, "PrivateReplies", recording_private)
+    monkeypatch.setattr(s.subprocess, "Popen", recording_popen)
+    yield started, sockets
+    for proc in started:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
+def test_a_bot_that_ignores_sigterm_is_killed_and_the_transcript_still_lands(smoke_run, tmp_path):
+    started, sockets = smoke_run
+    assert s.main(["stubborn"]) == 1
+    (proc,) = started
+    assert proc.poll() == -signal.SIGKILL
+    assert sockets[0].closed
+    (transcript,) = (tmp_path / "transcripts").glob("smoke-stubborn-*.md")
+    assert "FAIL: `!x`" in transcript.read_text()
+
+
+def test_the_transcript_is_written_even_when_stopping_the_bot_fails(smoke_run, tmp_path, monkeypatch):
+    started, sockets = smoke_run
+
+    def hung(_proc, grace=None):
+        raise s.subprocess.TimeoutExpired("bot.py", 0.5)
+
+    monkeypatch.setattr(s, "stop_bot", hung)
+    with pytest.raises(s.subprocess.TimeoutExpired):
+        s.main(["stubborn"])
+    assert sockets[0].closed
+    assert len(list((tmp_path / "transcripts").glob("smoke-stubborn-*.md"))) == 1
+
+
+def test_stop_bot_leaves_a_bot_that_exits_on_sigterm_alone():
+    class Polite:
+        killed = False
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    proc = Polite()
+    s.stop_bot(proc, grace=1)
+    assert not proc.killed
