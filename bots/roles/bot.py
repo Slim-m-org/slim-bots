@@ -211,10 +211,9 @@ async def private(ctx, text):
 
 def parse_create(arg):
     """(pick_one, title, [typed role names]) from `[--one] <title> | <role>, <role>`."""
-    text = arg.strip()
-    pick_one = text.startswith("--one ")
-    if pick_one:
-        text = text[len("--one "):]
+    first, rest = (arg.split(None, 1) + ["", ""])[:2]
+    pick_one = first == "--one"
+    text = rest if pick_one else arg.strip()
     title, _, names = text.partition("|")
     return pick_one, " ".join(title.split()), [n.strip() for n in names.split(",") if n.strip()]
 

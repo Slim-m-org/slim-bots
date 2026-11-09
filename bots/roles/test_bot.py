@@ -340,6 +340,13 @@ def test_pick_one_swaps_the_other_menu_role():
     assert "removed `member`" in client.ephemerals[-1]["content"]
 
 
+def test_pick_one_reads_the_flag_across_any_whitespace():
+    assert roles.parse_create("--one\nPick one | member, helper") == (True, "Pick one", ["member", "helper"])
+    assert roles.parse_create("--one\tPick | member") == (True, "Pick", ["member"])
+    assert roles.parse_create("--oneliner | member") == (False, "--oneliner", ["member"])
+    assert roles.parse_create("Pick your roles | member") == (False, "Pick your roles", ["member"])
+
+
 def test_a_menu_without_pick_one_keeps_the_other_role():
     client = setup_menu()
     menu_id = make_menu(client)
