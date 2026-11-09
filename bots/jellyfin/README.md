@@ -178,6 +178,12 @@ or more to start a transcode and a picture paced from launch raced
 through that second and stayed ahead of the sound. The audio queue is
 kept at 100 ms and cleared on every restart, so a seek or a pause does
 not leave old sound playing over the new picture.
+After that the picture follows the sound (`pump_sync.MediaClock`).
+A frame goes out once the sound has played up to it, so a stall, an underrun or a pause holds the picture instead of leaving it ahead of sound that fell behind.
+A frame the sound has already passed is sent at once, never skipped, so a decoder that cannot keep up shows slow video rather than a frozen one.
+The picture runs on the wall clock while the sound has not started, after it ends, and for good once a frame has waited half a second for sound that did not move, since sound that only comes once the picture moves would freeze both.
+That last case is a title whose audio trails its video by most of a second in the transcode, and it plays as it did before the picture followed the sound.
+The position shown on the panel and reported to Jellyfin is the picture's.
 
 Those raw frames are then re-encoded a second time by LiveKit's own
 WebRTC publish, which used to get no explicit bitrate/framerate ceiling

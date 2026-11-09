@@ -13,7 +13,8 @@ import playback_progress
 import quality
 import session_registry
 import stream_session
-from slimbots.testing import FakeVoiceSession, run_module_tests
+from pump_rig import PacedVoiceSession
+from slimbots.testing import run_module_tests
 from test_bot import jellyfin, movie_for_watch, setup_with_voice, asynced
 
 WIDTH = HEIGHT = 16
@@ -38,19 +39,6 @@ esac
 """
 
 
-class FakeRtc:
-    class VideoBufferType:
-        I420 = 1
-
-    class VideoFrame:
-        def __init__(self, *args):
-            self.args = args
-
-    class AudioFrame:
-        def __init__(self, *args):
-            self.args = args
-
-
 class Rig:
     """A real WatchSession whose ffmpeg is a shell stand-in in `mode`; `reports` collects what Jellyfin would be told."""
 
@@ -68,8 +56,7 @@ class Rig:
         playback_progress.report_position = asynced(lambda item_id, seconds, *, finished=False, user_id=None: self.reports.append((round(seconds, 1), finished)))
         playback_progress.resolve_user_id = asynced(lambda: "u1")
         jellyfin_core.next_episode = asynced(lambda *a, **k: None)
-        self.voice = FakeVoiceSession("c1")
-        self.voice.rtc = FakeRtc
+        self.voice = PacedVoiceSession("c1")
         self.session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(runtime_seconds=runtime_seconds), "u1", self.voice)
         self.session.quality = quality.Quality("tiny", WIDTH, HEIGHT, 100_000)
         session_registry.add(self.session)
