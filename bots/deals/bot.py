@@ -18,6 +18,7 @@ from slimbots.http import is_forbidden, is_token_revoked
 POST_NAMESPACE = uuid.UUID("5d0c8f1e-3a47-4b62-9e15-c7a2f4d6b983")
 MAX_POSTS_PER_RUN = 10
 MAX_WATCHES_PER_USER = 20
+RETRY_SECONDS = 600
 
 bot = Bot(prefix="!", default_data_path="deals.db", store_migrate=db.init_db)
 
@@ -80,6 +81,12 @@ async def configured_channel():
     return await bot.store.run(db.get_config, "channel_id")
 
 
+async def stamp(key, interval, fetched):
+    """Records a run; one whose fetch failed comes due again after RETRY_SECONDS instead of the whole interval."""
+    now = int(time.time())
+    await bot.store.run(db.set_config, key, now if fetched else now - max(interval - RETRY_SECONDS, 0))
+
+
 async def check_freebies():
     """Posts each unseen live offer once; a refused post stays unseen and retries next run. Returns (posted, error)."""
     channel_id = await configured_channel()
@@ -94,7 +101,7 @@ async def check_freebies():
         if await post(channel_id, offer.url, message_id=message_id, embed=offer_embed(offer), fallback=offer_fallback(offer)):
             await bot.store.run(db.mark_seen, offer.store, offer.offer_id, offer.title)
             posted += 1
-    await bot.store.run(db.set_config, "last_freebies_at", int(time.time()))
+    await stamp("last_freebies_at", FREEBIES_INTERVAL, not error)
     return posted, error
 
 
@@ -159,7 +166,7 @@ async def check_watches():
                 await asyncio.sleep(STEAM_DELAY)
             quotes[watch["app_id"]] = await asyncio.to_thread(prices.fetch_quote, transport, watch["app_id"], STEAM_CC)
         await apply_quote(channel_id, watch, quotes[watch["app_id"]])
-    await bot.store.run(db.set_config, "last_watches_at", int(time.time()))
+    await stamp("last_watches_at", WATCH_INTERVAL, any(quote.status != "error" for quote in quotes.values()))
     return len(watches)
 
 

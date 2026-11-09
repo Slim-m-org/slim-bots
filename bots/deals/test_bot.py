@@ -204,6 +204,48 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
     assert "slow down" in rig.client.ephemerals[-1]["content"]
 
 
+def due_after(seconds, key, interval):
+    real = deals.time.time
+    deals.time.time = lambda: real() + seconds
+    try:
+        return asyncio.run(deals.due(key, interval))
+    finally:
+        deals.time.time = real
+
+
+def test_a_failed_freebies_fetch_is_retried_in_minutes_not_hours():
+    rig = Rig()
+    rig.setup()
+    rig.web[STEAM] = (500, b"")
+    assert rig.freebies() == (0, "http 500")
+    key, interval = "last_freebies_at", deals.FREEBIES_INTERVAL
+    assert not due_after(deals.RETRY_SECONDS - 60, key, interval)
+    assert due_after(deals.RETRY_SECONDS + 60, key, interval)
+
+
+def test_a_good_freebies_fetch_waits_the_whole_interval():
+    rig = Rig()
+    rig.setup()
+    assert rig.freebies()[1] == ""
+    assert not due_after(deals.RETRY_SECONDS + 60, "last_freebies_at", deals.FREEBIES_INTERVAL)
+    assert due_after(deals.FREEBIES_INTERVAL + 60, "last_freebies_at", deals.FREEBIES_INTERVAL)
+
+
+def test_a_watch_check_where_every_quote_failed_is_retried_in_minutes():
+    rig = Rig()
+    rig.setup()
+    rig.price(620, cents=999)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
+    rig.web["appids=620&"] = (503, b"")
+    assert rig.watches() == 1
+    key, interval = "last_watches_at", deals.WATCH_INTERVAL
+    assert not due_after(deals.RETRY_SECONDS - 60, key, interval)
+    assert due_after(deals.RETRY_SECONDS + 60, key, interval)
+    rig.price(620, cents=999)
+    rig.watches()
+    assert not due_after(deals.RETRY_SECONDS + 60, key, interval), "one good quote is a finished check"
+
+
 def test_deals_now_says_when_a_post_is_refused():
     rig = Rig()
     rig.setup()
