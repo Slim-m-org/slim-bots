@@ -27,8 +27,10 @@ python3 bot.py
 
 A rule runs once, when a new warn brings the member's active count to exactly its number.
 A timeout needs Kick Members for the bot and a removal needs Ban Members; without it the reply says which one is missing.
+A warn that would run a rule is refused, and not recorded, unless the moderator could do the same to that member themselves: a removal needs Ban Members from them too, and the member's permissions must be fewer than theirs, as for a timeout or removal in the app.
+When the bot cannot read roles, it reads the member's permissions from the server instead, and refuses a rule on a member who is timed out because that read would understate their rank.
 There can be 10 rules, and a duration is `30m`, `2h` or `1d` (the server caps a timeout at 28 days).
-A reason is cut at 300 characters, and an at-sign in it is defused so it cannot ping anyone.
+A reason is cut at 300 characters, and an at-sign in it is escaped so it cannot ping anyone.
 
 ## Settings
 
