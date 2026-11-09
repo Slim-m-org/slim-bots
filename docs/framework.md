@@ -193,6 +193,9 @@ Unscoped bots, decided per bot: `deals`, `feeds`, `game-status`, `tickets` and `
 `automod` acts in `on_raw_message`, which a replay never reaches, so it neither re-moderates nor double-acts; spam posted while it was down is not swept.
 `greeter` acts on `on_member_join`, a live frame, so nothing is re-greeted.
 `cursor_path=` on `Bot()` still exists to point the cursor at a file *other* than `data_path`, for the rare bot that wants them separate.
+A live message's seq is noted in memory and written about a tenth of a second later with its neighbours in one transaction, so a burst of messages costs one commit and the frame loop never waits on sqlite.
+The cursor connection waits one second for a lock another connection to the same file holds; a write that still fails is logged and retried, and what is noted is also written before a replay reads it and when the bot stops.
+A hard crash can therefore lose the last tenth of a second of seqs, and a command in that window is replayed on the next start if it is within `max_replay_age`.
 
 `on_raw_message(message)` still fires for every in-scope message, command or not - for a bot that wants its own hook into every message, not for cursor-keeping any more.
 `on_frame(frame)` fires for every frame of any type, recognised or not, before any other dispatch - a liveness signal (a modlog-style bot marking itself "still connected") is the reason this exists; most bots have no reason to listen for it.

@@ -49,6 +49,12 @@ DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
 
+# Seconds a noted message seq waits to be written with its neighbours, and before a failed write is tried again.
+CURSOR_FLUSH_SECONDS = 0.1
+CURSOR_RETRY_SECONDS = 1.0
+# Seconds the cursor connection waits on a lock another connection to the same file holds.
+CURSOR_BUSY_SECONDS = 1.0
+
 log = logging.getLogger(__name__)
 UNEXPECTED_ERROR_REPLY = "something went wrong running that command; try again in a moment."
 
@@ -153,6 +159,8 @@ class Bot:
         self.authors: AuthorFilter | None = None
         self.me_id: str | None = None
         self._cursor_conn: sqlite3.Connection | None = None
+        self._pending_seqs = cursor.Pending()
+        self._cursor_flush: asyncio.TimerHandle | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._periodic: dict[str, Periodic] = {}
         self._periodic_started: set[str] = set()
@@ -699,7 +707,34 @@ class Bot:
 
     def _note_seq(self, channel_id: str | None, seq: int | None) -> None:
         if self._cursor_conn is not None and seq is not None and channel_id is not None:
-            cursor.set(self._cursor_conn, channel_id, seq)
+            self._pending_seqs.note(channel_id, seq)
+            self._schedule_cursor_flush(CURSOR_FLUSH_SECONDS)
+
+    def _schedule_cursor_flush(self, delay: float) -> None:
+        if self._cursor_flush is None:
+            self._cursor_flush = asyncio.get_running_loop().call_later(delay, self._flush_cursor)
+
+    def _close_cursor(self) -> None:
+        """Saves what is still noted and closes the connection; a save that fails here is dropped, not retried."""
+        self._flush_cursor()
+        if self._cursor_flush is not None:
+            self._cursor_flush.cancel()
+            self._cursor_flush = None
+        if self._cursor_conn is not None:
+            self._cursor_conn.close()
+
+    def _flush_cursor(self) -> None:
+        """Writes the noted seqs now; a locked database is logged and retried later, never raised into a frame handler."""
+        if self._cursor_flush is not None:
+            self._cursor_flush.cancel()
+            self._cursor_flush = None
+        if self._cursor_conn is None:
+            return
+        try:
+            self._pending_seqs.flush(self._cursor_conn)
+        except sqlite3.Error as err:
+            log.warning("could not save the message cursor (%s); trying again in %ss", err, CURSOR_RETRY_SECONDS)
+            self._schedule_cursor_flush(CURSOR_RETRY_SECONDS)
 
     def _catch_up_channels(self) -> list[str]:
         """The configured channels, or every visible channel for a bot that was not scoped."""
@@ -710,6 +745,7 @@ class Bot:
     async def _catch_up(self) -> None:
         """Replays the `/sync` backlog through `process_message`, page by page, persisting the cursor as it goes."""
         assert self.client is not None, "_catch_up needs start() to have run"
+        self._flush_cursor()
         pending = self._catch_up_channels()
         if not pending or self._cursor_conn is None:
             return
@@ -873,7 +909,7 @@ class Bot:
 
     def _open_cursor(self):
         path = self.cursor_path or self.data_path or os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB
-        self._cursor_conn = sqlite3.connect(path, isolation_level=None)
+        self._cursor_conn = sqlite3.connect(path, isolation_level=None, timeout=CURSOR_BUSY_SECONDS)
         cursor.init_table(self._cursor_conn)
 
     async def start(self, *, url=None, token=None):
@@ -894,8 +930,7 @@ class Bot:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
             await self.voice.leave_all()
             await self.client.aclose()
-            if self._cursor_conn is not None:
-                self._cursor_conn.close()
+            self._close_cursor()
             if self.store is not None:
                 await self.store.close()
 
