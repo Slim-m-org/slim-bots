@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
+import subprocess
 from collections import deque
 
 from slimbots import media, style
@@ -27,9 +29,22 @@ def ffmpeg_binary():
     return media.ffmpeg_binary(PlayerError)
 
 
+@functools.cache
+def ffmpeg_limits_redirects():
+    """Whether this ffmpeg has the http `max_redirects` option; older builds lack it and refuse to start when given it."""
+    try:
+        listing = subprocess.run([ffmpeg_binary(), "-hide_banner", "-h", "protocol=http"], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError, PlayerError):
+        return False
+    return "max_redirects" in listing.stdout
+
+
 def build_ffmpeg_args(track):
-    """Decodes to raw s16le on stdout; the protocol whitelist keeps a URL from reaching `file:` or a socket."""
+    """Decodes to raw s16le on stdout; the protocol whitelist keeps a URL from reaching `file:` or a socket.
+    A direct URL was already followed to where it answers, so a redirect from it is refused where this ffmpeg can."""
     args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "http,https,tcp,tls,crypto"]
+    if track.is_direct and ffmpeg_limits_redirects():
+        args += ["-max_redirects", "0"]
     args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
     if track.headers:
         args += ["-headers", track.headers]

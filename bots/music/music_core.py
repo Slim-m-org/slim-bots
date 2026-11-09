@@ -6,17 +6,26 @@ from dataclasses import dataclass
 
 from slimbots import jellyfin as jellyfin_api
 from slimbots.jellyfin import JellyfinAuthError  # noqa: F401 - re-exported for the cog
-from slimbots.urlpolicy import PRIVATE, destination_problem, host_of
+from slimbots.urlpolicy import PRIVATE, host_of
+from slimbots.web import JsonService, ServiceBlocked, ServiceError
 
 MAX_QUERY_LENGTH = 200
 MAX_QUEUE_LENGTH = 50
 MAX_SEARCH_RESULTS = 5
 USER_AGENT = "slimm-bot-music/1.0"
 AUDIO_FIELDS = "Album,AlbumArtist,Artists,RunTimeTicks"
+STREAM_PEEK_BYTES = 512
+STREAM_TIMEOUT_SECONDS = 10
+STREAM_DEADLINE_SECONDS = 15
+PLAYLIST_TYPES = ("mpegurl", "scpls", "pls+xml", "dash+xml", "x-mpd")
+PLAYLIST_SUFFIXES = (".m3u8", ".m3u", ".pls", ".mpd")
+PLAYLIST_HEADS = (b"#extm3u", b"[playlist]", b"<?xml", b"<mpd")
 
 # Populated once by configure(); empty JELLYFIN_URL means direct URLs only.
 JELLYFIN_URL = ""
 JELLYFIN_API_KEY = ""
+# A test points this at an httpx transport instead of the network.
+TRANSPORT = None
 
 
 @dataclass
@@ -25,6 +34,11 @@ class Track:
     url: str
     duration_seconds: float = 0.0
     headers: str | None = None
+
+    @property
+    def is_direct(self):
+        """A member-supplied stream URL, as opposed to a Jellyfin track that carries the key."""
+        return self.headers is None
 
 
 def configure(bot):
@@ -76,16 +90,39 @@ def is_stream_url(text):
     return parts.scheme in ("http", "https") and bool(parts.hostname) and " " not in text
 
 
-async def check_stream_url(url):
-    """Refuses a URL whose host resolves to a private address, so `~play` cannot probe the bot host's LAN.
-    The configured Jellyfin host is exempt; a resolver that changes its answer between this check and ffmpeg's fetch is not caught."""
+class StreamRefused(Exception):
+    """A direct stream URL that cannot be played; `str(self)` is the sentence to reply with."""
+
+
+def _is_playlist(answer):
+    kind = answer.headers.get("content-type", "").lower()
+    path = urllib.parse.urlsplit(answer.url).path.lower()
+    head = answer.body.lstrip(b"\xef\xbb\xbf \r\n\t").lower()
+    return any(t in kind for t in PLAYLIST_TYPES) or path.endswith(PLAYLIST_SUFFIXES) or head.startswith(PLAYLIST_HEADS)
+
+
+async def open_stream(url):
+    """The track for a direct stream URL after following and vetting every redirect, so ffmpeg is handed the address that answered.
+    A private or unresolvable host, a playlist or a stream that does not answer raises `StreamRefused`; the configured Jellyfin host is exempt."""
     allowed = [host_of(JELLYFIN_URL)] if JELLYFIN_URL else []
-    problem = await destination_problem(url, allow_hosts=allowed)
-    if problem is None:
-        return None
-    if problem == PRIVATE:
-        return "that address is on a private network - only public stream URLs are allowed."
-    return "could not resolve that host."
+    service = JsonService(
+        "stream", user_agent=USER_AGENT, timeout=STREAM_TIMEOUT_SECONDS, total_timeout=STREAM_DEADLINE_SECONDS,
+        public_only=True, allow_hosts=allowed, cross_origin_redirects=True, transport=TRANSPORT,
+    )
+    try:
+        answer = await service.peek(url, size=STREAM_PEEK_BYTES)
+    except ServiceBlocked as err:
+        reason = "that address is on a private network - only public stream URLs are allowed."
+        raise StreamRefused(reason if err.reason == PRIVATE else "could not resolve that host.") from None
+    except ServiceError:
+        raise StreamRefused("could not open that stream.") from None
+    if not 200 <= answer.status < 300:
+        raise StreamRefused(f"that stream answered HTTP {answer.status}.")
+    if _is_playlist(answer):
+        raise StreamRefused("that url is a playlist - give me the direct stream url inside it.")
+    track = track_from_url(url)
+    track.url = answer.url
+    return track
 
 
 def track_from_url(url):

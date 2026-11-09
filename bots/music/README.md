@@ -46,7 +46,10 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
 - **Direct URLs to private addresses are refused.**
   ffmpeg fetches on the bot host, so `~play http://192.168.x.x/...` would otherwise let a chat member probe the host's network.
   The configured Jellyfin host is exempt.
-  The check resolves the name once before ffmpeg fetches it, so a resolver that lies on the second lookup, or a redirect from a public host to a private one, is not caught.
+  Before ffmpeg sees a URL the bot opens it itself, follows every redirect and checks each hop against the same rule, connecting to the address it checked.
+  ffmpeg is then given the address that answered, and a playlist or manifest (`.m3u8`, `.pls`, `.mpd`) is refused because its entries would be fetched without that check.
+  An ffmpeg that lists the http `max_redirects` option is also told not to follow a redirect from that address; one that does not cannot be, so a server that answers ffmpeg differently from the bot's own request is not caught there.
+  A server that answers in the old `ICY 200 OK` form instead of HTTP is refused too, since the bot cannot check what it cannot parse.
   ffmpeg is also limited to `http`, `https`, `tcp`, `tls` and `crypto`, so a URL cannot reach `file:` or a raw socket.
 - **The Jellyfin key only goes to Jellyfin.**
   It is sent as an `Authorization` header on Jellyfin tracks and never on a direct URL.

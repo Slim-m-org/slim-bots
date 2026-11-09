@@ -24,11 +24,11 @@ def _forget(session):
 async def _resolve_track(ctx, query):
     """The track to play, or None after replying why not."""
     if music_core.is_stream_url(query):
-        problem = await music_core.check_stream_url(query.strip())
-        if problem:
-            await ctx.reply(problem)
+        try:
+            return await music_core.open_stream(query.strip())
+        except music_core.StreamRefused as err:
+            await ctx.reply(str(err))
             return None
-        return music_core.track_from_url(query.strip())
     if not music_core.jellyfin_enabled():
         await ctx.reply("no music library is configured here - give me a direct `http(s)` stream url.")
         return None

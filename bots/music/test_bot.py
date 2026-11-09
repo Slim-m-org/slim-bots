@@ -3,9 +3,11 @@
 
 import asyncio
 import shutil
+import subprocess
 import sys
 
 import bot as music
+import httpx
 import music_cog
 import music_core
 import player
@@ -86,6 +88,24 @@ class MusicVoice(FakeVoice):
         return session
 
 
+def stream_answer(request):
+    """The public stream every test url reaches: audio, with `/moved` redirecting and the other paths named for what they serve."""
+    path = request.url.path
+    if path == "/moved":
+        return httpx.Response(302, headers={"location": "https://93.184.216.35/final.mp3"})
+    if path == "/to-the-lan":
+        return httpx.Response(302, headers={"location": "http://10.0.0.5:8123/reboot"})
+    if path == "/gone":
+        return httpx.Response(404)
+    if path == "/refused":
+        raise httpx.ConnectError("refused")
+    if path == "/list.m3u8" or path == "/typed":
+        return httpx.Response(200, headers={"content-type": "application/vnd.apple.mpegurl"}, content=b"#EXTM3U\n")
+    if path == "/sniffed":
+        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=b"\n#EXTM3U\nhttp://10.0.0.5/seg.ts\n")
+    return httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=b"ID3" + b"\x00" * 600)
+
+
 def scripted_ffmpeg(track):
     """A stand-in decoder: `long` in the url never ends on its own, anything else emits 3 chunks and stops."""
     if "long" in track.url:
@@ -115,6 +135,7 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     music_core.JELLYFIN_URL = "https://jf.example" if jellyfin else ""
     music_core.JELLYFIN_API_KEY = "key" if jellyfin else ""
     player.build_ffmpeg_args = scripted_ffmpeg
+    music_core.TRANSPORT = httpx.MockTransport(stream_answer)
     return client
 
 
@@ -155,22 +176,60 @@ def test_stream_url_detection_and_naming():
     assert music_core.track_from_url("https://radio.example/").title == "radio.example"
 
 
-def check(url):
-    return asyncio.run(music_core.check_stream_url(url))
+def open_stream(url):
+    return asyncio.run(music_core.open_stream(url))
+
+
+def refusal(url):
+    try:
+        open_stream(url)
+    except music_core.StreamRefused as err:
+        return str(err)
+    raise AssertionError(f"{url} was not refused")
 
 
 def test_private_addresses_are_refused_but_the_jellyfin_host_is_not():
     setup(jellyfin=True)
-    assert "private" in check("http://127.0.0.1/x.mp3")
-    assert "private" in check("http://10.0.0.5:8096/x.mp3")
-    assert "private" in check("http://169.254.169.254/latest")
-    assert check(PUBLIC_URL) is None
+    assert "private" in refusal("http://127.0.0.1/x.mp3")
+    assert "private" in refusal("http://10.0.0.5:8096/x.mp3")
+    assert "private" in refusal("http://169.254.169.254/latest")
+    assert open_stream(PUBLIC_URL).url == PUBLIC_URL
     original = music_core.JELLYFIN_URL
     music_core.JELLYFIN_URL = "http://10.0.0.5:8096"
     try:
-        assert check("http://10.0.0.5:8096/Audio/1/stream") is None
+        assert open_stream("http://10.0.0.5:8096/Audio/1/stream").url == "http://10.0.0.5:8096/Audio/1/stream"
     finally:
         music_core.JELLYFIN_URL = original
+
+
+def test_a_redirect_into_the_lan_is_refused_before_ffmpeg_is_handed_the_url():
+    setup()
+    assert "private" in refusal("https://93.184.216.34/to-the-lan")
+
+
+def test_a_redirect_is_followed_here_and_ffmpeg_gets_the_address_that_answered():
+    setup()
+    track = open_stream("https://93.184.216.34/moved")
+    assert track.url == "https://93.184.216.35/final.mp3" and track.title == "moved" and track.is_direct
+
+
+def test_playlists_and_manifests_are_refused_however_they_announce_themselves():
+    setup()
+    for path in ("list.m3u8", "typed", "sniffed"):
+        assert "playlist" in refusal(f"https://93.184.216.34/{path}")
+
+
+def test_a_stream_that_does_not_answer_is_refused_with_a_reason():
+    setup()
+    assert refusal("https://93.184.216.34/gone") == "that stream answered HTTP 404."
+    assert refusal("https://93.184.216.34/refused") == "could not open that stream."
+
+
+def test_play_replies_with_the_refusal_and_never_joins_the_call():
+    client = setup()
+    scenario(client, "~play https://93.184.216.34/to-the-lan")
+    assert "private network" in replies(client)[-1]
+    assert not music.bot.voice.sessions
 
 
 def test_jellyfin_track_carries_the_auth_header_and_a_direct_url_does_not():
@@ -188,6 +247,35 @@ def test_ffmpeg_args_whitelist_protocols_and_scope_the_header_to_jellyfin():
     assert args[args.index("-protocol_whitelist") + 1] == "http,https,tcp,tls,crypto"
     assert "-headers" in args and args[-1] == "pipe:1"
     assert "-headers" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
+
+
+def test_a_direct_url_may_not_redirect_again_where_ffmpeg_can_refuse_it():
+    shutil.which = lambda name: "/usr/bin/ffmpeg"
+    original = player.ffmpeg_limits_redirects
+    try:
+        player.ffmpeg_limits_redirects = lambda: True
+        direct = REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
+        assert direct[direct.index("-max_redirects") + 1] == "0" and direct.index("-max_redirects") < direct.index("-i")
+        assert "-max_redirects" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL, headers="Authorization: x\r\n"))
+        player.ffmpeg_limits_redirects = lambda: False
+        assert "-max_redirects" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
+    finally:
+        player.ffmpeg_limits_redirects = original
+
+
+def test_the_redirect_limit_is_used_only_when_this_ffmpeg_lists_it():
+    original = subprocess.run
+    try:
+        for listing, expected in (("  -max_redirects <int> Maximum number of redirects", True), ("  -reconnect <boolean>", False)):
+            player.ffmpeg_limits_redirects.cache_clear()
+            subprocess.run = lambda *args, _listing=listing, **kwargs: subprocess.CompletedProcess(args, 0, _listing, "")
+            assert player.ffmpeg_limits_redirects() is expected
+        player.ffmpeg_limits_redirects.cache_clear()
+        subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("ffmpeg"))
+        assert player.ffmpeg_limits_redirects() is False
+    finally:
+        subprocess.run = original
+        player.ffmpeg_limits_redirects.cache_clear()
 
 
 def test_play_requires_the_invoker_to_be_in_a_call():
