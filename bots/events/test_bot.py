@@ -127,6 +127,14 @@ def test_list_and_cancel_with_the_right_permission():
     assert "over" in client.ephemerals[-1]["content"]
 
 
+def test_list_and_cancel_read_the_word_across_any_whitespace():
+    client = setup()
+    plan(client)
+    say("!event list", user=BOB)
+    say("!event cancel\n1", user=BOB, permissions=Permissions.MANAGE_MESSAGES)
+    assert "cancelled #1" in client.ephemerals[-1]["content"]
+
+
 def test_the_open_event_cap_holds():
     client = setup()
     for _ in range(events.MAX_OPEN_EVENTS):

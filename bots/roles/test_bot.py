@@ -126,6 +126,13 @@ def test_role_remove_revokes():
     assert "removed `member`" in client.sent[-1]["content"]
 
 
+def test_role_remove_reads_the_name_after_any_whitespace():
+    client = setup()
+    client.respond("DELETE", "/members/u1/roles/r-member", None)
+    process(client, message("u1", "!role remove\nmember"))
+    assert "removed `member`" in client.sent[-1]["content"]
+
+
 def test_role_mine_lists_held_roles():
     client = setup()
     roles.bot.space.members["u1"].role_ids = ["r-member"]
@@ -399,6 +406,15 @@ def test_adding_and_removing_a_role_edits_the_buttons_in_place():
     assert "at least one role" in client.ephemerals[-1]["content"]
     process(client, message("u1", f"!rolemenu add {menu_id} admin", "m5"))
     assert "not on the self-assignable list" in client.ephemerals[-1]["content"]
+
+
+def test_menu_subcommands_split_on_any_whitespace():
+    client = setup_menu()
+    menu_id = make_menu(client, "Pick | member")
+    process(client, message("u1", f"!rolemenu add\n{menu_id}\nhelper", "m2"))
+    assert [b["custom_id"] for r in client.component_edits[-1]["components"] for b in r["buttons"]] == ["rolemenu:r-member", "rolemenu:r-helper"]
+    process(client, message("u1", f"!rolemenu remove  {menu_id}\nmember", "m3"))
+    assert [b["custom_id"] for r in client.component_edits[-1]["components"] for b in r["buttons"]] == ["rolemenu:r-helper"]
 
 
 def test_deleting_a_menu_removes_the_message_and_stops_presses():

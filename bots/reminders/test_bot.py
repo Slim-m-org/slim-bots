@@ -72,6 +72,16 @@ def test_remind_every_weekday_recurs():
     assert "every monday at 09:00" in client.ephemerals[-1]["content"]
 
 
+def test_remind_every_reads_the_clock_across_a_newline_or_a_double_space():
+    client = setup()
+    process(client, message("!remind every monday at  09:30\nstand-up\n\nbring notes"))
+    assert "every monday at 09:30" in client.ephemerals[-1]["content"]
+    process(client, message("!remind every friday at\n17:00 water the plants", "m2"))
+    assert "every friday at 17:00" in client.ephemerals[-1]["content"]
+    texts = sorted(row[2] for row in reminders.pending_for_user(reminders.bot.store.connection, "c1", "u1"))
+    assert texts == ["stand-up\n\nbring notes", "water the plants"]
+
+
 def test_remind_every_weekday_defaults_to_the_default_hour():
     client = setup()
     process(client, message("!remind every monday standup"))

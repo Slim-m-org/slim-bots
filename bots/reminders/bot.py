@@ -286,9 +286,8 @@ async def remind_every(ctx, spec: str, rest: str):
             return
 
     hour, minute, text = DEFAULT_RECUR_HOUR, 0, rest
-    first, _, remainder = rest.partition(" ")
+    first, clock_token, remaining_text = (rest.split(None, 2) + ["", "", ""])[:3]
     if first.lower() == "at":
-        clock_token, _, remaining_text = remainder.partition(" ")
         clock = TimeOfDay.parse(clock_token)
         if clock is None:
             await ctx.reply_ephemeral(f"not a time I understand: `{clock_token}`", public_fallback=True)

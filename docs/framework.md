@@ -48,6 +48,7 @@ Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
 - `int` / `float` - parsed from one whitespace-separated token, or a clear `BadArgument` reply, never a traceback.
 - `str` - one token, unless it is the *last* parameter, in which case it consumes the rest of the message exactly as typed, line breaks and spacing kept (`!say hello there` -> `text="hello there"`). Any whitespace, a line break included, may follow the command name.
+  Because the rest is verbatim, a handler that splits it itself splits on any whitespace (`rest.split(None, 1)`), never on one space: `!remind every monday at  09:00` and `at\n09:00` are both valid.
 - `Member` - resolved from `@username` or a bare username/id against `bot.space`, or a `BadArgument` naming the token that did not resolve.
 - `Duration` - `10m`, `2h30m`, `1d` parsed to an int count of seconds (`slimbots/converters.py`); replaces a bot's own duration regex.
 - `TimeOfDay` - `HH:MM` parsed to a `.hour`/`.minute` pair, range-checked; replaces a bot's own clock regex.

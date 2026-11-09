@@ -103,7 +103,7 @@ async def _approver_and_target(ctx, rest):
     if refusal:
         await _tell(ctx, refusal, "only approvers can do that.")
         return None
-    token, _, remainder = (rest or "").strip().partition(" ")
+    token, remainder = ((rest or "").split(None, 1) + ["", ""])[:2]
     member = await ctx.bot.space.get_member(token.lstrip("@")) if token else None
     if member is None:
         await ctx.reply(f"name a member first, for example `{ctx.bot.prefix}request link @member <seerr username>`.")
