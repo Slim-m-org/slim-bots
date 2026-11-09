@@ -9,14 +9,18 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
+from websockets.exceptions import WebSocketException
+
 from .http import ApiError, is_token_revoked
 
 log = logging.getLogger(__name__)
 
+OUTSIDE_FAILURES = (ApiError, OSError, WebSocketException)
+
 
 def log_failure(logger: logging.Logger, err: BaseException, message: str, *args: Any) -> None:
-    """Logs `message` with `err`'s traceback; an `ApiError` or `OSError` is an outside failure and gets one line."""
-    if isinstance(err, (ApiError, OSError)):
+    """Logs `message` with `err`'s traceback; an API, network or websocket failure is outside the bot and gets one line."""
+    if isinstance(err, OUTSIDE_FAILURES):
         logger.warning(message + ": %s: %s", *args, type(err).__name__, err)
     else:
         logger.error(message, *args, exc_info=err)

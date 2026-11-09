@@ -4,6 +4,9 @@ import asyncio
 import logging
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.http11 import Response
 
 from slimbots import ApiError
 from slimbots.bot import Bot
@@ -84,3 +87,30 @@ async def test_a_connect_bug_is_logged_with_its_traceback_on_every_retry(monkeyp
     bug, outage = [r for r in caplog.records if "connection failed" in r.getMessage()]
     assert bug.levelno == logging.ERROR and isinstance(bug.exc_info[1], KeyError)
     assert outage.levelno == logging.WARNING and outage.exc_info is None
+
+
+@pytest.mark.parametrize("drop", [
+    ConnectionClosedError(None, None),
+    InvalidStatus(Response(502, "Bad Gateway", Headers(), b"")),
+    asyncio.TimeoutError(),
+], ids=["closed-without-a-close-frame", "proxy-502-on-upgrade", "timeout"])
+async def test_a_dropped_socket_is_one_warning_line_not_a_bug(monkeypatch, caplog, drop):
+    bot = Bot()
+    attempts = []
+
+    async def connect_once(reset_delay):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise drop
+        raise asyncio.CancelledError
+
+    async def no_wait(seconds):
+        return None
+
+    monkeypatch.setattr(bot, "_connect_once", connect_once)
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
+    with pytest.raises(asyncio.CancelledError):
+        await bot._run_forever()
+    (outage,) = [r for r in caplog.records if "connection failed" in r.getMessage()]
+    assert outage.levelno == logging.WARNING and outage.exc_info is None
+    assert type(drop).__name__ in outage.getMessage()
