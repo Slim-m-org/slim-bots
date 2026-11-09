@@ -37,7 +37,7 @@ jobs:
       # The parity test reads this file; unset, it fails under CI instead of skipping, so a new server bit cannot pass unseen.
       - name: Fetch slim-m's permission bits for the parity test
         run: |
-          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 --retry-all-errors \
             --output "$RUNNER_TEMP/permissions.rs" \
             https://raw.githubusercontent.com/Slim-m-org/slim-m/main/crates/slimm-server/src/permissions.rs
           echo "SLIMM_PERMISSIONS_RS=$RUNNER_TEMP/permissions.rs" >> "$GITHUB_ENV"

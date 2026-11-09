@@ -191,9 +191,10 @@ async def test_leave_all_gives_up_on_a_session_that_will_not_leave(
         await asyncio.sleep(30)
 
     room.disconnect = hang  # type: ignore[method-assign]
+    monkeypatch.setattr(voice_module, "LEAVE_ALL_TIMEOUT_SECONDS", 0.01)
     await bot.voice.join("c1")
     with caplog.at_level("WARNING", logger="slimbots.voice"):
-        await asyncio.wait_for(bot.voice.leave_all(timeout=0.01), timeout=2)
+        await asyncio.wait_for(bot.voice.leave_all(), timeout=2)
     assert "gave up leaving 1 voice session" in caplog.text
 
 

@@ -20,14 +20,16 @@ async def feed(url, stdin):
     headers = {"Authorization": jellyfin_core.jellyfin_auth_header(), "User-Agent": jellyfin_core.USER_AGENT, "Accept-Encoding": "identity"}
     timeout = httpx.Timeout(READ_SECONDS, connect=CONNECT_SECONDS)
     try:
-        async with httpx.AsyncClient(transport=jellyfin_core.TRANSPORT, timeout=timeout, follow_redirects=False) as client:
-            async with client.stream("GET", url, headers=headers) as response:
-                if response.status_code != 200:
-                    print(f"jellyfin answered the transcode request with {response.status_code}", file=sys.stderr)
-                    return
-                async for chunk in response.aiter_raw():
-                    stdin.write(chunk)
-                    await stdin.drain()
+        async with (
+            httpx.AsyncClient(transport=jellyfin_core.TRANSPORT, timeout=timeout, follow_redirects=False) as client,
+            client.stream("GET", url, headers=headers) as response,
+        ):
+            if response.status_code != 200:
+                print(f"jellyfin answered the transcode request with {response.status_code}", file=sys.stderr)
+                return
+            async for chunk in response.aiter_raw():
+                stdin.write(chunk)
+                await stdin.drain()
     except Exception as err:
         print(f"jellyfin transcode feed ended: {type(err).__name__}: {err}", file=sys.stderr)
     finally:

@@ -73,9 +73,11 @@ class FrameRecorder:
     def __init__(self, now=time.monotonic):
         self._now = now
         self.sent = []
+        self.timestamps_us = []
 
     def capture_frame(self, frame, timestamp_us=0):
         self.sent.append((self._now(), int.from_bytes(frame.args[3][:4], "big")))
+        self.timestamps_us.append(timestamp_us)
 
     @property
     def frame_count(self):

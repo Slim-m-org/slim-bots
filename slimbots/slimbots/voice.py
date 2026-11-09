@@ -273,14 +273,16 @@ class Voice:
         session.start_heartbeat()
         return session
 
-    async def leave_all(self, timeout: float = LEAVE_ALL_TIMEOUT_SECONDS) -> None:
-        """Leaves every open session, best effort within `timeout`, so a redeploy leaves no ghost on the call."""
+    async def leave_all(self) -> None:
+        """Leaves every open session, best effort within LEAVE_ALL_TIMEOUT_SECONDS, so a redeploy leaves no ghost on the call."""
         sessions = list(self._sessions)
         if not sessions:
             return
+        timeout = LEAVE_ALL_TIMEOUT_SECONDS
         try:
-            await asyncio.wait_for(asyncio.gather(*(s.leave() for s in sessions), return_exceptions=True), timeout)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(timeout):
+                await asyncio.gather(*(s.leave() for s in sessions), return_exceptions=True)
+        except TimeoutError:
             log.warning("gave up leaving %d voice session(s) after %.0fs", len(self._sessions), timeout)
 
 

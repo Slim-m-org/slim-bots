@@ -95,12 +95,17 @@ def _backoff(attempt: int, base_delay: float, max_delay: float) -> float:
     return min(base_delay * (2**attempt), max_delay)
 
 
-def _wait_before_retry(err: ApiError, attempt: int, base_delay: float, max_delay: float, max_retry_after: float) -> float | None:
-    """Seconds to wait before retrying `err`, or None when retrying cannot help or the server asked for too long a wait."""
+def _wait_before_retry(
+    err: ApiError, attempt: int, base_delay: float, max_delay: float, max_retry_after: float, only_unprocessed: bool,
+) -> float | None:
+    """Seconds to wait before retrying `err`, or None when retrying cannot help or the server asked for too long a wait.
+    `only_unprocessed` allows just the 429 that names a wait, which the server answers before acting."""
     if err.status == 429:
         asked = err.retry_after
         return asked if asked is not None and asked <= max_retry_after else None
-    return _backoff(attempt, base_delay, max_delay) if is_retryable(err) else None
+    if only_unprocessed or not is_retryable(err):
+        return None
+    return _backoff(attempt, base_delay, max_delay)
 
 
 def _rich(attachment_ids: list[str] | None, embeds: list[dict[str, Any]] | None) -> dict[str, Any]:
@@ -161,18 +166,16 @@ class AsyncClient:
             except httpx.HTTPError as err:
                 if attempt >= retries or only_unprocessed:
                     raise ApiError(None, str(err)) from err
-                await sleep(_backoff(attempt, base_delay, max_delay))
-                attempt += 1
-                continue
-            if response.status_code >= 400:
-                err = _error_from_response(response)
-                wait = _wait_before_retry(err, attempt, base_delay, max_delay, max_retry_after)
-                if attempt >= retries or wait is None or (only_unprocessed and err.status != 429):
-                    raise err
-                await sleep(wait)
-                attempt += 1
-                continue
-            return response.json() if response.content else None
+                wait = _backoff(attempt, base_delay, max_delay)
+            else:
+                if response.status_code < 400:
+                    return response.json() if response.content else None
+                failure = _error_from_response(response)
+                wait = _wait_before_retry(failure, attempt, base_delay, max_delay, max_retry_after, only_unprocessed)
+                if attempt >= retries or wait is None:
+                    raise failure
+            await sleep(wait)
+            attempt += 1
 
     async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES) -> bytes:
         """The raw body of `GET path` with `call`'s auth and base URL, within DEFAULT_TIMEOUT; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
