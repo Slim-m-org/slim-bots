@@ -255,5 +255,12 @@ def test_reason_is_limited_and_updates_the_topic():
     assert "only the ticket's opener" in client.ephemerals[-1]["content"]
 
 
+def test_a_member_the_server_cannot_look_up_is_not_staff_and_does_not_break_the_opening_message():
+    client = setup()
+    client.respond("GET", "/users/u-zed", ApiError(503, "unavailable"))
+    assert asyncio.run(tickets.is_staff("u-zed")) is False
+    assert "Ticket 0007" in asyncio.run(tickets.opening_message(7, "u-zed", "r-staff"))
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

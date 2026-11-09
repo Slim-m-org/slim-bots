@@ -405,6 +405,8 @@ class Bot:
     async def _resolve_author(self, author_id: str) -> Member | None:
         assert self.space is not None, "_resolve_author needs an open connection"
         member = await self.space.find_member(author_id)
+        if member is None:
+            log.debug("no such user %s; dropped what they sent", author_id)
         if member is not None and self.space.roles_readable is False and self.permissions_readable:
             await self._refresh_author_permissions(member)
         return member

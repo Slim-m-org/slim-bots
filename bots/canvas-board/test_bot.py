@@ -67,6 +67,14 @@ def test_name_of_uses_the_roster_and_reads_a_missing_user_as_none():
     assert asyncio.run(board.name_of("gone")) is None
 
 
+def test_name_of_reads_a_failed_lookup_as_none_and_tries_again_next_time():
+    client = setup()
+    client.respond("GET", "/users/flaky", ApiError(503, "unavailable"))
+    assert asyncio.run(board.name_of("flaky")) is None
+    client.respond("GET", "/users/flaky", human("flaky", "flaky", "Flaky"))
+    assert asyncio.run(board.name_of("flaky")) == "Flaky"
+
+
 def test_add_refuses_text_past_the_length_cap():
     client = setup()
     process(client, message("!board add " + "x" * (board.MAX_TEXT_LENGTH + 1)))

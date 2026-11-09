@@ -103,7 +103,10 @@ def store_link(app_id):
 
 
 async def mention_for(user_id):
-    member = await bot.space.find_member(user_id)
+    try:
+        member = await bot.space.find_member(user_id)
+    except ApiError:
+        return None
     return member.mention() if member else None
 
 

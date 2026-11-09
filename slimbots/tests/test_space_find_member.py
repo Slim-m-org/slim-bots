@@ -1,5 +1,7 @@
 """`Space.find_member`: cache first, then one fetch, and None instead of an exception when the user is gone."""
 
+import pytest
+
 from slimbots.http import ApiError
 from slimbots.space import Space
 from slimbots.testing import FakeAsyncClient
@@ -39,3 +41,17 @@ async def test_a_typed_dot_segment_asks_for_that_user_and_never_for_another_rout
     client.respond("GET", "/users/..%2Fme", ApiError(404, "not found"))
     assert await space.find_member("../me") is None
     assert client.calls == [("GET", "/users/..%2Fme", None, None)] and "../me" not in space.members
+
+
+@pytest.mark.parametrize("failure", [
+    ApiError(503, {"error": "unavailable"}), ApiError(None, "connection refused"), ApiError(401, {"error": "unauthorized"}),
+    ApiError(403, {"error": "forbidden"}),
+], ids=["server-error", "network", "revoked-token", "forbidden"])
+async def test_a_failed_lookup_is_raised_not_read_as_no_such_user(failure):
+    client = FakeAsyncClient()
+    space = Space(client)
+    client.respond("GET", "/users/u1", failure)
+    with pytest.raises(ApiError) as raised:
+        await space.find_member("u1")
+    assert raised.value is failure
+    assert "u1" not in space.members

@@ -79,7 +79,10 @@ async def summaries(players):
 
 
 async def name_of(user_id):
-    member = await bot.space.find_member(user_id)
+    try:
+        member = await bot.space.find_member(user_id)
+    except ApiError:
+        return "someone"
     return member.mention() if member else "someone"
 
 

@@ -541,6 +541,12 @@ def test_a_bad_digest_setting_is_explained():
     assert "0 to 23" in rig.last_private() and rig.sql(db.get_config, "digest_hour") is None
 
 
+def test_a_member_the_server_cannot_look_up_has_no_mention():
+    rig = Rig()
+    rig.client.respond("GET", "/users/u-zed", ApiError(503, "unavailable"))
+    assert asyncio.run(deals.mention_for("u-zed")) is None
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for test in tests:

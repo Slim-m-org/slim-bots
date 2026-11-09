@@ -9,6 +9,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as events  # noqa: E402
+from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
 
@@ -133,6 +134,12 @@ def test_list_and_cancel_read_the_word_across_any_whitespace():
     say("!event list", user=BOB)
     say("!event cancel\n1", user=BOB, permissions=Permissions.MANAGE_MESSAGES)
     assert "cancelled #1" in client.ephemerals[-1]["content"]
+
+
+def test_attendees_the_server_cannot_look_up_are_left_out_of_the_names():
+    client = setup()
+    client.respond("GET", "/users/u-zed", ApiError(503, "unavailable"))
+    assert asyncio.run(events.names_for(["u-zed", ANN["id"]])) == "@ann"
 
 
 def test_the_open_event_cap_holds():
