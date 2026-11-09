@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import sys
+import logging
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .components import MAX_LABEL, Button, grid, rows
 from .http import ApiError
+from .lifecycle import log_failure
 from .text import clip
 
 if TYPE_CHECKING:
     from .bot import Bot
     from .interactions import Interaction
+
+log = logging.getLogger(__name__)
 
 EXPIRES_SECONDS = 300
 EXPIRED_REPLY = "that choice has expired - run {retry} again."
@@ -144,6 +147,6 @@ class Chooser:
         try:
             outcome = await pick.on_choose(pick.items[index])
         except Exception as err:
-            print(f"chooser `{self.prefix}` could not act on a pick: {err}", file=sys.stderr)
+            log_failure(log, err, "chooser `%s` could not act on a pick", self.prefix)
             outcome = f"could not {self.verb} that - {self.retry(bot)} again to retry."
         await self.close(bot, pick, outcome)

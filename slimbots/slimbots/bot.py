@@ -24,7 +24,7 @@ from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
 from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_ui
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
-from .lifecycle import Periodic, guard_dispatch, run_periodic, run_with_shutdown
+from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_with_shutdown
 from .models import Member
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
@@ -235,7 +235,7 @@ class Bot:
         if is_token_revoked(err):
             print(f"{label}: token rejected - revoked?", file=sys.stderr)
         else:
-            print(f"{label} failed: {type(err).__name__}: {err}", file=sys.stderr)
+            log_failure(log, err, "%s failed", label)
         if self._main_task is not None:
             self._main_task.cancel()
 
@@ -802,13 +802,11 @@ class Bot:
             except RegistrationRejected as err:
                 print(f"the server refused this bot's registration at {err.route}: {err.reason or err.body}", file=sys.stderr)
                 return 1
-            except ApiError as err:
+            except Exception as err:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
-                print(f"{type(err).__name__}: {err}, retrying in {delay}s", file=sys.stderr)
-            except Exception as err:
-                print(f"{type(err).__name__}: {err}, retrying in {delay}s", file=sys.stderr)
+                log_failure(log, err, "connection failed, retrying in %ss", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.max_delay)
 

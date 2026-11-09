@@ -6,11 +6,11 @@ import asyncio
 import contextlib
 import importlib
 import logging
-import sys
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .http import ApiError, is_forbidden, is_token_revoked
+from .lifecycle import log_failure
 
 if TYPE_CHECKING:
     from .bot import Bot
@@ -223,7 +223,7 @@ async def start_or_leave(session: Any, start: Awaitable[Any], *, doing: str, exp
         if is_token_revoked(err):
             raise
         if not isinstance(err, (*expected, VoiceError)):
-            print(f"{type(err).__name__} starting {doing}: {err}", file=sys.stderr)
+            log_failure(log, err, "unexpected failure starting %s", doing)
         raise VoiceError(f"could not start {doing}: {err}") from err
 
 
