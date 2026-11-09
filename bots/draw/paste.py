@@ -2,6 +2,7 @@
 
 import io
 
+import pictures
 from plan import Planned
 from sources import SourceError
 
@@ -12,11 +13,7 @@ QUALITY = 88
 def prepare(data):
     """(JPEG bytes, width, height) of the picture shrunk to at most UPLOAD_SIDE pixels."""
     try:
-        from PIL import Image
-    except ImportError as err:
-        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
-    try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("RGB", (UPLOAD_SIDE * 2, UPLOAD_SIDE * 2))
             rgb = picture.convert("RGB")
             rgb.thumbnail((UPLOAD_SIDE, UPLOAD_SIDE))

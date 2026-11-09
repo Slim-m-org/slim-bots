@@ -1,5 +1,6 @@
 """Picture sources (Google, Bing, Wikipedia, Commons) and the decode step; the fetch is injectable so tests need no network."""
 
+import asyncio
 import html as html_module
 import io
 import json
@@ -8,9 +9,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import pictures
+from slimbots.web import JsonService, ServiceBlocked, ServiceError, ServiceTooLarge
+
 TIMEOUT = 15
+PICTURE_DEADLINE = 30
 MAX_PICTURE_BYTES = 3 * 1024 * 1024
-MAX_PIXELS = 25_000_000
+# A test points this at an httpx transport instead of the network.
+TRANSPORT = None
 USER_AGENT = "slimm-bot-draw/1.0 (https://github.com/Slim-m-org/slim-bots; a slim-m community drawing bot)"
 
 
@@ -31,6 +37,24 @@ def http_get(url, token=""):
         raise SourceError(f"could not connect ({type(err).__name__})") from err
 
 
+def http_get_public(url):
+    """Like `http_get` for a picture a search result named: public hosts only, each redirect checked and connected to as vetted.
+    Blocking, so call it from a worker thread."""
+    service = JsonService(
+        "picture", user_agent=USER_AGENT, timeout=TIMEOUT, total_timeout=PICTURE_DEADLINE, max_bytes=MAX_PICTURE_BYTES,
+        public_only=True, cross_origin_redirects=True, transport=TRANSPORT,
+    )
+    try:
+        response = asyncio.run(service.send("GET", url))
+    except ServiceBlocked:
+        raise SourceError("the picture is not on a public host") from None
+    except ServiceTooLarge:
+        raise SourceError("the picture is too large") from None
+    except ServiceError as err:
+        raise SourceError(f"could not connect ({type(err).__name__})") from err
+    return response.status, response.body
+
+
 def fetch_picture(get, url):
     status, body = get(url)
     if status != 200 or not body:
@@ -43,17 +67,14 @@ def fetch_picture(get, url):
 def decode_gray(data, size):
     """(grid of 0-255 rows, width, height) fitted inside size x size, using Pillow when it is installed."""
     try:
-        from PIL import Image
-    except ImportError as err:
-        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
-    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
-    try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("L", (size * 2, size * 2))
             gray = picture.convert("L")
             gray.thumbnail((size, size))
             width, height = gray.size
             pixels = list(gray.getdata())
+    except pictures.PillowMissing as err:
+        raise SourceError(str(err)) from err
     except Exception as err:
         raise SourceError("the picture could not be read") from err
     return [pixels[y * width : (y + 1) * width] for y in range(height)], width, height
@@ -62,17 +83,14 @@ def decode_gray(data, size):
 def reference_image(data, side=768):
     """(JPEG bytes, media type) of a downloaded picture shrunk to at most `side` pixels, for a model to look at."""
     try:
-        from PIL import Image
-    except ImportError as err:
-        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
-    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
-    try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("RGB", (side * 2, side * 2))
             rgb = picture.convert("RGB")
             rgb.thumbnail((side, side))
             out = io.BytesIO()
             rgb.save(out, "JPEG", quality=82)
+    except pictures.PillowMissing as err:
+        raise SourceError(str(err)) from err
     except Exception as err:
         raise SourceError("the picture could not be read") from err
     return out.getvalue(), "image/jpeg"

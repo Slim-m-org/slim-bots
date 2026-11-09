@@ -1,9 +1,9 @@
 """A line drawing traced from a photograph: strong connected edges, linked, smoothed, filtered and ranked; Pillow only."""
 
-import io
 import math
 
 import photo_shade
+import pictures
 import sizing
 import photo_quality as quality
 from photo_quality import drop_isolated, hugs_border  # noqa: F401  (re-exported for callers and tests)
@@ -31,11 +31,11 @@ NEIGHBOURS = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -
 
 def _gray(data):
     try:
-        from PIL import Image, ImageFilter, ImageOps
+        from PIL import ImageFilter, ImageOps
     except ImportError as err:
         raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
     try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("L", (WORK_SIDE * 2, WORK_SIDE * 2))
             gray = ImageOps.autocontrast(picture.convert("L"), cutoff=1)
             gray.thumbnail((WORK_SIDE, WORK_SIDE))

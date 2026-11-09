@@ -7,6 +7,8 @@ import os
 import sys
 import urllib.parse
 
+import httpx
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import sources  # noqa: E402
@@ -185,6 +187,54 @@ def test_the_user_agent_names_the_bot_and_a_picture_must_download_within_the_siz
         sources.fetch_picture(lambda url: (404, b""), "u")
     except sources.SourceError as err:
         assert "http 404" in str(err)
+
+
+def public_get(handler):
+    """`http_get_public` against a scripted transport, returning its answer or the SourceError sentence."""
+    seen = []
+    sources.TRANSPORT = httpx.MockTransport(lambda request: seen.append(str(request.url)) or handler(request))
+    return seen
+
+
+def picture_answer(url):
+    try:
+        return sources.http_get_public(url)
+    except sources.SourceError as err:
+        return str(err)
+    finally:
+        sources.TRANSPORT = None
+
+
+def test_a_picture_on_a_public_host_downloads_with_the_bots_user_agent():
+    agents = []
+    seen = public_get(lambda request: agents.append(request.headers["user-agent"]) or httpx.Response(200, content=b"png"))
+    assert picture_answer("https://93.184.216.34/cat.png") == (200, b"png")
+    assert seen == ["https://93.184.216.34/cat.png"] and agents == [sources.USER_AGENT]
+
+
+def test_a_picture_url_that_points_into_the_lan_is_refused_before_any_request():
+    seen = []
+    for url in ("http://127.0.0.1/cat.png", "http://192.168.1.1/admin", "http://169.254.169.254/latest/meta-data"):
+        public_get(lambda request: seen.append(str(request.url)) or httpx.Response(200, content=b"secret"))
+        assert picture_answer(url) == "the picture is not on a public host"
+    assert seen == []
+
+
+def test_a_picture_that_redirects_into_the_lan_is_refused_at_that_hop():
+    seen = public_get(lambda request: httpx.Response(302, headers={"location": "http://10.0.0.5:8123/reboot"}))
+    assert picture_answer("https://93.184.216.34/cat.png") == "the picture is not on a public host"
+    assert seen == ["https://93.184.216.34/cat.png"]
+
+
+def test_a_picture_past_the_size_cap_or_from_a_dead_host_is_a_sentence_not_a_traceback():
+    public_get(lambda request: httpx.Response(200, content=b"x" * (sources.MAX_PICTURE_BYTES + 1)))
+    assert picture_answer("https://93.184.216.34/big.png") == "the picture is too large"
+
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    public_get(refuse)
+    assert picture_answer("https://93.184.216.34/dead.png") == "could not connect (ServiceUnreachable)"
 
 
 def test_a_reference_image_is_a_small_jpeg():

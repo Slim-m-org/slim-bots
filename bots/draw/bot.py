@@ -76,6 +76,7 @@ AI_THINKING_BUDGET = bot.setting("DRAW_AI_THINKING_BUDGET", 2048, type=int)
 GRID = 96
 
 get = sources.http_get
+get_picture = sources.http_get_public
 planner = ai.make_planner(
     api_key=bot.setting("ANTHROPIC_API_KEY"), model=bot.setting("DRAW_MODEL", "claude-sonnet-4-6"), max_tokens=AI_MAX_TOKENS,
     local_url=bot.setting("DRAW_LLM_URL"), thinking_budget=AI_THINKING_BUDGET, request_timeout=AI_REQUEST_TIMEOUT, local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
@@ -174,7 +175,7 @@ async def find_drawable(query):
         return "no openly licensed picture matched that; try a simpler word."
     for candidate in found[:ATTEMPTS]:
         try:
-            data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
+            data = await asyncio.to_thread(sources.fetch_picture, get_picture, candidate["url"])
             grid, width, height = await asyncio.to_thread(sources.decode_gray, data, GRID)
         except sources.SourceError as err:
             if "Pillow" in str(err):
@@ -360,7 +361,7 @@ async def _first_picture(candidates, log, convert):
         for url in [candidate["url"], *([candidate["fallback"]] if candidate.get("fallback") else [])]:
             try:
                 with log.stage("download"):
-                    data = await asyncio.to_thread(sources.fetch_picture, get, url)
+                    data = await asyncio.to_thread(sources.fetch_picture, get_picture, url)
                     if convert:
                         data = await asyncio.to_thread(convert, data)
             except sources.SourceError as err:
