@@ -10,7 +10,7 @@ import bot as starboard
 from slimbots import Message, Store
 from slimbots.events import ReactionsChanged
 from slimbots.http import ApiError, is_token_revoked
-from slimbots.testing import FakeAsyncClient, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, run_module_tests, wire_bot
 
 
 def member(user_id, name, **flags):
@@ -41,7 +41,7 @@ def setup():
 
 
 def frame(kind, **fields):
-    asyncio.run(starboard.bot._handle_frame({"type": kind, **fields}))
+    handle_frame(starboard.bot, {"type": kind, **fields})
 
 
 def created(msg_id="m1", content="hello world", channel_id="c1", author_id="u1", **extra):

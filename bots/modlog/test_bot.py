@@ -7,7 +7,7 @@ import sqlite3
 import bot as modlog
 import render
 from slimbots import ApiError, Store, style
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
 
 MEMBERS = [human("u1", "nick", "Nick", role_ids=[], roles=[])]
 
@@ -36,7 +36,7 @@ def setup():
 
 
 def dispatch_frame(frame):
-    asyncio.run(modlog.bot._handle_frame(frame))
+    handle_frame(modlog.bot, frame)
 
 
 def process(client, *messages):
@@ -506,6 +506,7 @@ def test_a_server_without_a_moderation_head_changes_nothing():
 
 def test_modlog_gaps_mentions_a_cursor_gap_with_no_reconnect_gap():
     client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
     dispatch_frame({"type": "member.removed", "user_id": "u1", "seq": 100})
     ready_in_one_loop((200, "0.76.0"), (300, "0.77.0"))
     process(client, message("u1", "!modlog gaps"))
