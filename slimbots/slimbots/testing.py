@@ -198,6 +198,8 @@ class FakeVideoSource:
 class FakeAudioSource:
     """Stands in for a real `AudioSource`: `capture_frame` (async, like the real one) counts frames, `clear_queue` counts clears."""
 
+    queued_duration = 0.0  # it plays everything the moment it is given, so nothing ever waits in its queue
+
     def __init__(self) -> None:
         self.frame_count = 0
         self.clear_count = 0

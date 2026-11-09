@@ -83,3 +83,10 @@ def test_a_real_room_dropping_ends_the_session_through_the_event_watch_room_subs
         return session.lost, ran
 
     assert asyncio.run(run()) == (True, ["lost"])
+
+
+def test_the_real_audio_source_reports_how_much_sound_is_still_queued() -> None:
+    async def run() -> float:
+        return load_rtc().AudioSource(48000, 2, queue_size_ms=100).queued_duration
+
+    assert asyncio.run(run()) == 0.0
