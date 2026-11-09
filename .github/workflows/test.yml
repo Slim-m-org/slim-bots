@@ -10,9 +10,15 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
+
+# Only a pull request's superseded runs are cancelled; a push to main or a publish gets its own group.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONPATH: ${{ github.workspace }}/slimbots
@@ -20,6 +26,7 @@ env:
 jobs:
   slimbots:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -33,6 +40,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -46,6 +54,7 @@ jobs:
 
   bot-templates:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -76,6 +85,7 @@ jobs:
 
   casino-concurrency:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -91,6 +101,7 @@ jobs:
     # Runs the jellyfin publish path against the real livekit package (the version the prod image
     # installs) and a real livekit-server (the version prod runs), since the fast suite only sees a fake.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       livekit:
         image: livekit/livekit-server:v1.10.1@sha256:698a13999b4b2285866a32903724884b1e10c03259526391d9b3a72d9b73bbb4
@@ -114,6 +125,7 @@ jobs:
   bot-checklist:
     # Cheap structure and hygiene gate for bot PRs; the rest of docs/shipping-a-bot.md is a human checklist.
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,4 +141,6 @@ jobs:
         run: python scripts/check_hygiene.py
       - name: Check the bots this PR changes
         if: github.event_name == 'pull_request'
-        run: python scripts/check_bot_pr.py --base "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/check_bot_pr.py --base "origin/$BASE_REF"

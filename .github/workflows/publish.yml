@@ -3,6 +3,7 @@ name: publish
 # Trusted publishing: PyPI verifies this workflow's OIDC identity, so there is
 # no API token to store or rotate. The environment below must match the one
 # named on the PyPI publisher, or the token exchange is refused.
+# A manual run only does anything from a release tag.
 on:
   release:
     types: [published]
@@ -12,13 +13,29 @@ permissions:
   contents: read
 
 jobs:
+  # A PyPI version is immutable, so a red commit must not become one.
+  test:
+    if: github.ref_type == 'tag'
+    uses: ./.github/workflows/test.yml
+
   build:
+    needs: test
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+      - name: Refuse a tag that is not the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/check_release_tag.py "$TAG"
+      - name: Refuse a tag that is not on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not a commit on main"; exit 1; }
       - name: Build the distribution
         working-directory: slimbots
         run: |
@@ -32,6 +49,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # The PyPI publisher also names this repo's owner, so a repo move needs a new publisher there first.
     environment: pypi
     permissions:

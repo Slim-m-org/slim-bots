@@ -48,6 +48,9 @@ Adversarial pass, told to break it, at least:
 ## 6. Rollout
 
 - Library change: bump `slimbots/pyproject.toml`, add an entry to `slimbots/CHANGELOG.md`, publish to PyPI.
+- Publish by creating a GitHub release for the tag `v<version>` on a commit on `main`.
+  The `publish` workflow runs the whole `test` workflow first.
+  It refuses a tag that is not `v` plus the version in `pyproject.toml`, and a commit that is not on `main`.
 - Each bot's `requirements.txt` pins `slim-m>=` the release that provides every library feature it uses.
 - Prod: bump the image pin so it installs the new release, and add or update the bot's compose entry (each entry hardcodes its `bot.py` path).
 - Check the deployed bot answers once after the rollout; a merged change is not a deployed one.
@@ -66,6 +69,8 @@ Passes 1 and 3 to 6 are not machine-checked; the PR template is the only enforce
 - `bot-templates`: each bot's own `test_bot.py` and its other `test_*.py`, with no server involved.
 - `bot-checklist`: `scripts/check_bot_pr.py` on the bots the PR changed, the tests for the checker, the smoke harness and `bots/_template`, and `scripts/check_hygiene.py`, which fails on an em dash, an emoji, or a plain comment longer than one line anywhere in the repo.
 - `slimbots` and `typecheck`: the library's suite, docstring length and pyright.
+
+Every job has a timeout, and a new push to a PR cancels that PR's superseded run.
 
 A new bot can start from `bots/_template`, whose own tests prove a copy passes all of the above.
 
