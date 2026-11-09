@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repo rules CI enforces on contributed text: no em dash, no emoji, plain comments one line."""
+"""Repo rules CI enforces on contributed text: no em dash, no emoji, no invisible characters, plain comments one line."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", "smoke-transcripts", "LIC
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".yml", ".yaml", ".toml"}
 EM_DASH = chr(0x2014)
 GLYPH_RANGES = ((0x2190, 0x21FF), (0x2300, 0x23FF), (0x25A0, 0x27BF), (0x2B00, 0x2BFF), (0xFE0F, 0xFE0F), (0x1F000, 0x1FAFF))
+ZERO_WIDTH = range(0x200B, 0x2010)
 LOCKFILE = re.compile(r".*\.lock\.txt")
 
 
@@ -35,6 +36,8 @@ def character_problems(path: Path, text: str) -> list[str]:
             problems.append(f"{path}:{number}: em dash, use a plain hyphen")
         if any(lo <= ord(ch) <= hi for ch in line for lo, hi in GLYPH_RANGES):
             problems.append(f"{path}:{number}: emoji or decorative glyph")
+        if any(ord(ch) in ZERO_WIDTH for ch in line):
+            problems.append(f"{path}:{number}: zero-width character, write it as a \\u escape")
     return problems
 
 

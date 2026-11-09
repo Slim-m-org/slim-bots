@@ -198,7 +198,7 @@ async def test_a_button_press_without_a_kind_still_reaches_button_handlers():
     assert seen == ["button"]
 
 
-@pytest.mark.parametrize("hidden", ["​", "‮", "ㅤ", "⠀", "­", "﻿", "\x00", "⁠", "\U000e0041"])
+@pytest.mark.parametrize("hidden", ["\u200b", "‮", "ㅤ", "⠀", "­", "﻿", "\x00", "⁠", "\U000e0041"])
 def test_a_label_holding_an_invisible_character_is_refused_before_it_is_sent(hidden):
     with pytest.raises(ValueError, match="invisible"):
         UiEntry("pause", f"Pa{hidden}use")

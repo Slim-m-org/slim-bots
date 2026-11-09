@@ -10,7 +10,7 @@ def test_blank_label_is_refused_locally():
 
 def test_hidden_character_in_a_label_is_refused_locally():
     with pytest.raises(ValueError, match="invisible"):
-        Button("Nick‍", "id")
+        Button("Nick\u200d", "id")
 
 
 def test_hidden_character_in_a_custom_id_is_refused_locally():

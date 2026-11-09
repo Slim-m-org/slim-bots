@@ -41,9 +41,11 @@ def test_the_hygiene_gate_catches_what_it_claims_to(tmp_path):
     (tmp_path / "a.md").write_text("a dash " + chr(0x2014) + " here\n")
     (tmp_path / "b.py").write_text("x = 1\n# one\n# two\n")
     (tmp_path / "c.py").write_text("x = '" + chr(0x2B50) + "'\n")
+    (tmp_path / "d.py").write_text("x = '" + chr(0x200B) + "'\n")
     (tmp_path / "ok.py").write_text("#!/usr/bin/env python3\n# fine\nx = 1  # trailing\ny = 2  # trailing\n")
     found = "\n".join(check_hygiene.check(tmp_path))
     assert "a.md:1: em dash" in found
     assert "b.py:3: plain comment" in found
     assert "c.py:1: emoji" in found
+    assert "d.py:1: zero-width" in found
     assert "ok.py" not in found

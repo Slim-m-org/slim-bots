@@ -83,7 +83,7 @@ def test_game_chat_reaches_the_channel_named_and_escaped():
         await mc.pump_once()
         body = client.sent[-1]["content"]
         assert client.sent[-1]["channel_id"] == "c-mc"
-        assert "**[mc]** `Steve`: `hi @​everyone 'x'`" in body and "`Alex` joined the game" in body
+        assert "**[mc]** `Steve`: `hi @\u200beveryone 'x'`" in body and "`Alex` joined the game" in body
         assert "@everyone" not in body
 
     run(scenario)

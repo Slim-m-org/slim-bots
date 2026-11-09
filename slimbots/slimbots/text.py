@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-ZERO_WIDTH_SPACE = "​"
+ZERO_WIDTH_SPACE = "\u200b"
 
 
 def one_line(text: object) -> str:
