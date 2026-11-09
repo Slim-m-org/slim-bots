@@ -137,3 +137,61 @@ async def test_a_private_reply_is_never_retried_because_a_repeat_would_be_a_seco
             await client.send_ephemeral_to_press("c1", "i1", "hi")
     assert caught.value.status == 502
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("send", ["reply", "press"])
+async def test_a_private_reply_retries_a_429_that_names_a_wait(send):
+    replies = iter([httpx.Response(429, headers={"retry-after": "0"}, json={"error": "slow down"}), httpx.Response(200, json={"id": "e1"})])
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return next(replies)
+
+    client = _client(handler)
+    if send == "reply":
+        assert await client.send_ephemeral("c1", "m1", "hi") == {"id": "e1"}
+    else:
+        assert await client.send_ephemeral_to_press("c1", "i1", "hi") == {"id": "e1"}
+    assert len(seen) == 2
+
+
+async def test_a_private_reply_is_not_retried_after_a_network_failure():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        raise httpx.ReadTimeout("slow")
+
+    client = _client(handler)
+    with pytest.raises(ApiError) as caught:
+        await client.send_ephemeral("c1", "m1", "hi")
+    assert caught.value.status is None
+    assert len(seen) == 1
+
+
+async def test_only_unprocessed_retries_a_named_429_and_nothing_else():
+    replies = iter([httpx.Response(429, headers={"retry-after": "3"}), httpx.Response(200, json={"ok": True})])
+    client = _client(lambda request: next(replies))
+    delays, sleep = _recorder()
+    assert await client.call("POST", "/x", {"a": 1}, only_unprocessed=True, sleep=sleep) == {"ok": True}
+    assert delays == [3.0]
+
+    seen = []
+
+    def server_error(request):
+        seen.append(request)
+        return httpx.Response(503, json={"error": "busy"})
+
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError):
+        await _client(server_error).call("POST", "/x", only_unprocessed=True, sleep=sleep)
+    assert len(seen) == 1 and delays == []
+
+
+async def test_only_unprocessed_still_raises_a_429_that_names_no_wait():
+    client = _client(lambda request: httpx.Response(429, json={"error": "three private replies per message"}))
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("POST", "/x", only_unprocessed=True, sleep=sleep)
+    assert caught.value.status == 429 and delays == []

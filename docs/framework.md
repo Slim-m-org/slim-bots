@@ -228,7 +228,7 @@ httpx was already a transitive dependency in this environment, so it costs nothi
 `call()` retries a 5xx or a network failure with exponential backoff and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
 A 429 is retried after the wait it names (`Retry-After`, or `retry_after_seconds` in the body, which slow mode and the rate limiter both set) when that is within `max_retry_after` (15 seconds by default), and raised at once otherwise.
 A 429 that names no wait, such as the limit of three private replies per message, is a quota that waiting does not lift, so it is raised without retrying; `ApiError.retry_after` carries the wait when there was one.
-The private reply routes are never retried, since a repeated POST would be a second reply.
+The private reply routes retry only a 429 that names a wait, which the server answers before it acts; a network failure or a 5xx is raised, since a repeated POST would be a second reply.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
 `await bot.client.download(path, max_bytes=)` is the matching read: the raw body of a `GET` (an attachment, say) with the same auth and base URL, never reading past `max_bytes` (10 MiB by default) and giving up after the client's 15 seconds; wrap the call in `asyncio.timeout(...)` for a tighter bound.
 It raises `ApiError` for an HTTP error or a network failure and `ResponseTooLarge` (an `ApiError` with no status, `.limit` set) when the body is bigger; `FakeAsyncClient` answers it from `respond("GET", path, b"...")`.

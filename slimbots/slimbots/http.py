@@ -150,16 +150,16 @@ class AsyncClient:
         self, method: str, path: str, body: Any = None, *, params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None, raw_body: bytes | None = None,
         retries: int = 5, base_delay: float = 0.5, max_delay: float = 8.0, max_retry_after: float = MAX_RETRY_AFTER,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        only_unprocessed: bool = False, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> Any:
-        """One authenticated call, retrying a genuinely uncertain outcome; `raw_body` sends bytes as-is (an attachment).
-        A 429 is retried after the wait it names when that is within `max_retry_after`, and raised at once otherwise."""
+        """One authenticated call, retrying an uncertain outcome and a 429 that names a wait; `raw_body` sends bytes as-is.
+        `only_unprocessed` retries just that 429, for a write with no idempotency key, since the server answers it before acting."""
         attempt = 0
         while True:
             try:
                 response = await self._send_once(method, path, body, params, headers, raw_body)
             except httpx.HTTPError as err:
-                if attempt >= retries:
+                if attempt >= retries or only_unprocessed:
                     raise ApiError(None, str(err)) from err
                 await sleep(_backoff(attempt, base_delay, max_delay))
                 attempt += 1
@@ -167,7 +167,7 @@ class AsyncClient:
             if response.status_code >= 400:
                 err = _error_from_response(response)
                 wait = _wait_before_retry(err, attempt, base_delay, max_delay, max_retry_after)
-                if attempt >= retries or wait is None:
+                if attempt >= retries or wait is None or (only_unprocessed and err.status != 429):
                     raise err
                 await sleep(wait)
                 attempt += 1
@@ -269,17 +269,17 @@ class AsyncClient:
         self, channel_id: str, in_reply_to_id: str, content: str, *,
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Answers the author of `in_reply_to_id` privately; never retried, since a repeat would be a second reply. See docs/framework.md."""
+        """Answers the author of `in_reply_to_id` privately; only a rate limit is retried, since a repeat would be a second reply. See docs/framework.md."""
         body = {"in_reply_to_id": in_reply_to_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, retries=0)
+        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
 
     async def send_ephemeral_to_press(
         self, channel_id: str, interaction_id: str, content: str, *,
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Answers whoever pressed the button behind `interaction_id`; never retried, and a separate field from a message anchor."""
+        """Answers whoever pressed the button behind `interaction_id`; only a rate limit is retried, and a separate field from a message anchor."""
         body = {"interaction_id": interaction_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, retries=0)
+        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
 
     async def edit_components(
         self, channel_id: str, message_id: str, components: Rows, *, interaction_id: str | None = None,
