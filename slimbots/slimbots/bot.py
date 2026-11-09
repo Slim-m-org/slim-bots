@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.metadata
 import logging
 import os
 import sqlite3
@@ -32,7 +33,16 @@ from .space import Space
 from .store import Store
 from .voice import Voice
 
-DEFAULT_USER_AGENT = "slimbots/0.3"
+
+def library_version() -> str:
+    """The installed `slim-m` package version, or "dev" when running from a checkout that was never installed."""
+    try:
+        return importlib.metadata.version("slim-m")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
+
+
+DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
 
