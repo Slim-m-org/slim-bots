@@ -174,8 +174,11 @@ def test_the_0_8_features_need_a_0_8_pin(tmp_path, code):
     ("0.19.0", "if ctx.replayed:\n    return\n"),
     ("0.19.0", "if bot.is_replay(message):\n    return\n"),
     ("0.20.0", "voice_session.on_disconnect(lambda: session.stop(reason='gone'))\n"),
+    ("0.21.0", "answer = await service.peek(url, size=512)\n"),
+    ("0.21.0", "panel = JsonService('pve', url, ssl_context=context)\n"),
+    ("0.21.0", "service = JsonService('pic', timeout=15, total_timeout=30)\n"),
 ])
-def test_the_0_11_to_0_20_features_need_their_release(tmp_path, needed, code):
+def test_the_0_11_to_0_21_features_need_their_release(tmp_path, needed, code):
     below = ".".join(map(str, (c.parse_version(needed)[0], c.parse_version(needed)[1] - 1, 0)))
     (problem,) = c.check_bot(make_bot(tmp_path, "b", req=f"slim-m>={below}\n", code=code))
     assert f"needs >={needed}" in problem
@@ -190,6 +193,8 @@ def test_the_0_11_to_0_20_features_need_their_release(tmp_path, needed, code):
     "self.direct_play = None\n",
     "replayed = 0\n",
     "self.on_disconnected = None\n",
+    "top = stack.peek()\n",
+    "self.ssl_context_cache = None\n",
 ])
 def test_lookalike_names_do_not_demand_a_newer_pin(tmp_path, code):
     assert c.check_bot(make_bot(tmp_path, "b", req="slim-m>=0.10.0\n", code=code)) == []

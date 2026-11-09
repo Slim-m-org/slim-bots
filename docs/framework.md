@@ -247,6 +247,9 @@ A failure is one of these, and `str(err)` never carries a key or a URL.
 `ServiceTooLarge` is a body past `max_bytes`, and `ServiceBlocked` is a destination the url policy refused.
 A redirect is followed only to the same origin, so a key header is never replayed at another host.
 `cross_origin_redirects=True` is for a service that holds no key, and `max_redirects=0` follows none.
+`total_timeout` (default 60 seconds, `None` for no limit) bounds the whole call, every redirect hop and the whole body, where `timeout` bounds each phase on its own.
+`ssl_context=` is the trust for a service with its own certificate authority, such as a Proxmox node.
+`await service.peek(url, size=512)` follows the redirects of a GET and reads only the first `size` bytes of the final body, so a stream can be inspected without being downloaded; `WebResponse.url` is where it ended.
 `transport=httpx.MockTransport(handler)` answers in place of the network, which is how a bot's tests fake the service.
 
 `slimbots.jellyfin` is the Jellyfin side that `bot-jellyfin` and `bot-music` used to each carry: `service(url, key, user_agent=...)`, `auth_header(key)` and `url_problem(url)`.
@@ -265,7 +268,9 @@ It returns `urlpolicy.PRIVATE` or `urlpolicy.UNRESOLVABLE`, or `None` when every
 Private, loopback, link-local, carrier-grade NAT, multicast, reserved and unspecified addresses all fail, in IPv4, IPv6 and IPv4-mapped IPv6 form, and so does a name with even one such answer.
 `allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` exempts its Jellyfin host).
 `JsonService(public_only=True)` runs the same check before the request and again for every redirect hop.
-It cannot close the gap between its lookup and the connection, so it guards against pointing a bot at the LAN, not against a hostile resolver.
+It then connects to the addresses it checked, with the Host header and the TLS server name still the original host's, so a name that answers differently the second time cannot reach the LAN.
+It also caps the body at 10 MiB unless `max_bytes` says otherwise.
+`vet_destination(url, ...)` is the same check returning those addresses as well as the verdict.
 
 ## Typed REST wrappers
 

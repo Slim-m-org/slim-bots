@@ -3,7 +3,9 @@
 import pytest
 
 from slimbots import urlpolicy
-from slimbots.urlpolicy import PRIVATE, UNRESOLVABLE, destination_problem, is_loopback_host, is_public_address, service_url_problem
+from slimbots.urlpolicy import (
+    PRIVATE, UNRESOLVABLE, destination_problem, is_loopback_host, is_public_address, service_url_problem, vet_destination,
+)
 
 
 @pytest.mark.parametrize("address", [
@@ -43,6 +45,18 @@ def resolver_for(*addresses):
 ])
 async def test_every_dns_answer_must_be_public(answers, expected):
     assert await destination_problem("https://feed.example/x", resolver=resolver_for(*answers)) == expected
+
+
+async def test_a_vetted_name_hands_back_its_distinct_public_addresses_to_connect_to():
+    answers = ["93.184.216.34", "::ffff:93.184.216.34", "2606:4700:4700::1111", "93.184.216.34"]
+    vetted = await vet_destination("https://feed.example/x", resolver=resolver_for(*answers))
+    assert vetted.problem is None and vetted.pins == ("93.184.216.34", "2606:4700:4700::1111")
+
+
+async def test_a_literal_address_or_an_opt_in_or_a_refusal_has_nothing_to_pin():
+    assert (await vet_destination("http://93.184.216.34/x")).pins == ()
+    assert (await vet_destination("http://lan.example/x", allow_hosts=["lan.example"])).pins == ()
+    assert (await vet_destination("http://lan.example/x", resolver=resolver_for("10.0.0.5"))).pins == ()
 
 
 async def test_a_name_that_does_not_resolve_is_unresolvable():
