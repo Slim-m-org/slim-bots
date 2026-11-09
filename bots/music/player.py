@@ -17,6 +17,7 @@ from slimbots.voice import publish_microphone, watch_empty
 import music_core
 
 AUDIO_MAX_BITRATE = 128_000
+AUDIO_QUEUE_MS = 100  # livekit buffers a second by default, which is how late a pause or skip would be heard
 CHUNK_SAMPLES = media.pcm_chunk_samples()
 CHUNK_BYTES = media.pcm_chunk_bytes()
 
@@ -79,7 +80,7 @@ class MusicSession:
         return self._chunks_sent * AUDIO_CHUNK_MS / 1000
 
     async def start(self, first_track):
-        self._source = await publish_microphone(self.voice_session, max_bitrate=AUDIO_MAX_BITRATE)
+        self._source = await publish_microphone(self.voice_session, max_bitrate=AUDIO_MAX_BITRATE, audio_queue_ms=AUDIO_QUEUE_MS)
         self.queue.append(first_track)
         self._runner_task = self.bot.background(self._run(), name=f"music-runner-{self.voice_channel_id}")
         self._monitor_task = self.bot.background(self._monitor_loop(), name=f"music-monitor-{self.voice_channel_id}")
@@ -155,6 +156,8 @@ class MusicSession:
             await self._pump(self._process.stdout)
         finally:
             await self._kill_process()
+            if self._interrupted:
+                self._source.clear_queue()
 
     async def _pump(self, stream):
         rtc = self.voice_session.rtc

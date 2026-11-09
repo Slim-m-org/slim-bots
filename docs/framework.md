@@ -139,7 +139,7 @@ A bot that decodes media with ffmpeg and pushes it into LiveKit (`bot-music`, `b
 `join_to_speak(bot.voice, channel_id, label=, to=)` joins, and raises a `VoiceError` whose text is the reply when the join fails or the bot cannot speak.
 `start_or_leave(session, start(), doing=)` leaves the call and raises a reply when starting fails, and re-raises a revoked token.
 A leave that itself fails is logged, so the start error is the one the reply names.
-`publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate.
+`publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate; `audio_queue_ms=` shortens its buffer from livekit's second, so a pause or skip is heard sooner, and `source.clear_queue()` drops what is still waiting.
 `watch_empty(bot, channel_id, wake, on_empty)` is the loop that stops a player when only the bot is left.
 They take the voice object or session as an argument, so `FakeVoice` and `FakeVoiceSession` work with them unchanged.
 

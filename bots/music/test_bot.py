@@ -56,7 +56,13 @@ class FakeRtc:
     AudioSource = FakeAudioSource
 
     def __init__(self):
-        self.AudioSource = lambda sample_rate, num_channels: FakeAudioSource()
+        self.AudioSource = self._audio_source
+
+    @staticmethod
+    def _audio_source(sample_rate, num_channels, queue_size_ms=1000):
+        source = FakeAudioSource()
+        source.queue_size_ms = queue_size_ms
+        return source
 
 
 class FakeLocalParticipant:
@@ -348,6 +354,8 @@ def test_play_plays_into_the_invokers_call_as_a_microphone_track_and_leaves_when
     assert track["name"] == "music" and options.source == "microphone"
     assert options.audio_encoding.max_bitrate == player.AUDIO_MAX_BITRATE
     assert track["source"].frame_count == 3
+    assert track["source"].queue_size_ms == player.AUDIO_QUEUE_MS
+    assert track["source"].clear_count == 0, "a track that ends on its own plays out its tail"
     assert "queue finished, leaving the call." in replies(client)
     assert music_cog.active_sessions() == {}
 
@@ -369,6 +377,21 @@ def test_a_second_play_queues_and_a_skip_keeps_the_queue():
     assert "now: **long.mp3**\n1. stream.mp3" in said
     assert "skipped **long.mp3**." in said
     assert "now playing **stream.mp3**." in said
+
+
+def test_a_skip_drops_the_audio_still_queued_for_the_old_track():
+    client = setup()
+    held = []
+
+    async def playing_long():
+        await until(lambda: music_cog.active_sessions()["v1"].current is not None)
+        held.append(music_cog.active_sessions()["v1"])
+        await until(lambda: held[0]._source.frame_count > 0)
+
+    async def old_audio_dropped():
+        await until(lambda: held[0]._source.clear_count >= 1)
+
+    scenario(client, "~play https://93.184.216.34/long.mp3", playing_long, f"~play {PUBLIC_URL}", "~skip", old_audio_dropped)
 
 
 def test_each_voice_channel_gets_its_own_queue():

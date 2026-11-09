@@ -98,8 +98,10 @@ class FakeRtc:
             return {"name": name, "source": source}
 
     @staticmethod
-    def AudioSource(sample_rate, num_channels):
-        return FakeAudioSource()
+    def AudioSource(sample_rate, num_channels, queue_size_ms=1000):
+        source = FakeAudioSource()
+        source.queue_size_ms = queue_size_ms
+        return source
 
 
 class FakeParticipant:
@@ -119,6 +121,17 @@ async def test_publish_microphone_publishes_a_microphone_track_at_the_bitrate():
     track, options = participant.published[0]
     assert isinstance(source, FakeAudioSource) and track["name"] == "music"
     assert options.source == "microphone" and options.audio_encoding.max_bitrate == 96_000
+
+
+async def test_publish_microphone_keeps_the_default_queue_unless_asked_to_shorten_it():
+    async def publish(**options):
+        session = FakeVoiceSession("v1")
+        session.rtc = FakeRtc()
+        session.room = type("Room", (), {"local_participant": FakeParticipant()})()
+        return await publish_microphone(session, max_bitrate=96_000, **options)
+
+    assert (await publish()).queue_size_ms == 1000
+    assert (await publish(audio_queue_ms=100)).queue_size_ms == 100
 
 
 async def test_publish_microphone_refuses_a_session_that_cannot_publish():

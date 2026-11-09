@@ -29,8 +29,8 @@ Set `SLIMM_PREFIX=!` if it runs alone, or address it as `@<its username> play ..
 - `~play <song or url>` - a name searches the Jellyfin music library and plays the first match, an `http(s)` URL is played directly.
   If a call already has music playing, the track is queued.
 - `~queue` (`~q`) - the current track and the next ten.
-- `~skip` - ends the current track; the rest of the queue carries on.
-- `~pause` / `~resume`
+- `~skip` - ends the current track and drops its queued audio, so the next one starts at once; the rest of the queue carries on.
+- `~pause` / `~resume` - the track keeps about a tenth of a second queued in the call, so a pause is heard almost at once.
 - `~stop` - clears the queue and leaves.
 - `~np` - the current track, position, duration and how many are queued.
 

@@ -176,6 +176,7 @@ def test_the_0_8_features_need_a_0_8_pin(tmp_path, code):
     ("0.20.0", "voice_session.on_disconnect(lambda: session.stop(reason='gone'))\n"),
     ("0.21.0", "answer = await service.peek(url, size=512)\n"),
     ("0.21.0", "panel = JsonService('pve', url, ssl_context=context)\n"),
+    ("0.21.0", "source = await publish_microphone(session, max_bitrate=1, audio_queue_ms=100)\n"),
     ("0.21.0", "service = JsonService('pic', timeout=15, total_timeout=30)\n"),
 ])
 def test_the_0_11_to_0_21_features_need_their_release(tmp_path, needed, code):
