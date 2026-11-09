@@ -3,10 +3,10 @@
 A slim-m bot (directory `bots/homelab`, command `!homelab`) that keeps a few status tiles on a voice channel's Voice Canvas: Proxmox nodes and guests, Docker containers, and what Jellyfin is playing.
 Each tile is one canvas note that is edited in place every interval, never placed again, so the canvas stays at three notes.
 
-Needs `slim-m>=0.15.0`.
+Needs `slim-m>=0.21.0`.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps the id of each note in its own sqlite file (`SLIMM_DB_PATH`, default `homelab.db`).
-It uses only the standard library to talk to your services.
+It reads Proxmox and Jellyfin through the library's `JsonService`, which follows a redirect only within the same host, so a token is never sent anywhere else.
 
 ```bash
 pip install -r requirements.txt
@@ -30,6 +30,7 @@ A source with no settings is simply not drawn; with none set the bot says what t
 | `HOMELAB_X`, `HOMELAB_Y` | `400`, `0` | the top-left of the first tile in canvas units; tiles sit side by side from there |
 | `HOMELAB_PROXMOX_URL`, `HOMELAB_PROXMOX_TOKEN` | empty | the Proxmox API root and an API token as `user@realm!tokenid=secret`; a read-only role is enough |
 | `HOMELAB_PROXMOX_CA_FILE` | unset | path to the node's `pve-root-ca.pem`, for its self-signed certificate |
+| `HOMELAB_ALLOW_HTTP` | off | `1` allows a plaintext `http` Proxmox or Jellyfin URL on a trusted LAN; loopback and a bare Docker service name never need it |
 | `HOMELAB_DOCKER_SOCKET` | empty | the Docker socket path, for example `/var/run/docker.sock`, mounted read-only into the bot's container |
 | `HOMELAB_JELLYFIN_URL`, `HOMELAB_JELLYFIN_KEY` | empty | the server address and an API key |
 

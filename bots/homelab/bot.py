@@ -8,6 +8,7 @@ import uuid
 
 import sources
 from slimbots import ApiError, Bot, Permissions
+from slimbots.urlpolicy import service_url_problem
 
 TILE_W = 260.0
 TILE_H = 150.0
@@ -31,6 +32,7 @@ PROXMOX_CA_FILE = bot.setting("HOMELAB_PROXMOX_CA_FILE")
 DOCKER_SOCKET = bot.setting("HOMELAB_DOCKER_SOCKET")
 JELLYFIN_URL = bot.setting("HOMELAB_JELLYFIN_URL")
 JELLYFIN_KEY = bot.setting("HOMELAB_JELLYFIN_KEY")
+ALLOW_HTTP = bot.setting("HOMELAB_ALLOW_HTTP", False, type=bool)
 
 get_url = sources.http_get
 get_docker = sources.docker_get
@@ -39,6 +41,19 @@ canvas_channel_name = None
 # tile name -> "ok" or the sentence for the last problem, for `!homelab`.
 status = {}
 last_poll = [0.0]
+
+
+def check_config():
+    """A startup problem in the settings as a message, or None: a token or key may not travel in plaintext to a LAN host unless allowed."""
+    for url, url_setting, key_setting in (
+        (PROXMOX_URL, "HOMELAB_PROXMOX_URL", "HOMELAB_PROXMOX_TOKEN"), (JELLYFIN_URL, "HOMELAB_JELLYFIN_URL", "HOMELAB_JELLYFIN_KEY"),
+    ):
+        problem = url and service_url_problem(
+            url_setting, url, allow_http=ALLOW_HTTP, bare_hostnames=True, opt_in="HOMELAB_ALLOW_HTTP", key_setting=key_setting,
+        )
+        if problem:
+            return problem
+    return None
 
 
 def tile_names():
@@ -210,4 +225,4 @@ async def homelab(ctx, sub: str = "status"):
 
 
 if __name__ == "__main__":
-    bot.run_cli()
+    bot.run_cli(check=check_config)
