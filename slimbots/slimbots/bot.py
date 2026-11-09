@@ -18,7 +18,7 @@ from . import catchup, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
-from .commands import Command, Group, build_help_text
+from .commands import Command, Group, build_help_text, split_first_word
 from .context import Context
 from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
@@ -436,7 +436,7 @@ class Bot:
             await self._dispatch_event("on_message", message)
             return
 
-        invoked_with, _, raw_args = invocation.partition(" ")
+        invoked_with, raw_args = split_first_word(invocation)
         command = self.commands.get(invoked_with)
         if command is None:
             if self._listeners.get("on_command_not_found"):
