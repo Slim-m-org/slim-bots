@@ -5,6 +5,7 @@ import asyncio
 import sqlite3
 
 import bot as modlog
+import outbox
 import render
 from slimbots import ApiError, Store, style
 from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
@@ -406,6 +407,102 @@ def test_a_frame_without_a_moderation_seq_is_not_persisted():
     setup()
     dispatch_frame({"type": "message.created", "seq": 99, "message": {}})
     assert stored_moderation_seq() is None
+
+
+SEND = ("POST", "/channels/c1/messages")
+REMOVED = {"type": "member.removed", "user_id": "u1", "seq": 40}
+
+
+def unposted():
+    return modlog.bot.store.connection.execute("SELECT COUNT(*) FROM unposted").fetchone()[0]
+
+
+def retry_at(offset_seconds):
+    real = modlog.time.time
+    modlog.time.time = lambda: real() + offset_seconds
+    try:
+        asyncio.run(modlog.retry_unposted())
+    finally:
+        modlog.time.time = real
+
+
+def refuse_posts(client):
+    client.respond(*SEND, ApiError(403, {"error": "missing SEND_MESSAGES"}))
+
+
+def allow_posts(client):
+    client._responses.pop(SEND)
+
+
+def posted_ids(client):
+    return [sent["id"] for sent in client.sent]
+
+
+def test_a_posted_frame_leaves_nothing_to_retry():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    dispatch_frame(REMOVED)
+    assert len(client.sent) == 1 and unposted() == 0
+
+
+def test_a_post_the_channel_refuses_is_kept_and_posted_on_a_later_try():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    refuse_posts(client)
+    dispatch_frame(REMOVED)
+    assert stored_moderation_seq() == (40,) and unposted() == 1, "the cursor passed it, so the entry is held for a retry"
+    allow_posts(client)
+    retry_at(modlog.outbox.RETRY_BASE_SECONDS + 1)
+    assert unposted() == 0
+    assert client.sent[-1]["embeds"][0]["title"] == "Member removed"
+    assert stored_moderation_seq() == (40,)
+
+
+def test_a_failure_before_the_post_is_kept_too():
+    client = setup()
+    client.respond("GET", "/users/u1", ApiError(500, {"error": "boom"}))
+    dispatch_frame(REMOVED)
+    assert unposted() == 1 and not client.sent
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    retry_at(modlog.outbox.RETRY_BASE_SECONDS + 1)
+    assert unposted() == 0 and client.sent[-1]["embeds"][0]["title"] == "Member removed"
+
+
+def test_a_retry_waits_longer_after_each_failure():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    refuse_posts(client)
+    dispatch_frame(REMOVED)
+    base = modlog.outbox.RETRY_BASE_SECONDS
+    retry_at(base - 5)
+    assert len(client.sent) == 1, "not due yet"
+    retry_at(base + 1)
+    assert len(client.sent) == 2 and unposted() == 1
+    retry_at(base + 1 + base)
+    assert len(client.sent) == 2, "the second wait is twice as long"
+    retry_at(base + 1 + 2 * base + 1)
+    assert len(client.sent) == 3
+
+
+def test_a_frame_keeps_its_message_id_so_a_repeat_post_is_the_same_message():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    dispatch_frame(REMOVED)
+    first = posted_ids(client)[-1]
+    dispatch_frame(REMOVED)
+    assert posted_ids(client)[-1] == first
+    dispatch_frame({**REMOVED, "seq": 41})
+    assert posted_ids(client)[-1] != first
+
+
+def test_modlog_gaps_says_how_many_events_are_waiting_to_be_posted():
+    client = setup()
+    client.respond("GET", "/users/u1", {**MEMBERS[0]})
+    refuse_posts(client)
+    dispatch_frame(REMOVED)
+    allow_posts(client)
+    process(client, message("u1", "!modlog gaps"))
+    assert "1 moderation event(s) could not be posted yet" in client.sent[-1]["content"]
 
 
 def test_the_first_connect_seeds_the_cursor_without_a_marker():

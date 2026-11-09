@@ -2,14 +2,16 @@
 """bot-modlog: mirrors timeouts, kicks, restores, and role changes into a channel; see README.md."""
 
 import asyncio
+import functools
 import time
 import uuid
 from datetime import datetime, timezone
 
 from slimbots import ApiError, Bot, style
-from slimbots.http import is_forbidden
+from slimbots.http import is_forbidden, is_token_revoked
 from slimbots.text import format_duration
 
+import outbox
 import render
 
 # Every gap over the record threshold is kept for `!modlog gaps`; only a longer one is worth a channel post.
@@ -22,6 +24,8 @@ MAX_GAPS_SHOWN = 10
 # A moderation frame at or below the hello head can still land just after it, so a hole is judged only after this wait.
 MODERATION_SETTLE_SECONDS = 5
 MODERATION_FRAMES = frozenset({"member.timeout", "member.removed", "member.restored", "member.role_changed", "role.changed"})
+# Names a moderation post after its frame, so posting a frame twice is the same message.
+POST_NAMESPACE = uuid.UUID("6c1d2f48-93a7-4b05-8e6d-0f5a7c3b9e21")
 
 
 def init_db(conn):
@@ -52,6 +56,7 @@ def init_db(conn):
         );
         """
     )
+    conn.executescript(outbox.SCHEMA)
     conn.commit()
 
 
@@ -86,16 +91,23 @@ def record_event(conn, kind, text):
     conn.commit()
 
 
-async def post(kind, title, fields=(), *, tone="info", description=None):
-    """Posts an embed under a fresh id every call - two different events can produce identical text,
-    so there is nothing here worth deduplicating against the way a command reply is."""
+def post_id(frame):
+    """The id a frame's post is sent under: stable per frame, so a retry cannot double it; a fresh one for a frame with no seq."""
+    if not isinstance(frame, dict) or not isinstance(frame.get("seq"), int):
+        return str(uuid.uuid4())
+    identity = "|".join(str(frame.get(key)) for key in ("type", "seq", "user_id", "role_id"))
+    return str(uuid.uuid5(POST_NAMESPACE, identity))
+
+
+async def post(kind, title, fields=(), *, tone="info", description=None, frame=None):
+    """Posts an embed for the event; two different events can produce identical text, so only a frame's own retry is deduplicated."""
     global _open_gap_notice
     _open_gap_notice = None
     embed = style.card(tone, title=title, description=description, timestamp=int(time.time() * 1000))
     for name, value in fields:
         embed.add_field(name, value, inline=True)
     text = render.plain_text(title, fields)
-    await bot.client.send(bot.channel, text, message_id=str(uuid.uuid4()), **style.send_kwargs(embed, text))
+    await bot.client.send(bot.channel, text, message_id=post_id(frame), **style.send_kwargs(embed, text))
     await bot.store.run(record_event, kind, text)
 
 
@@ -141,10 +153,16 @@ def _record_moderation_gap(conn, last_seq, head, text, after_restart):
     conn.commit()
 
 
+def _accept_moderation_frame(conn, seq, frame):
+    """The frame is kept before the cursor moves past it, so a crash between the two costs a gap marker, never an entry."""
+    outbox.remember(conn, seq, frame, int(time.time()))
+    _store_moderation_seq(conn, seq)
+
+
 async def note_moderation_seq(frame):
     seq = frame.get("seq")
     if frame.get("type") in MODERATION_FRAMES and isinstance(seq, int):
-        await bot.store.run(_store_moderation_seq, seq)
+        await bot.store.run(_accept_moderation_frame, seq, frame)
 
 
 async def current_build():
@@ -269,11 +287,11 @@ async def handle_role_change(frame):
     role = role_name_of(role_id) or "Unknown role"
     fields = [("Member", member_label(user_id)), ("Role", role)]
     if granted is None:
-        await post("member.role_changed", "Member roles changed", fields)
+        await post("member.role_changed", "Member roles changed", fields, frame=frame)
     elif granted:
-        await post("member.role_changed", "Role granted", fields, tone="success")
+        await post("member.role_changed", "Role granted", fields, tone="success", frame=frame)
     else:
-        await post("member.role_changed", "Role revoked", fields, tone="warn")
+        await post("member.role_changed", "Role revoked", fields, tone="warn", frame=frame)
 
 
 async def read_role_bits():
@@ -333,7 +351,8 @@ def _count_moderation_gaps(conn):
 async def show_gaps(ctx):
     rows = await bot.store.run(_fetch_gaps)
     plain_gaps, restart_gaps = await bot.store.run(_count_moderation_gaps)
-    if not rows and not plain_gaps and not restart_gaps:
+    unposted = await bot.store.run(outbox.count)
+    if not rows and not plain_gaps and not restart_gaps and not unposted:
         await ctx.reply("no reconnect gaps recorded.")
         return
     lines = [f"last {len(rows)} known gap(s), most recent first:"] if rows else []
@@ -344,7 +363,10 @@ async def show_gaps(ctx):
         lines.append(f"the moderation cursor was ahead of this log {plain_gaps} time(s) on an unchanged server build, so events were missed then.")
     if restart_gaps:
         lines.append(f"{restart_gaps} more time(s) it was ahead after the server restarted, so events may have been missed.")
-    lines.append("moderation events during any of these gaps are permanently missing from this log.")
+    if unposted:
+        lines.append(f"{unposted} moderation event(s) could not be posted yet; I keep trying, so check that I can still send messages here.")
+    if rows or plain_gaps or restart_gaps:
+        lines.append("moderation events during any of these gaps are permanently missing from this log.")
     await ctx.reply("\n".join(lines))
 
 
@@ -380,33 +402,63 @@ async def on_ready():
     await check_moderation_cursor()
 
 
-@bot.event
+_posters = {}
+
+
+def moderation_event(frame_type):
+    """Registers the `on_*` handler for one moderation frame; its frame is forgotten once the handler finished, else retried."""
+    def decorator(handler):
+        @functools.wraps(handler)
+        async def run(frame):
+            await handler(frame)
+            await bot.store.run(outbox.forget, frame.get("seq"))
+
+        _posters[frame_type] = run
+        return bot.event(run)
+
+    return decorator
+
+
+@bot.every(outbox.RETRY_BASE_SECONDS, name="modlog-unposted", delay_first=True)
+async def retry_unposted():
+    """Runs again every frame that was received but never posted, with a longer wait after each failure."""
+    for seq, frame in await bot.store.run(outbox.due, int(time.time())):
+        await bot.store.run(outbox.mark_tried, seq, int(time.time()))
+        try:
+            await _posters[frame["type"]](frame)
+        except Exception as err:
+            if is_token_revoked(err):
+                raise
+            print(f"could not post moderation event {seq} yet ({type(err).__name__}); trying again later", flush=True)
+
+
+@moderation_event("member.timeout")
 async def on_member_timeout(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
     until = frame.get("until")
     fields = [("Member", member_label(user_id))]
     if until is None:
-        await post("member.timeout", "Timeout lifted", fields, tone="success")
+        await post("member.timeout", "Timeout lifted", fields, tone="success", frame=frame)
     else:
-        await post("member.timeout", "Member timed out", [*fields, ("Until", format_until(until))], tone="warn")
+        await post("member.timeout", "Member timed out", [*fields, ("Until", format_until(until))], tone="warn", frame=frame)
 
 
-@bot.event
+@moderation_event("member.removed")
 async def on_member_removed(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
-    await post("member.removed", "Member removed", [("Member", member_label(user_id))], tone="error")
+    await post("member.removed", "Member removed", [("Member", member_label(user_id))], tone="error", frame=frame)
 
 
-@bot.event
+@moderation_event("member.restored")
 async def on_member_restored(frame):
     user_id = frame["user_id"]
     await resolve_member(user_id)
-    await post("member.restored", "Member restored", [("Member", member_label(user_id))], tone="success")
+    await post("member.restored", "Member restored", [("Member", member_label(user_id))], tone="success", frame=frame)
 
 
-@bot.event
+@moderation_event("member.role_changed")
 async def on_member_role_changed(frame):
     await handle_role_change(frame)
 
@@ -414,7 +466,7 @@ async def on_member_role_changed(frame):
 ROLE_TITLES = {"created": ("Role created", "success"), "deleted": ("Role deleted", "error")}
 
 
-@bot.event
+@moderation_event("role.changed")
 async def on_role_changed(frame):
     role_id, change = frame["role_id"], frame.get("change")
     name = frame.get("name") or role_name_of(role_id)
@@ -427,7 +479,7 @@ async def on_role_changed(frame):
     if permissions:
         fields.append(("Permissions", permissions))
     description = None if change or len(fields) > 1 else "Its position or access was adjusted."
-    await post("role.changed", title, fields, tone=tone, description=description)
+    await post("role.changed", title, fields, tone=tone, description=description, frame=frame)
 
 
 async def announce_catchup_capability():
