@@ -127,3 +127,12 @@ async def test_catch_up_replays_backlog_and_advances_the_cursor(monkeypatch, tmp
     await bot._catch_up()
     assert seen == ["m1"]
     assert cursor.get(bot._cursor_conn, "c1") == 7
+
+
+async def test_a_plaintext_url_off_loopback_fails_at_start_before_any_request(monkeypatch):
+    monkeypatch.setenv("SLIMM_URL", "http://10.0.0.5:8080")
+    monkeypatch.setenv("SLIMM_BOT_TOKEN", "slimbot_fake")
+    bot = Bot()
+    with pytest.raises(RuntimeError, match="SLIMM_URL: refusing to send a bot token over http"):
+        await bot.start()
+    assert bot.client is None

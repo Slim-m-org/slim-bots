@@ -153,6 +153,7 @@ A member is in at most one call; if roster data somehow shows otherwise (no time
 
 `bot.setting(name, default=None, *, type=str, required=False)` reads one of a bot's *own* env vars the same way, converting via `type` (`int`, `float`, `bool`, `list` for a comma-separated one, or `dict` for comma-separated `key:value` pairs; a malformed pair is reported at `start()`) - `bot-jellyfin`'s nine `JELLYFIN_*` variables are the worked example.
 A missing `required=True` value is never raised at the `setting()` call itself (which usually runs at import time, before `Bot.start()`); it is collected and reported together with a missing `SLIMM_URL`/token/channels in the same one-line error when `start()` runs.
+`start()` also refuses a `SLIMM_URL` that is plaintext http to anything but loopback before any request, since every call carries the bot token.
 
 ## Where a bot listens, and how it is addressed
 

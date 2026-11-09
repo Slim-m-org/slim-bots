@@ -19,6 +19,7 @@ from . import catchup, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
+from .client import base_url_problem
 from .commands import Command, Group, build_help_text, split_first_word
 from .context import Context
 from .exceptions import CommandError, CommandNotFound, MissingPermissions
@@ -834,6 +835,8 @@ class Bot:
             if env_channels:
                 self.channels = env_channels
 
+        if base and (problem := base_url_problem(base)):
+            raise RuntimeError(f"SLIMM_URL: {problem}")
         missing = []
         if not base:
             missing.append("SLIMM_URL")

@@ -31,3 +31,11 @@ async def test_a_missing_user_reads_as_none():
     space = Space(client)
     client.respond("GET", "/users/gone", ApiError(404, "not found"))
     assert await space.find_member("gone") is None
+
+
+async def test_a_typed_dot_segment_asks_for_that_user_and_never_for_another_route():
+    client = FakeAsyncClient()
+    space = Space(client)
+    client.respond("GET", "/users/..%2Fme", ApiError(404, "not found"))
+    assert await space.find_member("../me") is None
+    assert client.calls == [("GET", "/users/..%2Fme", None, None)] and "../me" not in space.members

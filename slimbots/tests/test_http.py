@@ -127,3 +127,33 @@ async def test_download_gives_up_after_the_timeout_with_an_api_error():
         raise AssertionError("expected ApiError")
     finally:
         http.DEFAULT_TIMEOUT = original
+
+
+async def test_text_a_member_typed_stays_one_path_segment():
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.raw_path)
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    for typed in ("../me", "a?b=1", "x/../../me", "a#b"):
+        await client.get_user(typed)
+    await client.member_permissions("../me")
+    assert seen == [b"/users/..%2Fme", b"/users/a%3Fb%3D1", b"/users/x%2F..%2F..%2Fme", b"/users/a%23b", b"/members/..%2Fme/permissions"]
+
+
+async def test_an_id_that_is_already_safe_is_sent_unchanged():
+    seen = []
+    client = _client(lambda request: seen.append(request.url.path) or httpx.Response(200, json={}))
+    await client.get_user("0192b1c2-7d3e-7a10-8c55-3f2a9d4e6b70")
+    assert seen == ["/users/0192b1c2-7d3e-7a10-8c55-3f2a9d4e6b70"]
+
+
+def test_a_plaintext_base_that_is_not_loopback_is_refused_before_any_request():
+    import pytest
+
+    with pytest.raises(ValueError, match="refusing to send a bot token over http"):
+        AsyncClient("http://10.0.0.5:8080", "slimbot_fake", "test/1.0")
+    for allowed in ("https://my.space", "http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"):
+        AsyncClient(allowed, "slimbot_fake", "test/1.0")
