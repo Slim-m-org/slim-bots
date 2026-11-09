@@ -13,11 +13,12 @@ PLAYPAUSE_ID = "jf-playpause"
 
 
 def wanted(sessions):
-    """The icon and label for the control: Play only when every live party is paused, else Pause."""
-    parties = list(sessions)
-    if parties and all(session.paused for session in parties):
+    """The icon and label for the control: Play when every live party is paused, Pause when none is,
+    and a label that promises neither when calls disagree, since one registration serves every call."""
+    paused = [session.paused for session in sessions]
+    if paused and all(paused):
         return "play", "Play"
-    return "pause", "Pause"
+    return ("pause", "Play/Pause") if any(paused) else ("pause", "Pause")
 
 
 async def sync(bot):

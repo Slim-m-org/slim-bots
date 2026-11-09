@@ -72,14 +72,41 @@ def test_a_repeat_with_no_change_sends_nothing():
     session_registry.clear()
 
 
-def test_with_several_parties_it_shows_play_only_when_all_are_paused():
-    class Party:
-        def __init__(self, paused):
-            self.paused = paused
+class Party:
+    def __init__(self, paused):
+        self.paused = paused
 
+
+def test_with_several_parties_it_shows_play_only_when_all_are_paused_and_pause_only_when_none_is():
     assert dock_state.wanted([]) == ("pause", "Pause")
-    assert dock_state.wanted([Party(True), Party(False)]) == ("pause", "Pause")
+    assert dock_state.wanted([Party(False), Party(False)]) == ("pause", "Pause")
     assert dock_state.wanted([Party(True), Party(True)]) == ("play", "Play")
+
+
+def test_parties_that_disagree_get_a_label_that_promises_neither():
+    assert dock_state.wanted([Party(True), Party(False)]) == ("pause", "Play/Pause")
+    assert dock_state.wanted([Party(False), Party(True), Party(False)]) == ("pause", "Play/Pause")
+    assert dock_state.wanted(iter([Party(True), Party(False)])) == ("pause", "Play/Pause"), "a generator is read once"
+
+
+def test_two_calls_that_disagree_leave_the_registered_dock_neutral_until_they_agree():
+    client = armed_client()
+    second = started_session(client)
+    second.voice_channel_id = "v2"
+    session_registry.clear()
+    session_registry.add(second)
+    first = started_session(client)
+    first.pause()
+    asyncio.run(dock_state.sync(jellyfin.bot))
+    assert dock() == ("pause", "Play/Pause") and last_registered(client) == ("pause", "Play/Pause")
+    second.pause()
+    asyncio.run(dock_state.sync(jellyfin.bot))
+    assert dock() == ("play", "Play")
+    first.resume()
+    second.resume()
+    asyncio.run(dock_state.sync(jellyfin.bot))
+    assert dock() == ("pause", "Pause")
+    session_registry.clear()
 
 
 if __name__ == "__main__":
