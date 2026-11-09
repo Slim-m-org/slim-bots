@@ -264,9 +264,16 @@ def wire_bot(bot: Any, client: FakeAsyncClient, *, me_id: str | None = None, db_
         bot.data_path = os.path.join(tempfile.mkdtemp(), db_name)
 
 
+async def feed_frame(bot: Any, frame: dict[str, Any]) -> None:
+    """Hands `frame` to `bot` as the gateway loop does, then waits for the handler tasks that frame started."""
+    before = set(bot._background_tasks)
+    await bot._handle_frame(frame)
+    await asyncio.gather(*(bot._background_tasks - before), return_exceptions=True)
+
+
 def handle_frame(bot: Any, frame: dict[str, Any]) -> None:
     """Drives one gateway frame through `bot` to completion."""
-    asyncio.run(bot._handle_frame(frame))
+    asyncio.run(feed_frame(bot, frame))
 
 
 def run_module_tests(namespace: dict[str, Any]) -> None:

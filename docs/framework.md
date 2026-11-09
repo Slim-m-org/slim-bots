@@ -78,12 +78,13 @@ The same goes for an event listener, a button handler, a periodic task and the c
 
 Store your own data under `member.storage_key` (an alias for the stable slim-m user id, never `username`, which can change).
 Look a stored key back up to a live member with `await bot.space.member_for_key(key)` or `await bot.space.resolve_member(key)`, which fetches directly if the id fell out of the cached roster.
-`await bot.space.find_member(user_id)` is the same cache-then-fetch but returns `None` instead of raising when the user is gone.
+`await bot.space.find_member(user_id)` is the same cache-then-fetch but returns `None` only when the server answers 404 for that user.
+Any other failure (a 5xx, a network error, a revoked token) raises `ApiError`, so a handler that can carry on without the name catches it and one that cannot lets it reach the dispatch guard, which logs it.
 One line each way, by construction: neither name is spelled `id`, so a bot cannot casually key on the wrong field.
 
 ## The Space model
 
-`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed` and `member.role_changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
+`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed`, `member.role_changed`, `member.removed`, `member.restored` and `profile.changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
 
 - `space.get_member(id_or_name)`, `space.get_channel(...)`, `space.get_role(...)`
 - `await space.find_channel_by_path("category/channel")` (or a bare `"channel"`) returns the channel id by name without case, or `None`
@@ -298,6 +299,12 @@ Typing is cosmetic, so a frame that cannot be sent (the gateway is reconnecting,
 
 `_handle_frame` runs each `message.created` frame's `process_message` as its own `bot.background()` task rather than awaiting it inline, precisely so a command's own `wait_for`/`ctx.confirm` can be answered at all: the gateway loop is a single sequential `async for frame in gateway.frames(): await self._handle_frame(frame)`, so an inline await would block that loop inside the command, and the very reply frame a `wait_for` is waiting for would never be read until the wait's own timeout fired - a deadlock, not a race, for any command that waits on a later frame in the same connection. `process_message`'s own error handling (`_invoke` catches and replies to `CommandError`/`ApiError`/any other `Exception`, re-raising only a revoked-token `ApiError`) already narrows what can escape a message's task to the one case `bot.background()`'s fatal-on-exception policy should apply to, so no new exception handling was added - the fix is only where the coroutine is scheduled. Task *creation* order still matches frame arrival order (the loop spawns one task per frame before reading the next), but task *completion* order is not guaranteed - a slower command finishes after a faster later one. A per-channel queue was considered and rejected: serializing a channel's messages to completion before the next would reintroduce the same deadlock one level down, since a command's `wait_for` blocking its own channel's queue can never dequeue the very reply that would resolve it.
 
+Every other frame handler follows the same rule: `on_raw_message`, `on_frame`, `on_member_join` and each typed event run as their own `bot.background()` task, so a handler that makes several REST calls (automod removing a flagged message, say) cannot hold up the frame loop until the server drops the socket as a slow subscriber.
+Tasks start in frame arrival order and may finish in any order; a handler that needs an earlier event to have finished waits for it itself.
+An event nobody listens for starts no task.
+The library's own upkeep of `space` (channels, roles, members) still runs inline before a frame's handlers start, so a handler always sees the cache that frame produced.
+A frame with an unexpected shape is logged with its traceback and skipped; only a revoked token ends the connection.
+
 ## Splitting a bot across files
 
 `bot.load_extension(module)` imports `module` (a name, or an already-imported module object) and calls its `setup(bot)` once - loading the same extension twice is a no-op the second time, keyed by module name.
@@ -440,6 +447,8 @@ The styles are `exact` (`1h`), `interval` (`5m`), `compact` (`1h5m`), `spaced` (
 `slimbots.testing.FakeAsyncClient` never touches the network: pre-stubbed `/me`/`/channels`/`/members`/`/roles`, `respond(method, path, response_or_exception)` to stub anything else, and an unstubbed call fails loud rather than hanging.
 Drive a `Bot` directly with `await bot.process_message({...})` to exercise argument conversion, cooldowns, permission gating, and the bot-ignore default with no deployment; `await bot._handle_frame({...})` reaches an `@bot.event` handler the same way.
 A `wait_for`/`ctx.confirm` round trip needs `_handle_frame`, not `process_message` directly, since only `_handle_frame` schedules the command as its own background task the way the real gateway loop does; call it sequentially for each frame (command, then reply) with a short `await asyncio.sleep(0.01)` between them so the spawned task gets a turn to start and register its listener before the next frame arrives - `slimbots/tests/test_frame_loop_does_not_block_on_wait_for.py` and `bots/canvas-board/test_bot.py`'s `!board clear` tests are the worked examples.
+`await slimbots.testing.feed_frame(bot, frame)` is `_handle_frame` plus a wait for the handler tasks that frame started, and `handle_frame(bot, frame)` is the same for a synchronous test.
+A bare `await bot._handle_frame(frame)` returns once those tasks are started, not when they finish.
 `slimbots.testing.FakeVoice`/`FakeVoiceSession` stand in for `bot.voice`: `bot.voice = FakeVoice()`, then `await bot.voice.join(...)` hands back a session that records `publish_screen_share`'s arguments and whether `leave()` was called - no LiveKit package or network involved, which is also why CI never installs `livekit` (`bot-jellyfin`'s `test_bot.py` and `slimbots/tests/test_voice.py` are the worked examples).
 It is not a mock of slim-m's own validation or concurrency - `bots/casino/test_concurrency.py` is what proves money-safety, with a real sqlite connection and real threads.
 

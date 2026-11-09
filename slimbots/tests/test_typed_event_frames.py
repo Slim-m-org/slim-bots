@@ -5,7 +5,7 @@ from slimbots import events as ev
 from slimbots.authors import AuthorFilter
 from slimbots.bot import _CHANNEL_EVENT_FRAMES, _GLOBAL_EVENT_FRAMES
 from slimbots.space import Space
-from slimbots.testing import FakeAsyncClient
+from slimbots.testing import FakeAsyncClient, feed_frame
 
 CHANNEL = {"id": "c9", "name": "new", "kind": "text"}
 
@@ -73,7 +73,7 @@ async def test_a_frame_reaches_its_handler_as_the_mapped_class_with_every_field(
 
     handler.__name__ = handler_name
     bot.event(handler)
-    await bot._handle_frame({"type": kind, **SAMPLES[kind]})
+    await feed_frame(bot, {"type": kind, **SAMPLES[kind]})
 
     assert len(seen) == 1
     assert type(seen[0]) is payload_cls

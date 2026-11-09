@@ -399,7 +399,7 @@ class Bot:
             await ctx.reply_ephemeral(build_help_text(self, command_name=command_name), public_fallback=True)
 
     async def _dispatch_event(self, name: str, *args: Any) -> None:
-        for handler in self._listeners.get(name, []):
+        for handler in list(self._listeners.get(name, [])):
             await guard_dispatch(handler, *args)
 
     async def _resolve_author(self, author_id: str) -> Member | None:
@@ -528,6 +528,16 @@ class Bot:
         elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
             await guard_dispatch(self.space.fetch_member, frame["user_id"])
 
+    async def _track_members(self, kind: str, frame: dict[str, Any]) -> None:
+        """Drops a removed member from `space.members` and refetches a restored or renamed one, so lookups are never stale."""
+        user_id = frame.get("user_id")
+        if self.space is None or not user_id:
+            return
+        if kind == "member.removed":
+            self.space.members.pop(user_id, None)
+        elif kind == "member.restored" or (kind == "profile.changed" and user_id in self.space.members):
+            await guard_dispatch(self.space.fetch_member, user_id)
+
     async def _reload_roles(self) -> None:
         assert self.space is not None
         if await self._load_roles():
@@ -621,60 +631,68 @@ class Bot:
             log.exception("could not tell the invoker a command failed")
 
     async def _handle_frame(self, frame: dict[str, Any]) -> None:
+        """One server frame: a malformed one is logged and skipped, and only a revoked token ends the connection."""
+        await guard_dispatch(self._route_frame, frame)
+
+    async def _route_frame(self, frame: dict[str, Any]) -> None:
         kind: str = frame.get("type") or ""
-        await guard_dispatch(self._dispatch_event, "on_frame", frame)
+        self._spawn_event("on_frame", frame)
         await self._track_channels(kind, frame)
         await self._track_roles(kind, frame)
+        await self._track_members(kind, frame)
         if kind == "message.created":
-            channel_id = frame.get("channel_id")
-            if not await self._accepts_channel(channel_id, kind):
-                return
-            message = frame.get("message") or {}
-            if message.get("id") in self._replayed_ids:
-                return
-            if self._held_live is not None:
-                await guard_dispatch(self._dispatch_event, "on_raw_message", message)
-                self._held_live.append((channel_id, message))
-                return
-            self._note_seq(channel_id, message.get("seq"))
-            await guard_dispatch(self._dispatch_event, "on_raw_message", message)
-            self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
-            return
-        if kind == "interaction.created":
+            await self._route_message(frame)
+        elif kind == "interaction.created":
             # A call control is used on a call, which a channel-scoped bot is not scoped to, so scope never gates it.
             if frame.get("kind") == "call_control" or await self._accepts_channel(frame.get("channel_id"), kind):
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
-            return
-        if kind == "voice.participant_joined":
+        elif kind == "voice.participant_joined":
             # Never gated on self.channels - find_member() tracks every voice channel the bot can see.
             self.voice._note_joined(frame["channel_id"], frame["user_id"])
-            return
-        if kind == "voice.participant_left":
+        elif kind == "voice.participant_left":
             self.voice._note_left(frame["channel_id"], frame["user_id"])
-            return
-        if kind == "member.joined":
+        elif kind == "member.joined":
             # Special-cased, not a _GLOBAL_EVENT_FRAMES entry: on_member_join needs a resolved Member, which payload_cls(frame) cannot fetch.
-            user_id = frame.get("user_id")
-            member = await self._resolve_author(user_id) if user_id else None
-            if member is not None:
-                await guard_dispatch(self._dispatch_event, "on_member_join", member)
+            self.background(guard_dispatch(self._dispatch_member_join, frame.get("user_id")), name="on_member_join")
+        elif kind in _GLOBAL_EVENT_FRAMES:
+            self._spawn_typed(*_GLOBAL_EVENT_FRAMES[kind], frame)
+        elif kind in _CHANNEL_EVENT_FRAMES and await self._accepts_channel(frame.get("channel_id"), kind):
+            self._spawn_typed(*_CHANNEL_EVENT_FRAMES[kind], frame)
+
+    async def _route_message(self, frame: dict[str, Any]) -> None:
+        channel_id = frame.get("channel_id")
+        if not await self._accepts_channel(channel_id, "message.created"):
             return
-        global_event = _GLOBAL_EVENT_FRAMES.get(kind)
-        if global_event:
-            await self._dispatch_typed(*global_event, frame)
+        message = frame.get("message") or {}
+        if message.get("id") in self._replayed_ids:
             return
-        channel_event = _CHANNEL_EVENT_FRAMES.get(kind)
-        if channel_event:
-            if not await self._accepts_channel(frame.get("channel_id"), kind):
-                return
-            await self._dispatch_typed(*channel_event, frame)
+        self._spawn_event("on_raw_message", message)
+        if self._held_live is not None:
+            self._held_live.append((channel_id, message))
+            return
+        self._note_seq(channel_id, message.get("seq"))
+        self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
+
+    def _spawn_event(self, name: str, *args: Any) -> None:
+        """Runs `name`'s listeners as their own task, started in arrival order, so a slow handler never holds up the next frame."""
+        if self._listeners.get(name):
+            self.background(guard_dispatch(self._dispatch_event, name, *args), name=name)
+
+    def _spawn_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
+        if self._listeners.get(name):
+            self.background(guard_dispatch(self._dispatch_typed, name, payload_cls, frame), name=name)
 
     async def _dispatch_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
         """Wraps `frame` in `payload_cls` unless it is `None` (the pre-typed events keep the raw frame dict)."""
         payload = payload_cls(frame) if payload_cls else frame
-        await guard_dispatch(self._dispatch_event, name, payload)
+        await self._dispatch_event(name, payload)
+
+    async def _dispatch_member_join(self, user_id: str | None) -> None:
+        member = await self._resolve_author(user_id) if user_id else None
+        if member is not None:
+            await self._dispatch_event("on_member_join", member)
 
     def _note_seq(self, channel_id: str | None, seq: int | None) -> None:
         if self._cursor_conn is not None and seq is not None and channel_id is not None:

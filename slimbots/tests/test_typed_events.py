@@ -1,7 +1,7 @@
 import pytest
 
 from slimbots import Bot
-from slimbots.testing import FakeAsyncClient
+from slimbots.testing import FakeAsyncClient, feed_frame
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ async def test_message_edited_carries_a_typed_payload(bot):
     async def on_message_edited(event):
         seen.append(event)
 
-    await bot._handle_frame({
+    await feed_frame(bot, {
         "type": "message.edited", "channel_id": "c1", "seq": 5, "op_seq": 9,
         "message": {"id": "m1", "content": "new text"},
     })
@@ -48,13 +48,13 @@ async def test_channel_scoped_typed_event_is_gated_by_channels(bot):
     async def on_reactions_changed(event):
         seen.append(event)
 
-    await bot._handle_frame({
+    await feed_frame(bot, {
         "type": "reactions.changed", "channel_id": "other", "message_id": "m1",
         "reactions": [{"emoji": "x", "count": 1}],
     })
     assert seen == []
 
-    await bot._handle_frame({
+    await feed_frame(bot, {
         "type": "reactions.changed", "channel_id": "c1", "message_id": "m1",
         "reactions": [{"emoji": "x", "count": 1}],
     })
@@ -70,7 +70,7 @@ async def test_global_typed_event_is_never_channel_gated(bot):
     async def on_presence_changed(event):
         seen.append(event)
 
-    await bot._handle_frame({"type": "presence.changed", "user_id": "u1", "status": "online"})
+    await feed_frame(bot, {"type": "presence.changed", "user_id": "u1", "status": "online"})
     assert len(seen) == 1
     assert seen[0].user_id == "u1"
     assert seen[0].status == "online"
@@ -83,7 +83,7 @@ async def test_a_field_less_event_still_dispatches(bot):
     async def on_category_changed(event):
         seen.append(event)
 
-    await bot._handle_frame({"type": "category.changed"})
+    await feed_frame(bot, {"type": "category.changed"})
     assert len(seen) == 1
 
 
@@ -94,7 +94,7 @@ async def test_pre_existing_event_still_gets_the_raw_frame_not_a_wrapper(bot):
     async def on_member_removed(frame):
         seen.append(frame)
 
-    await bot._handle_frame({"type": "member.removed", "user_id": "u1"})
+    await feed_frame(bot, {"type": "member.removed", "user_id": "u1"})
     assert seen == [{"type": "member.removed", "user_id": "u1"}]
 
 
@@ -105,7 +105,7 @@ async def test_call_ringing_is_global_so_a_dm_channel_never_needs_to_be_in_chann
     async def on_call_ringing(event):
         seen.append(event)
 
-    await bot._handle_frame({
+    await feed_frame(bot, {
         "type": "call.ringing", "channel_id": "dm-1", "ring_id": "r1", "caller_id": "u1",
     })
     assert len(seen) == 1
@@ -124,7 +124,7 @@ async def test_member_joined_resolves_and_dispatches_a_live_member(bot, client):
     client.respond("GET", "/users/u-new", {
         "id": "u-new", "username": "newbie", "display_name": "Newbie",
     })
-    await bot._handle_frame({"type": "member.joined", "user_id": "u-new"})
+    await feed_frame(bot, {"type": "member.joined", "user_id": "u-new"})
     assert len(seen) == 1
     assert seen[0].id == "u-new"
     assert seen[0].display_name == "Newbie"
@@ -140,7 +140,7 @@ async def test_member_joined_for_an_unresolvable_id_dispatches_nothing(bot, clie
         seen.append(member)
 
     client.respond("GET", "/users/ghost", ApiError(404, "not found"))
-    await bot._handle_frame({"type": "member.joined", "user_id": "ghost"})
+    await feed_frame(bot, {"type": "member.joined", "user_id": "ghost"})
     assert seen == []
 
 

@@ -4,7 +4,7 @@ from slimbots import Bot
 from slimbots.authors import AuthorFilter
 from slimbots.models import Channel
 from slimbots.space import Space
-from slimbots.testing import FakeAsyncClient
+from slimbots.testing import FakeAsyncClient, feed_frame
 
 MEMBER = {"id": "u1", "username": "nick", "display_name": "Nick", "is_bot": False, "is_webhook": False, "role_ids": []}
 
@@ -47,15 +47,15 @@ def record_raw_messages(bot):
 async def test_voice_chat_is_dropped_by_default_when_channels_are_scoped(monkeypatch):
     bot, _ = await make_bot(monkeypatch, channels={"text"})
     seen = record_raw_messages(bot)
-    await bot._handle_frame(frame("voice"))
+    await feed_frame(bot, frame("voice"))
     assert seen == []
 
 
 async def test_listen_voice_chats_accepts_a_voice_channel_but_not_another_text_channel(monkeypatch):
     bot, _ = await make_bot(monkeypatch, channels={"text"}, listen_voice_chats=True)
     seen = record_raw_messages(bot)
-    await bot._handle_frame(frame("voice"))
-    await bot._handle_frame(frame("other-text"))
+    await feed_frame(bot, frame("voice"))
+    await feed_frame(bot, frame("other-text"))
     assert seen == ["voice"]
 
 
