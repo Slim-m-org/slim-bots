@@ -64,6 +64,46 @@ async def test_ctx_typing_stops_refreshing_once_the_block_exits(monkeypatch):
     assert len(bot._gateway.sent) == count_at_exit
 
 
+class DropsAfterTheFirstFrame(FakeGateway):
+    async def send(self, frame):
+        if self.sent:
+            raise ConnectionError("the socket dropped")
+        await super().send(frame)
+
+
+def _typing_ctx(monkeypatch, gateway):
+    import slimbots.context as context_module
+
+    monkeypatch.setattr(context_module, "TYPING_REFRESH_SECONDS", 0.01)
+    bot = Bot()
+    bot._gateway = gateway
+    return Context(bot=bot, message={"id": "m1"}, author=None, channel_id="c1")
+
+
+async def test_ctx_typing_on_a_closed_gateway_still_runs_the_body(monkeypatch, caplog):
+    ctx = _typing_ctx(monkeypatch, None)
+    ran = []
+    async with ctx.typing():
+        await asyncio.sleep(0.03)
+        ran.append(True)
+    assert ran == [True]
+    assert any("could not show typing in c1" in r.getMessage() for r in caplog.records)
+
+
+async def test_ctx_typing_whose_refresh_dies_mid_body_does_not_fail_a_finished_command(monkeypatch):
+    ctx = _typing_ctx(monkeypatch, DropsAfterTheFirstFrame())
+    async with ctx.typing():
+        await asyncio.sleep(0.05)
+
+
+async def test_ctx_typing_whose_refresh_dies_does_not_mask_the_bodys_own_error(monkeypatch):
+    ctx = _typing_ctx(monkeypatch, DropsAfterTheFirstFrame())
+    with pytest.raises(ValueError, match="the real failure"):
+        async with ctx.typing():
+            await asyncio.sleep(0.05)
+            raise ValueError("the real failure")
+
+
 async def test_canvas_send_cursor_and_stroke_preview_go_through_the_bots_gateway():
     bot = Bot()
     bot._gateway = FakeGateway()

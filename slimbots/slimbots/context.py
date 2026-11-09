@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import TYPE_CHECKING, Any
 
 from .http import ApiError
@@ -14,11 +15,13 @@ if TYPE_CHECKING:
     from .embeds import Embed
     from .models import Member
 
+log = logging.getLogger(__name__)
+
 TYPING_REFRESH_SECONDS = 4  # comfortably under slim-m's 6-second typing TTL
 
 
 class _Typing:
-    """Keeps a channel's typing indicator alive for `async with ctx.typing():`'s whole body."""
+    """Keeps a channel's typing indicator alive for `async with ctx.typing():`'s whole body; a failed refresh never reaches the body."""
 
     def __init__(self, bot: Bot, channel_id: str | None) -> None:
         self._bot = bot
@@ -26,7 +29,7 @@ class _Typing:
         self._task: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> _Typing:
-        await self._bot.start_typing(self._channel_id)
+        await self._pulse()
         self._task = asyncio.create_task(self._refresh_loop())
         return self
 
@@ -36,10 +39,16 @@ class _Typing:
         with contextlib.suppress(asyncio.CancelledError):
             await self._task
 
+    async def _pulse(self) -> None:
+        try:
+            await self._bot.start_typing(self._channel_id)
+        except Exception as err:
+            log.warning("could not show typing in %s: %s", self._channel_id, err)
+
     async def _refresh_loop(self) -> None:
         while True:
             await asyncio.sleep(TYPING_REFRESH_SECONDS)
-            await self._bot.start_typing(self._channel_id)
+            await self._pulse()
 
 
 class Context:
