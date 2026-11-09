@@ -90,7 +90,7 @@ class Destination(NamedTuple):
 async def vet_destination(
     url: str, *, allow_private: bool = False, allow_hosts: Iterable[str] = (), resolver: Resolver | None = None
 ) -> Destination:
-    """Whether `url` is an http(s) URL to a public host, and the addresses to connect to.
+    """Whether `url` is an http(s) URL to a public host, and the addresses to connect to, IPv4 first so a host without IPv6 never waits on one.
     `allow_private` and `allow_hosts` are the operator's opt-ins; every resolved answer must be public, not just the first."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
@@ -108,7 +108,8 @@ async def vet_destination(
         return Destination(UNRESOLVABLE)
     if not all(is_public_address(a) for a in addresses):
         return Destination(PRIVATE)
-    return Destination(None, tuple(dict.fromkeys(str(_address(a)) for a in addresses)))
+    distinct = dict.fromkeys(str(_address(a)) for a in addresses)
+    return Destination(None, tuple(sorted(distinct, key=lambda a: ":" in a)))
 
 
 async def destination_problem(

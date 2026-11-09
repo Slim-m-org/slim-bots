@@ -244,13 +244,13 @@ async def test_a_literal_address_and_an_operator_opt_in_are_not_rewritten():
 
 async def test_a_dead_address_falls_back_to_the_next_one_the_lookup_vouched_for():
     def handler(request):
-        if request.url.host == "2606:4700:4700::1111":
+        if request.url.host == "93.184.216.34":
             raise httpx.ConnectError("network unreachable")
         return httpx.Response(200, content=b"ok")
 
-    service, seen = vetted(handler, resolving("2606:4700:4700::1111", "93.184.216.34"))
+    service, seen = vetted(handler, resolving("93.184.216.34", "2606:4700:4700::1111"))
     assert (await service.send("GET", "https://feed.example/a")).body == b"ok"
-    assert [r.url.host for r in seen] == ["2606:4700:4700::1111", "93.184.216.34"]
+    assert [r.url.host for r in seen] == ["93.184.216.34", "2606:4700:4700::1111"]
 
 
 async def test_every_address_failing_is_unreachable():
