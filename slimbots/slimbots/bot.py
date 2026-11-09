@@ -745,6 +745,7 @@ class Bot:
         await self._dispatch_event("on_connect")
         async with await Gateway.open(self.client) as gateway:
             self._gateway = gateway
+            self.voice.forget_members()
             head = gateway.hello.get("moderation_seq")
             self.moderation_head = head if isinstance(head, int) else None
             try:
@@ -866,6 +867,7 @@ class Bot:
                 task.cancel()
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            await self.voice.leave_all()
             await self.client.aclose()
             if self._cursor_conn is not None:
                 self._cursor_conn.close()

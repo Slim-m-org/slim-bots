@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import importlib
 import logging
-import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .http import ApiError, is_forbidden, is_token_revoked
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = 15.0
+LEAVE_ALL_TIMEOUT_SECONDS = 5.0
 
 
 def _audio_encoding(rtc: Any, max_bitrate: int) -> Any:
@@ -42,16 +42,29 @@ def load_rtc() -> Any:
         raise VoiceError("bot.voice needs the `livekit` package installed - pip install livekit") from err
 
 
+def _heartbeat_refused_for_good(err: ApiError) -> bool:
+    """A 501 (no voice configured) or a 4xx other than 429 will not change by retrying; a network error, 5xx or 429 might."""
+    status = err.status
+    return status == 501 or (status is not None and 400 <= status < 500 and status != 429)
+
+
 class VoiceSession:
     """One joined LiveKit room: heartbeats itself over REST, and can publish a screen-share track pair."""
 
-    def __init__(self, bot: "Bot", channel_id: str, room: Any, can_publish: bool, rtc: Any) -> None:
+    def __init__(
+        self, bot: "Bot", channel_id: str, room: Any, can_publish: bool, rtc: Any,
+        *, on_closed: Callable[["VoiceSession"], None] | None = None,
+    ) -> None:
         self._bot = bot
         self.channel_id = channel_id
         self.room = room
         self.can_publish = can_publish
         self.rtc = rtc
+        self.lost = False
+        self._on_closed = on_closed
         self._heartbeat_task: asyncio.Task[Any] | None = None
+        self._leave_task: asyncio.Task[None] | None = None
+        self._disconnect_callbacks: list[Callable[[], Awaitable[Any]]] = []
         self._screen_share_sids: list[str] = []
 
     def start_heartbeat(self) -> None:
@@ -61,10 +74,53 @@ class VoiceSession:
                 self._heartbeat_loop(), name=f"voice-heartbeat-{self.channel_id}"
             )
 
+    def watch_room(self) -> None:
+        """Treats the LiveKit room dropping (a kick, a move, an SFU restart) as the end of this session."""
+        self.room.on("disconnected", self._on_room_disconnected)
+
+    def on_disconnect(self, callback: Callable[[], Awaitable[Any]]) -> None:
+        """Runs `await callback()` once if the session ends without `leave()`; at once when it already has."""
+        if self.lost:
+            self._bot.background(self._run_callback(callback), name=f"voice-lost-{self.channel_id}")
+        else:
+            self._disconnect_callbacks.append(callback)
+
+    def _on_room_disconnected(self, reason: Any = None) -> None:
+        self._lose(f"the LiveKit room disconnected (reason {reason})")
+
+    def _lose(self, reason: str) -> None:
+        if self.lost or self._leave_task is not None:
+            return
+        self.lost = True
+        log.warning("voice session in %s ended: %s", self.channel_id, reason)
+        self._bot.background(self._end(), name=f"voice-lost-{self.channel_id}")
+
+    async def _end(self) -> None:
+        await self.leave()
+        callbacks, self._disconnect_callbacks = self._disconnect_callbacks, []
+        for callback in callbacks:
+            await self._run_callback(callback)
+
+    async def _run_callback(self, callback: Callable[[], Awaitable[Any]]) -> None:
+        try:
+            await callback()
+        except Exception as err:
+            if is_token_revoked(err):
+                raise
+            log_failure(log, err, "voice disconnect handler for %s failed", self.channel_id)
+
     async def _heartbeat_loop(self) -> None:
         assert self._bot.client is not None, "a voice session needs an open Bot connection"
         while True:
-            await self._bot.client.voice_heartbeat(self.channel_id)
+            try:
+                await self._bot.client.voice_heartbeat(self.channel_id)
+            except ApiError as err:
+                if is_token_revoked(err):
+                    raise
+                if _heartbeat_refused_for_good(err):
+                    self._lose(f"the server refused its heartbeat: {err}")
+                    return
+                log.warning("voice heartbeat for %s failed, trying again: %s", self.channel_id, err)
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
 
     async def publish_screen_share(
@@ -128,15 +184,25 @@ class VoiceSession:
 
     async def leave(self) -> None:
         """Stops the heartbeat, disconnects from the room, and forgets the heartbeat server-side; safe to call twice."""
-        if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
-            self._heartbeat_task = None
-        await self.room.disconnect()
+        if self._leave_task is None:
+            self._leave_task = asyncio.create_task(self._teardown(), name=f"voice-leave-{self.channel_id}")
+        await asyncio.shield(self._leave_task)
+
+    async def _teardown(self) -> None:
+        heartbeat, self._heartbeat_task = self._heartbeat_task, None
+        if heartbeat is not None:
+            heartbeat.cancel()
+        try:
+            await self.room.disconnect()
+        except Exception as err:
+            log.warning("could not disconnect from the voice room for %s: %s", self.channel_id, err)
         assert self._bot.client is not None, "a voice session needs an open Bot connection"
         try:
             await self._bot.client.forget_voice_heartbeat(self.channel_id)
         except Exception as err:
             log.warning("could not forget the voice heartbeat for %s: %s", self.channel_id, err)
+        if self._on_closed is not None:
+            self._on_closed(self)
 
 
 class Voice:
@@ -144,22 +210,26 @@ class Voice:
 
     def __init__(self, bot: "Bot") -> None:
         self._bot = bot
-        # user_id -> (channel_id, monotonic time last confirmed there); see find_member().
-        self._member_channel: dict[str, tuple[str, float]] = {}
+        # user_id -> the voice channel their last join frame (or roster hit) put them in; see find_member().
+        self._member_channel: dict[str, str] = {}
+        self._sessions: set[VoiceSession] = set()
 
     def _note_joined(self, channel_id: str, user_id: str) -> None:
-        self._member_channel[user_id] = (channel_id, time.monotonic())
+        self._member_channel[user_id] = channel_id
 
     def _note_left(self, channel_id: str, user_id: str) -> None:
-        current = self._member_channel.get(user_id)
-        if current is not None and current[0] == channel_id:
+        if self._member_channel.get(user_id) == channel_id:
             del self._member_channel[user_id]
+
+    def forget_members(self) -> None:
+        """Drops what join/leave frames taught us; a socket that was down missed some, so the next lookup asks the roster."""
+        self._member_channel.clear()
 
     async def find_member(self, user_id: str) -> str | None:
         """The voice channel `user_id` is currently connected to, or None; see docs/framework.md."""
         cached = self._member_channel.get(user_id)
         if cached is not None:
-            return cached[0]
+            return cached
         return await self._find_member_via_roster(user_id)
 
     async def _find_member_via_roster(self, user_id: str) -> str | None:
@@ -195,9 +265,23 @@ class Voice:
             await room.connect(token["url"], token["token"], options=rtc.RoomOptions(auto_subscribe=False))
         except Exception as err:
             raise VoiceError(f"could not join channel {channel_id}'s voice room: {err}") from err
-        session = VoiceSession(self._bot, channel_id, room, bool(token.get("can_publish")), rtc)
+        session = VoiceSession(
+            self._bot, channel_id, room, bool(token.get("can_publish")), rtc, on_closed=self._sessions.discard,
+        )
+        self._sessions.add(session)
+        session.watch_room()
         session.start_heartbeat()
         return session
+
+    async def leave_all(self, timeout: float = LEAVE_ALL_TIMEOUT_SECONDS) -> None:
+        """Leaves every open session, best effort within `timeout`, so a redeploy leaves no ghost on the call."""
+        sessions = list(self._sessions)
+        if not sessions:
+            return
+        try:
+            await asyncio.wait_for(asyncio.gather(*(s.leave() for s in sessions), return_exceptions=True), timeout)
+        except asyncio.TimeoutError:
+            log.warning("gave up leaving %d voice session(s) after %.0fs", len(self._sessions), timeout)
 
 
 async def join_to_speak(voice: Any, channel_id: str, *, label: str, to: str) -> Any:
@@ -208,7 +292,7 @@ async def join_to_speak(voice: Any, channel_id: str, *, label: str, to: str) -> 
     except VoiceError as err:
         raise VoiceError(f"can't join {label}: {err}") from err
     if not session.can_publish:
-        await session.leave()
+        await _leave_quietly(session)
         raise VoiceError(f"I can join {label} but can't speak there - I need SPEAK to {to}.")
     return session
 
@@ -219,12 +303,20 @@ async def start_or_leave(session: Any, start: Awaitable[Any], *, doing: str, exp
     try:
         await start
     except Exception as err:
-        await session.leave()
+        await _leave_quietly(session)
         if is_token_revoked(err):
             raise
         if not isinstance(err, (*expected, VoiceError)):
             log_failure(log, err, "unexpected failure starting %s", doing)
         raise VoiceError(f"could not start {doing}: {err}") from err
+
+
+async def _leave_quietly(session: Any) -> None:
+    """Leaves, logging a failure instead of raising it, so the error that sent us here is the one that surfaces."""
+    try:
+        await session.leave()
+    except Exception as err:
+        log_failure(log, err, "could not leave the voice session for %s", getattr(session, "channel_id", "?"))
 
 
 async def publish_microphone(
