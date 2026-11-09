@@ -125,13 +125,14 @@ class Bot:
         max_delay: float = 60.0, help_command: bool = True, channels: set[str] | list[str] | None = None,
         require_channels: bool = False, cursor_path: str | None = None, default_data_path: str | None = None,
         store_migrate: Callable[[Any], None] | None = None, listen_voice_chats: bool = False,
-        mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE,
+        mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE, ordered_events: bool = False,
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
         self.permissions_readable: bool | None = None
         self.mention_commands = mention_commands
         self.max_replay_age = max_replay_age
+        self.ordered_events = ordered_events
         self.listen_voice_chats = listen_voice_chats or os.environ.get("SLIMM_LISTEN_VOICE_CHATS") == "1"
         self._url = url
         self._token = token
@@ -162,6 +163,7 @@ class Bot:
         self._pending_seqs = cursor.Pending()
         self._cursor_flush: asyncio.TimerHandle | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._handler_tail: asyncio.Task[Any] | None = None
         self._periodic: dict[str, Periodic] = {}
         self._periodic_started: set[str] = set()
         self._fatal_error: BaseException | None = None
@@ -666,7 +668,7 @@ class Bot:
             self.voice._note_left(frame["channel_id"], frame["user_id"])
         elif kind == "member.joined":
             # Special-cased, not a _GLOBAL_EVENT_FRAMES entry: on_member_join needs a resolved Member, which payload_cls(frame) cannot fetch.
-            self.background(guard_dispatch(self._dispatch_member_join, frame.get("user_id")), name="on_member_join")
+            self._start_handler("on_member_join", self._dispatch_member_join, frame.get("user_id"))
         elif kind in _GLOBAL_EVENT_FRAMES:
             self._spawn_typed(*_GLOBAL_EVENT_FRAMES[kind], frame)
         elif kind in _CHANNEL_EVENT_FRAMES and await self._accepts_channel(frame.get("channel_id"), kind):
@@ -687,13 +689,25 @@ class Bot:
         self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
 
     def _spawn_event(self, name: str, *args: Any) -> None:
-        """Runs `name`'s listeners as their own task, started in arrival order, so a slow handler never holds up the next frame."""
         if self._listeners.get(name):
-            self.background(guard_dispatch(self._dispatch_event, name, *args), name=name)
+            self._start_handler(name, self._dispatch_event, name, *args)
 
     def _spawn_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
         if self._listeners.get(name):
-            self.background(guard_dispatch(self._dispatch_typed, name, payload_cls, frame), name=name)
+            self._start_handler(name, self._dispatch_typed, name, payload_cls, frame)
+
+    def _start_handler(self, name: str, func: Callable[..., Awaitable[Any]], *args: Any) -> None:
+        """Runs a frame's handlers as their own task, so a slow one never holds up the next frame; `ordered_events` chains them."""
+        previous = self._handler_tail if self.ordered_events else None
+
+        async def run() -> None:
+            if previous is not None and not previous.done():
+                await asyncio.wait([previous])
+            await guard_dispatch(func, *args)
+
+        task = self.background(run(), name=name)
+        if self.ordered_events:
+            self._handler_tail = task
 
     async def _dispatch_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
         """Wraps `frame` in `payload_cls` unless it is `None` (the pre-typed events keep the raw frame dict)."""

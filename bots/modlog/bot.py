@@ -55,7 +55,7 @@ def init_db(conn):
     conn.commit()
 
 
-bot = Bot(prefix="!", require_channels=True, default_data_path="modlog.db", store_migrate=init_db)
+bot = Bot(prefix="!", require_channels=True, default_data_path="modlog.db", store_migrate=init_db, ordered_events=True)
 
 # user_id -> set of role_ids last observed, used to infer a member.role_changed event's direction.
 _last_roles = {}

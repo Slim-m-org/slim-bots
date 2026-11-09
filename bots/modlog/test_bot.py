@@ -127,6 +127,42 @@ def test_role_change_from_an_older_server_is_inferred_from_the_member():
     assert last_embed(client)["title"] == "Role revoked"
 
 
+def two_role_changes_with_a_slow_first_post():
+    client = setup()
+    posts = []
+    plain_call = client.call
+
+    async def call(method, path, body=None, **kw):
+        if (method, path) == ("POST", "/channels/c1/messages"):
+            posts.append(1)
+            await asyncio.sleep(0.05 if len(posts) == 1 else 0)
+        return await plain_call(method, path, body, **kw)
+
+    client.call = call
+    client.respond("GET", "/users/u1", {**MEMBERS[0], "role_ids": ["r1"], "roles": ["Helper"]})
+    granted = {"type": "member.role_changed", "user_id": "u1", "role_id": "r1", "granted": True, "role_name": "Helper"}
+
+    async def run():
+        await modlog.bot._handle_frame(granted)
+        await modlog.bot._handle_frame({**granted, "granted": False})
+        await asyncio.gather(*list(modlog.bot._background_tasks))
+
+    asyncio.run(run())
+    return [sent["embeds"][0]["title"] for sent in client.sent]
+
+
+def test_role_changes_that_arrive_together_are_logged_in_the_order_they_happened():
+    assert two_role_changes_with_a_slow_first_post() == ["Role granted", "Role revoked"]
+
+
+def test_the_log_would_swap_those_two_entries_if_handlers_were_not_ordered():
+    modlog.bot.ordered_events = False
+    try:
+        assert two_role_changes_with_a_slow_first_post() == ["Role revoked", "Role granted"]
+    finally:
+        modlog.bot.ordered_events = True
+
+
 def test_role_created_shows_its_name():
     client = setup()
     after = {"name": "Helpers", "color": 1, "hoist": False, "mentionable": False}

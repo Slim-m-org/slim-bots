@@ -44,7 +44,7 @@ def init_db(conn):
         ensure_columns(conn, table, {"attachment_ids": "TEXT NOT NULL DEFAULT ''"})
 
 
-bot = Bot(prefix="!", require_channels=True, default_data_path="starboard.db", store_migrate=init_db)
+bot = Bot(prefix="!", require_channels=True, default_data_path="starboard.db", store_migrate=init_db, ordered_events=True)
 
 STARBOARD_CHANNEL = bot.setting("STARBOARD_CHANNEL", required=True)
 EMOJI = bot.setting("STARBOARD_EMOJI", "\u2b50")

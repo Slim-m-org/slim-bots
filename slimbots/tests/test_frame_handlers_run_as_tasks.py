@@ -165,3 +165,55 @@ async def test_a_member_join_whose_lookup_fails_is_logged_not_dropped_silently(c
     assert greeted == []
     assert any("HTTP 503" in r.getMessage() for r in caplog.records)
     assert bot._fatal_error is None
+
+
+async def ordered_run(ordered, frames):
+    bot, _client = await a_bot()
+    bot.ordered_events = ordered
+    done = []
+
+    @bot.event
+    async def on_member_removed(frame):
+        await asyncio.sleep(frame["delay"])
+        if frame.get("boom"):
+            raise RuntimeError("handler bug")
+        done.append(frame["user_id"])
+
+    for frame in frames:
+        await asyncio.wait_for(bot._handle_frame({"type": "member.removed", **frame}), 1)
+    await finish(bot)
+    return done
+
+
+SLOW_THEN_QUICK = [{"user_id": "first", "delay": 0.05}, {"user_id": "second", "delay": 0}]
+
+
+async def test_by_default_a_quick_handler_may_finish_before_an_earlier_slow_one():
+    assert await ordered_run(False, SLOW_THEN_QUICK) == ["second", "first"]
+
+
+async def test_ordered_events_finish_in_frame_arrival_order_without_blocking_the_frame_loop():
+    assert await ordered_run(True, SLOW_THEN_QUICK) == ["first", "second"]
+
+
+async def test_an_ordered_handler_that_fails_does_not_stop_the_ones_after_it(caplog):
+    frames = [{"user_id": "first", "delay": 0, "boom": True}, {"user_id": "second", "delay": 0}]
+    with caplog.at_level(logging.ERROR):
+        assert await ordered_run(True, frames) == ["second"]
+    assert any(r.exc_info and "handler bug" in str(r.exc_info[1]) for r in caplog.records)
+
+
+async def test_ordered_events_hold_the_frame_loop_for_nothing_even_behind_a_stuck_handler():
+    bot, _client = await a_bot()
+    bot.ordered_events = True
+    stuck = asyncio.Event()
+
+    @bot.event
+    async def on_member_removed(frame):
+        await stuck.wait()
+
+    for number in range(3):
+        await asyncio.wait_for(bot._handle_frame({"type": "member.removed", "user_id": f"u{number}"}), 1)
+    for task in list(bot._background_tasks):
+        task.cancel()
+    await finish(bot)
