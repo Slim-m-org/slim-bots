@@ -28,11 +28,11 @@ async def test_a_503_is_retried_with_doubling_backoff_until_it_succeeds():
 
 
 async def test_backoff_is_capped_and_the_last_error_is_raised_after_the_retries():
-    client = _client(lambda request: httpx.Response(429, json={"error": "slow down"}))
+    client = _client(lambda request: httpx.Response(503, json={"error": "busy"}))
     delays, sleep = _recorder()
     with pytest.raises(ApiError) as caught:
         await client.call("GET", "/x", retries=4, base_delay=1.0, max_delay=3.0, sleep=sleep)
-    assert caught.value.status == 429
+    assert caught.value.status == 503
     assert delays == [1.0, 2.0, 3.0, 3.0]
 
 
@@ -56,3 +56,84 @@ async def test_a_network_failure_is_retried_then_raised_with_no_status():
         await client.call("GET", "/x", retries=2, sleep=sleep)
     assert caught.value.status is None
     assert delays == [0.5, 1.0]
+
+
+async def test_a_429_is_retried_after_the_wait_its_retry_after_header_names():
+    replies = iter([httpx.Response(429, headers={"retry-after": "3"}, json={"error": "slow down"}), httpx.Response(200, json={"ok": True})])
+    client = _client(lambda request: next(replies))
+    delays, sleep = _recorder()
+    assert await client.call("GET", "/x", sleep=sleep) == {"ok": True}
+    assert delays == [3.0]
+
+
+async def test_a_429_without_the_header_uses_the_retry_after_seconds_in_the_body():
+    replies = iter([httpx.Response(429, json={"error": "slow mode: wait 2s", "retry_after_seconds": 2}), httpx.Response(200, json={})])
+    client = _client(lambda request: next(replies))
+    delays, sleep = _recorder()
+    await client.call("POST", "/x", {"a": 1}, sleep=sleep)
+    assert delays == [2.0]
+
+
+async def test_a_429_asking_for_a_longer_wait_than_the_cap_is_raised_without_retrying():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(429, headers={"retry-after": "30"}, json={"error": "slow mode: wait 30s", "retry_after_seconds": 30})
+
+    client = _client(handler)
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("POST", "/x", sleep=sleep)
+    assert caught.value.status == 429 and caught.value.retry_after == 30.0
+    assert len(seen) == 1 and delays == []
+
+
+async def test_a_429_that_names_no_wait_is_a_quota_and_is_raised_at_once():
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(429, json={"error": "slow down and retry"})
+
+    client = _client(handler)
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("POST", "/x", sleep=sleep)
+    assert caught.value.retry_after is None
+    assert len(seen) == 1 and delays == []
+
+
+@pytest.mark.parametrize("asked", ["soon", "-1", "nan", "inf", ""])
+async def test_an_unusable_retry_after_is_ignored(asked):
+    client = _client(lambda request: httpx.Response(429, headers={"retry-after": asked}, json={"error": "slow down"}))
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("GET", "/x", sleep=sleep)
+    assert caught.value.retry_after is None and delays == []
+
+
+async def test_the_wait_cap_is_the_callers_to_set():
+    replies = iter([httpx.Response(429, headers={"retry-after": "30"}), httpx.Response(200, json={})])
+    client = _client(lambda request: next(replies))
+    delays, sleep = _recorder()
+    await client.call("GET", "/x", max_retry_after=60.0, sleep=sleep)
+    assert delays == [30.0]
+
+
+@pytest.mark.parametrize("send", ["reply", "press"])
+async def test_a_private_reply_is_never_retried_because_a_repeat_would_be_a_second_reply(send):
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(502, text="bad gateway")
+
+    client = _client(handler)
+    with pytest.raises(ApiError) as caught:
+        if send == "reply":
+            await client.send_ephemeral("c1", "m1", "hi")
+        else:
+            await client.send_ephemeral_to_press("c1", "i1", "hi")
+    assert caught.value.status == 502
+    assert len(seen) == 1
