@@ -47,7 +47,7 @@ A bot script imports `Bot` and little else.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
 - `int` / `float` - parsed from one whitespace-separated token, or a clear `BadArgument` reply, never a traceback.
-- `str` - one token, unless it is the *last* parameter, in which case it consumes the rest of the message (`!say hello there` -> `text="hello there"`).
+- `str` - one token, unless it is the *last* parameter, in which case it consumes the rest of the message exactly as typed, line breaks and spacing kept (`!say hello there` -> `text="hello there"`). Any whitespace, a line break included, may follow the command name.
 - `Member` - resolved from `@username` or a bare username/id against `bot.space`, or a `BadArgument` naming the token that did not resolve.
 - `Duration` - `10m`, `2h30m`, `1d` parsed to an int count of seconds (`slimbots/converters.py`); replaces a bot's own duration regex.
 - `TimeOfDay` - `HH:MM` parsed to a `.hour`/`.minute` pair, range-checked; replaces a bot's own clock regex.
@@ -71,6 +71,7 @@ This is what replaced every bot's own `TRIGGER_X = re.compile(...)` wall of shap
 A prefixed message naming no registered command is silent by default - it fires `on_command_not_found(ctx, error)` if, and only if, something is actually listening for it, so a stray `!` in ordinary conversation costs nothing (no author lookup, no `ctx` built) when nobody cares.
 `error` is a real `CommandNotFound` (`error.invoked_with`, `str(error)`), not just a name string, for the same reason every other command failure is a real exception rather than a tuple.
 A command that raises anything else is logged with its traceback and answered with one generic line, sent privately (publicly on a server without private replies); the exception text never reaches chat, and `on_command_error` still fires.
+The same goes for an event listener, a button handler, a periodic task and the connection loop: a bug in one is logged through `logging` with its traceback, while an `ApiError` or `OSError` gets a single warning line.
 
 ## Identity
 
@@ -215,7 +216,10 @@ A column that needs to join the primary key (`bot-casino`'s `hands.hand_index`, 
 `slimbots.http.AsyncClient` is built on `httpx.AsyncClient` rather than `asyncio.to_thread` over `urllib`.
 A bot's steady state is awaiting the websocket, and httpx gives real connection pooling and a timeout that composes with the rest of the event loop, instead of parking a thread-pool worker per in-flight request for something that is I/O-bound anyway.
 httpx was already a transitive dependency in this environment, so it costs nothing new to vet.
-`call()` retries a 429 or 5xx with exponential backoff (slim-m sends no `Retry-After`) and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
+`call()` retries a 5xx or a network failure with exponential backoff and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
+A 429 is retried after the wait it names (`Retry-After`, or `retry_after_seconds` in the body, which slow mode and the rate limiter both set) when that is within `max_retry_after` (15 seconds by default), and raised at once otherwise.
+A 429 that names no wait, such as the limit of three private replies per message, is a quota that waiting does not lift, so it is raised without retrying; `ApiError.retry_after` carries the wait when there was one.
+The private reply routes are never retried, since a repeated POST would be a second reply.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
 `await bot.client.download(path, max_bytes=)` is the matching read: the raw body of a `GET` (an attachment, say) with the same auth and base URL, never reading past `max_bytes` (10 MiB by default) and giving up after the client's 15 seconds; wrap the call in `asyncio.timeout(...)` for a tighter bound.
 It raises `ApiError` for an HTTP error or a network failure and `ResponseTooLarge` (an `ApiError` with no status, `.limit` set) when the body is bigger; `FakeAsyncClient` answers it from `respond("GET", path, b"...")`.
@@ -267,6 +271,7 @@ Every one of these is still a thin, hand-written wrapper over one REST call rath
 `typing`, `canvas.cursor` and `canvas.stroke_preview` are client->server frames, not REST calls - slim-m's own rate limits and authorization for them mirror the REST routes they stand in for, but there is no request/response, just a frame sent into the open socket.
 `await bot.send_frame(frame)` sends one, raising a clear `RuntimeError` rather than hanging if nothing is connected yet; `await bot.start_typing(channel_id)` is the one-line form.
 `async with ctx.typing():` is the one most commands want: it sends the initial frame on entry and refreshes every four seconds (slim-m's typing TTL is six) for as long as the block runs, so a slow command's typing indicator does not lapse partway through - `ctx.typing()`'s refresh loop is a plain, locally-scoped task cancelled on exit, not a `bot.background()` task, since nothing about it needs to outlive one command.
+Typing is cosmetic, so a frame that cannot be sent (the gateway is reconnecting, say) is logged as a warning and never fails or masks the block.
 `Canvas(client, channel_id, bot=bot)`'s `send_cursor(x, y)` and `send_stroke_preview(object_id, points, ended=)` need that `bot=` (a clear `RuntimeError` otherwise) since they go over the gateway, not REST - the REST-only methods (`place`/`move`/`remove`/`clear`/`restore`/`reorder`/`viewport`) never needed it and still do not.
 
 ## Waiting for a reply
