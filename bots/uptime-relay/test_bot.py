@@ -9,6 +9,7 @@ os.environ.setdefault("UPTIME_RELAY_SECRET", "test-secret")
 
 import bot as relay_bot
 from relay import Alert
+from slimbots.http import ApiError
 from slimbots.testing import FakeAsyncClient, run_module_tests
 from slimbots.text import format_duration
 
@@ -141,6 +142,74 @@ def test_two_webhooks_at_once_open_one_alert_and_count_both():
     asyncio.run(both())
     assert len(client.sent) == 1
     assert "2 alerts" in edits(client)[-1]
+
+def delete_post(client, message_id):
+    client.respond("PATCH", f"/channels/{CHANNEL}/messages/{message_id}", ApiError(404, {"error": "message not found"}))
+
+
+def stored_message_id(key):
+    return asyncio.run(relay_bot.bot.store.run(relay_bot.open_alert, key))["message_id"]
+
+
+def test_a_repeat_after_the_post_was_deleted_posts_a_fresh_alert():
+    client = setup()
+    handle(DOWN, now=1_000_000)
+    delete_post(client, client.sent[-1]["id"])
+    handle(DOWN, now=1_000_060)
+    assert len(client.sent) == 2
+    assert "2 alerts" in client.sent[-1]["content"]
+    assert [b.split(":")[1] for b in button_ids(client.sent[-1]["components"])] == ["ack", "silence"]
+    assert stored_message_id(DOWN.key) == client.sent[-1]["id"]
+    allow_edits(client)
+    handle(DOWN, now=1_000_120)
+    assert len(client.sent) == 2 and "3 alerts" in edits(client)[-1], "later repeats edit the new post"
+
+
+def test_a_silenced_alert_whose_post_was_deleted_stays_quiet():
+    client = setup()
+    handle(DOWN, now=int(relay_bot.time.time()))
+    message_id = allow_edits(client)
+    [_, silence_id] = button_ids(client.sent[-1]["components"])
+    press(silence_id)
+    delete_post(client, message_id)
+    handle(DOWN, now=int(relay_bot.time.time()) + 60)
+    assert len(client.sent) == 1
+
+
+def test_recovery_after_the_post_was_deleted_announces_it_and_closes_the_alert():
+    client = setup()
+    handle(DOWN, now=1_000_000)
+    delete_post(client, client.sent[-1]["id"])
+    handle(UP, now=1_000_000 + 25 * 60)
+    assert client.sent[-1]["content"] == "RESOLVED - Jellyfin (kuma) was down for 25 min."
+    handle(DOWN, now=1_100_000)
+    assert client.sent[-1]["content"].startswith("DOWN - Jellyfin"), "the alert is closed, so a new outage opens a new one"
+
+
+def test_recovery_closes_the_alert_even_when_clearing_the_buttons_is_refused():
+    client = setup()
+    handle(DOWN, now=1_000_000)
+    allow_edits(client)
+    real_call = client.call
+
+    async def call(method, path, body=None, **kw):
+        if method == "PUT" and path.endswith("/components"):
+            raise ApiError(404, {"error": "message not found"})
+        return await real_call(method, path, body, **kw)
+
+    client.call = call
+    handle(UP, now=1_000_000 + 60)
+    handle(DOWN, now=1_100_000)
+    assert len(client.sent) == 2
+
+
+def test_a_name_or_message_cannot_ping():
+    client = setup()
+    handle(Alert("generic", "@everyone", True, "call @[Core Team] now"), now=1_000_000)
+    content = client.sent[-1]["content"]
+    assert "\\@everyone" in content and "\\@[Core Team]" in content
+    assert content.count("@") == content.count("\\@")
+
 
 def test_durations_read_naturally():
     assert format_duration(30, "minutes") == "1 min"

@@ -9,8 +9,8 @@ import uuid
 
 import relay
 from slimbots import ApiError, Bot, Button, rows
-from slimbots.http import is_token_revoked
-from slimbots.text import format_duration
+from slimbots.http import is_not_found, is_token_revoked
+from slimbots.text import escape_mentions, format_duration
 
 
 def init_db(conn):
@@ -86,6 +86,12 @@ def close_alert(conn, key):
     conn.commit()
 
 
+def move_alert(conn, key, message_id):
+    conn.execute("UPDATE alerts SET message_id = ? WHERE key = ?", (message_id, key))
+    conn.commit()
+    return open_alert(conn, key)
+
+
 def clock(epoch):
     return time.strftime("%H:%M UTC", time.gmtime(epoch))
 
@@ -104,11 +110,11 @@ def render(row, silence=None):
         lines.append(f"acknowledged by {row['acked_by']}")
     if silence:
         lines.append(f"silenced by {silence['by']} until {clock(silence['until'])}")
-    return "\n".join(lines)
+    return escape_mentions("\n".join(lines))
 
 
 def render_resolved(row, now):
-    return f"RESOLVED - {row['service']} ({row['source']}) was down for {format_duration(now - row['since'], 'minutes')}."
+    return escape_mentions(f"RESOLVED - {row['service']} ({row['source']}) was down for {format_duration(now - row['since'], 'minutes')}.")
 
 
 def buttons(row, silence=None):
@@ -120,13 +126,39 @@ def buttons(row, silence=None):
     return rows(found) if found else []
 
 
-async def _edit(row, content):
+async def _tolerate(row, call):
+    """Awaits an edit of the alert's post; False when the post is gone, and any other failure is logged and swallowed."""
     try:
-        await bot.client.edit_message(bot.channel, row["message_id"], content)
+        await call
     except ApiError as err:
         if is_token_revoked(err):
             raise
+        if is_not_found(err):
+            return False
         print(f"could not edit the alert for {row['key']}: {err}", file=sys.stderr)
+    return True
+
+
+async def _edit(row, content):
+    return await _tolerate(row, bot.client.edit_message(bot.channel, row["message_id"], content))
+
+
+async def _post_again(row):
+    """Replaces a post that was deleted, by a moderator or by retention, so the outage is still announced."""
+    message_id = str(uuid.uuid4())
+    await bot.client.send(bot.channel, render(row), message_id=message_id, components=buttons(row))
+    await bot.store.run(move_alert, row["key"], message_id)
+
+
+async def _resolve(row, now):
+    text = render_resolved(row, now)
+    try:
+        if await _edit(row, text):
+            await _tolerate(row, bot.client.edit_components(bot.channel, row["message_id"], []))
+        else:
+            await bot.client.send(bot.channel, text)
+    finally:
+        await bot.store.run(close_alert, row["key"])
 
 
 async def handle(alert, now=None):
@@ -134,14 +166,13 @@ async def handle(alert, now=None):
     row = await bot.store.run(open_alert, alert.key)
     if not alert.down:
         if row:
-            await _edit(row, render_resolved(row, now))
-            await bot.client.edit_components(bot.channel, row["message_id"], [])
-            await bot.store.run(close_alert, alert.key)
+            await _resolve(row, now)
         return
     silence = await bot.store.run(silence_of, alert.key, now)
     if row:
         row = await bot.store.run(bump_alert, alert.key, alert.message)
-        await _edit(row, render(row, silence))
+        if not await _edit(row, render(row, silence)) and not silence:
+            await _post_again(row)
         return
     if silence:
         return

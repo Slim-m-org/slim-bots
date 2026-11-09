@@ -47,6 +47,8 @@ The listener answers 204 when it took the alert, 401 for a missing or wrong secr
 - A service going down posts one message: `DOWN - <service> (<source>)`, the monitor's message, when it started and the monitor's link, with Acknowledge and Silence buttons.
 - More down alerts for the same service edit that message with a count instead of posting again.
 - Recovery edits it to `RESOLVED - <service> was down for 25 min.` and clears the buttons.
+- If someone deleted the message, or the channel's retention removed it, the next down alert posts a fresh one, and a recovery posts the resolved line as a new message.
+- An at-sign in a service name or a monitor message is escaped, so a webhook cannot ping anyone.
 - Acknowledge records the display name of whoever pressed it on the message and drops its own button.
 - Silence holds new posts for that service for `UPTIME_RELAY_SILENCE_MINUTES`, and says who silenced it until when.
   An alert that is already open keeps updating while silenced, so the channel never shows a stale state.
