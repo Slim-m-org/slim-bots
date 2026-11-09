@@ -23,14 +23,7 @@ import squiggle
 import store_db
 import tracer
 import where
-from slimbots import ApiError, Bot, Permissions
-
-try:
-    from slimbots import BatchUnavailable
-except ImportError:  # slimbots before 0.18 has no batch place
-
-    class BatchUnavailable(Exception):
-        pass
+from slimbots import ApiError, BatchUnavailable, Bot, Permissions
 from slimbots.http import is_rate_limited
 from store_db import SLOTS, add_stroke, add_strokes, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
@@ -111,8 +104,6 @@ def grouped(objects):
 
 
 async def batch_with_retry(canvas, wire):
-    if not hasattr(canvas, "place_many"):
-        raise BatchUnavailable("this slimbots has no batch place")
     for attempt in range(RATE_RETRIES):
         try:
             return await canvas.place_many(wire)
@@ -262,11 +253,9 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
 
 
 MODES = ("photo", "shaded", "color", "paste", "trace", "undo", "clear")
-# slimbots before 0.18 has no `suggest`, so the composer then just lacks the pick list
-_PICKER = {"suggest": {"mode": MODES}} if "suggest" in inspect.signature(bot.group).parameters else {}
 
 
-@bot.group(name="draw", help="Draw in your call: <idea>, photo, shaded, color, paste <subject>, trace <word>, undo, clear", **_PICKER)
+@bot.group(name="draw", help="Draw in your call: <idea>, photo, shaded, color, paste <subject>, trace <word>, undo, clear", suggest={"mode": MODES})
 async def draw(ctx, mode: str = ""):
     """The composer labels the first word `mode`; anything that is not a mode is the idea to draw."""
     query = mode.strip()
