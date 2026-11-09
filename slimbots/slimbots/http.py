@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import urllib.parse
 import uuid
 from typing import Any, Awaitable, Callable
@@ -16,16 +17,18 @@ from .components import to_wire as components_to_wire
 from .models import Attachment, DmConversation, Message
 
 DEFAULT_TIMEOUT = 15.0
+MAX_RETRY_AFTER = 15.0
 DEFAULT_DOWNLOAD_BYTES = 10 * 1024 * 1024
 log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
-    """An HTTP error response (`status` set), or a network failure (`status` None)."""
+    """An HTTP error response (`status` set), or a network failure (`status` None); `retry_after` is the wait a 429 asked for."""
 
-    def __init__(self, status: int | None, body: Any = None) -> None:
+    def __init__(self, status: int | None, body: Any = None, *, retry_after: float | None = None) -> None:
         self.status = status
         self.body = body
+        self.retry_after = retry_after
         super().__init__(f"HTTP {status}: {body}" if status else f"network error: {body}")
 
     @property
@@ -59,7 +62,25 @@ def is_rate_limited(err: BaseException) -> bool:
 
 
 def is_retryable(err: BaseException) -> bool:
-    return isinstance(err, ApiError) and (err.status is None or err.status == 429 or err.status >= 500)
+    """A 429 is worth retrying only when it names a wait; one without is a quota that waiting does not lift."""
+    if not isinstance(err, ApiError):
+        return False
+    if err.status == 429:
+        return err.retry_after is not None
+    return err.status is None or err.status >= 500
+
+
+def _retry_after(response: httpx.Response, detail: Any) -> float | None:
+    """The seconds a response asks the caller to wait, from `Retry-After` or the body's `retry_after_seconds`."""
+    asked: list[Any] = [response.headers.get("retry-after"), detail.get("retry_after_seconds") if isinstance(detail, dict) else None]
+    for raw in asked:
+        try:
+            seconds = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(seconds) and seconds >= 0:
+            return seconds
+    return None
 
 
 def _error_from_response(response: httpx.Response) -> ApiError:
@@ -67,7 +88,24 @@ def _error_from_response(response: httpx.Response) -> ApiError:
         detail = response.json()
     except ValueError:
         detail = response.text
-    return ApiError(response.status_code, detail)
+    return ApiError(response.status_code, detail, retry_after=_retry_after(response, detail))
+
+
+def _backoff(attempt: int, base_delay: float, max_delay: float) -> float:
+    return min(base_delay * (2**attempt), max_delay)
+
+
+def _wait_before_retry(
+    err: ApiError, attempt: int, base_delay: float, max_delay: float, max_retry_after: float, only_unprocessed: bool,
+) -> float | None:
+    """Seconds to wait before retrying `err`, or None when retrying cannot help or the server asked for too long a wait.
+    `only_unprocessed` allows just the 429 that names a wait, which the server answers before acting."""
+    if err.status == 429:
+        asked = err.retry_after
+        return asked if asked is not None and asked <= max_retry_after else None
+    if only_unprocessed or not is_retryable(err):
+        return None
+    return _backoff(attempt, base_delay, max_delay)
 
 
 def _rich(attachment_ids: list[str] | None, embeds: list[dict[str, Any]] | None) -> dict[str, Any]:
@@ -116,28 +154,28 @@ class AsyncClient:
     async def call(
         self, method: str, path: str, body: Any = None, *, params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None, raw_body: bytes | None = None,
-        retries: int = 5, base_delay: float = 0.5, max_delay: float = 8.0,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        retries: int = 5, base_delay: float = 0.5, max_delay: float = 8.0, max_retry_after: float = MAX_RETRY_AFTER,
+        only_unprocessed: bool = False, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> Any:
-        """One authenticated call, retrying a genuinely uncertain outcome; `raw_body` sends bytes as-is (an attachment)."""
+        """One authenticated call, retrying an uncertain outcome and a 429 that names a wait; `raw_body` sends bytes as-is.
+        `only_unprocessed` retries just that 429, for a write with no idempotency key, since the server answers it before acting."""
         attempt = 0
         while True:
             try:
                 response = await self._send_once(method, path, body, params, headers, raw_body)
             except httpx.HTTPError as err:
-                if attempt >= retries:
+                if attempt >= retries or only_unprocessed:
                     raise ApiError(None, str(err)) from err
-                await sleep(min(base_delay * (2**attempt), max_delay))
-                attempt += 1
-                continue
-            if response.status_code >= 400:
-                err = _error_from_response(response)
-                if attempt >= retries or not is_retryable(err):
-                    raise err
-                await sleep(min(base_delay * (2**attempt), max_delay))
-                attempt += 1
-                continue
-            return response.json() if response.content else None
+                wait = _backoff(attempt, base_delay, max_delay)
+            else:
+                if response.status_code < 400:
+                    return response.json() if response.content else None
+                failure = _error_from_response(response)
+                wait = _wait_before_retry(failure, attempt, base_delay, max_delay, max_retry_after, only_unprocessed)
+                if attempt >= retries or wait is None:
+                    raise failure
+            await sleep(wait)
+            attempt += 1
 
     async def download(self, path: str, *, max_bytes: int = DEFAULT_DOWNLOAD_BYTES) -> bytes:
         """The raw body of `GET path` with `call`'s auth and base URL, within DEFAULT_TIMEOUT; `ApiError` on failure, `ResponseTooLarge` past `max_bytes`."""
@@ -234,17 +272,17 @@ class AsyncClient:
         self, channel_id: str, in_reply_to_id: str, content: str, *,
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Answers the author of `in_reply_to_id` privately; see docs/framework.md."""
+        """Answers the author of `in_reply_to_id` privately; only a rate limit is retried, since a repeat would be a second reply. See docs/framework.md."""
         body = {"in_reply_to_id": in_reply_to_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body)
+        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
 
     async def send_ephemeral_to_press(
         self, channel_id: str, interaction_id: str, content: str, *,
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
     ) -> Any:
-        """Answers whoever pressed the button behind `interaction_id`; a separate field from a message anchor."""
+        """Answers whoever pressed the button behind `interaction_id`; only a rate limit is retried, and a separate field from a message anchor."""
         body = {"interaction_id": interaction_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body)
+        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
 
     async def edit_components(
         self, channel_id: str, message_id: str, components: Rows, *, interaction_id: str | None = None,

@@ -42,7 +42,7 @@ async def test_start_or_leave_lets_a_good_start_through():
     assert not session.left
 
 
-async def test_a_failed_start_leaves_and_raises_a_reply_text(capsys):
+async def test_a_failed_start_leaves_and_raises_a_reply_text(caplog):
     session = FakeVoiceSession("v1")
 
     async def start():
@@ -51,10 +51,11 @@ async def test_a_failed_start_leaves_and_raises_a_reply_text(capsys):
     with pytest.raises(VoiceError) as caught:
         await start_or_leave(session, start(), doing="playing")
     assert str(caught.value) == "could not start playing: engine timed out" and session.left
-    assert "RuntimeError starting playing: engine timed out" in capsys.readouterr().err
+    record = next(r for r in caplog.records if "unexpected failure starting playing" in r.getMessage())
+    assert record.exc_info and "engine timed out" in str(record.exc_info[1])
 
 
-async def test_an_expected_failure_is_not_logged(capsys):
+async def test_an_expected_failure_is_not_logged(caplog):
     session = FakeVoiceSession("v1")
 
     class PlayerError(Exception):
@@ -65,7 +66,7 @@ async def test_an_expected_failure_is_not_logged(capsys):
 
     with pytest.raises(VoiceError, match="no ffmpeg"):
         await start_or_leave(session, start(), doing="playing", expected=(PlayerError,))
-    assert capsys.readouterr().err == ""
+    assert caplog.records == []
 
 
 async def test_a_revoked_token_leaves_and_is_reraised_as_it_was():

@@ -91,7 +91,7 @@ class Rig:
         draw.bot.send_frame = no_gateway
 
     def in_call(self, user, channel="c-voice"):
-        draw.bot.voice._member_channel[user["id"]] = (channel, 0.0)
+        draw.bot.voice._note_joined(channel, user["id"])
 
     def say(self, text, user=ANN, permissions=0, channel="c1"):
         member = draw.bot.space._make_member({**user, "role_ids": []})

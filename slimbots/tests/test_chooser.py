@@ -137,7 +137,7 @@ async def test_the_clock_closes_a_pick_that_nobody_answered():
     await chooser.expire(bot, pick, 0)
 
 
-async def test_a_failing_choice_still_closes_the_chooser_with_a_retry_hint(capsys):
+async def test_a_failing_choice_still_closes_the_chooser_with_a_retry_hint(caplog):
     bot = make_bot()
     chooser = Chooser("demo:", "demo add", lambda item: item["name"], "add")
     chooser.register(bot)
@@ -151,4 +151,5 @@ async def test_a_failing_choice_still_closes_the_chooser_with_a_retry_hint(capsy
     await settle(bot)
     assert not chooser._picks
     assert bot.client.edited == ["could not add that - `!demo add` again to retry."]
-    assert "could not act on a pick: boom" in capsys.readouterr().err
+    record = next(r for r in caplog.records if "could not act on a pick" in r.getMessage())
+    assert record.exc_info and "boom" in str(record.exc_info[1])

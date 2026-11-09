@@ -5,6 +5,7 @@ import asyncio
 import errno
 
 import jellyfin_core
+import playback_progress
 import session_registry
 import stream_session
 from test_bot import jellyfin, message, movie_for_watch, asynced
@@ -67,6 +68,29 @@ def test_a_failed_start_frees_the_call_for_the_next_try():
     with Patched((stream_session.WatchSession, "start", full_disk), *FOUND):
         asyncio.run(twice())
     assert len(jellyfin.bot.voice.sessions) == 2
+
+
+async def started(self, start_seconds=0.0):
+    return None
+
+
+def test_the_call_dropping_ends_the_party_instead_of_leaving_it_playing_into_a_dead_room():
+    voice_client()
+    saved = playback_progress.report_position
+    playback_progress.report_position = asynced(lambda *args, **kwargs: None)
+
+    async def watch_then_drop():
+        await jellyfin.bot.process_message(watch_from("u1", "m1"))
+        assert session_registry.session_for_channel("v1") is not None
+        await jellyfin.bot.voice.sessions[0].simulate_disconnect()
+
+    try:
+        with Patched((stream_session.WatchSession, "start", started), *FOUND):
+            asyncio.run(watch_then_drop())
+    finally:
+        playback_progress.report_position = saved
+    assert session_registry.session_for_channel("v1") is None
+    assert jellyfin.bot.voice.sessions[0].left
 
 
 if __name__ == "__main__":

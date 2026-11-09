@@ -13,7 +13,8 @@ import playback_progress
 import quality
 import session_registry
 import stream_session
-from slimbots.testing import FakeVoiceSession, run_module_tests
+from pump_rig import PacedVoiceSession
+from slimbots.testing import run_module_tests
 from test_bot import jellyfin, movie_for_watch, setup_with_voice, asynced
 
 WIDTH = HEIGHT = 16
@@ -38,17 +39,10 @@ esac
 """
 
 
-class FakeRtc:
-    class VideoBufferType:
-        I420 = 1
-
-    class VideoFrame:
-        def __init__(self, *args):
-            self.args = args
-
-    class AudioFrame:
-        def __init__(self, *args):
-            self.args = args
+def closed_feed(_url, stdin):
+    """The stand-in ffmpeg needs no input, and no Jellyfin answers here."""
+    stdin.close()
+    return asyncio.ensure_future(asyncio.sleep(0))
 
 
 class Rig:
@@ -64,18 +58,19 @@ class Rig:
         os.chmod(script, os.stat(script).st_mode | stat.S_IXUSR)
         os.environ.update(STAND_IN_MODE=mode, FRAME_BYTES=str(FRAME_BYTES), FRAMES=str(FRAMES))
         self.saved = (stream_session.ffmpeg_binary, playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode)
+        self.saved_feed, stream_session.transcode_feed.start = stream_session.transcode_feed.start, closed_feed
         stream_session.ffmpeg_binary = lambda: script
         playback_progress.report_position = asynced(lambda item_id, seconds, *, finished=False, user_id=None: self.reports.append((round(seconds, 1), finished)))
         playback_progress.resolve_user_id = asynced(lambda: "u1")
         jellyfin_core.next_episode = asynced(lambda *a, **k: None)
-        self.voice = FakeVoiceSession("c1")
-        self.voice.rtc = FakeRtc
+        self.voice = PacedVoiceSession("c1")
         self.session = stream_session.WatchSession(jellyfin.bot, "c1", "c1", movie_for_watch(runtime_seconds=runtime_seconds), "u1", self.voice)
         self.session.quality = quality.Quality("tiny", WIDTH, HEIGHT, 100_000)
         session_registry.add(self.session)
 
     def close(self):
         stream_session.ffmpeg_binary, playback_progress.report_position, playback_progress.resolve_user_id, jellyfin_core.next_episode = self.saved
+        stream_session.transcode_feed.start = self.saved_feed
         session_registry.clear()
 
     async def play_until_finished(self, timeout=5.0):
@@ -210,11 +205,11 @@ def test_a_title_with_no_audio_stream_keeps_playing_its_video():
 def test_one_ffmpeg_reads_the_transcode_for_both_tracks():
     saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
     try:
-        args = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30, audio_fd=7)
-        video_only = stream_session.build_args("http://jf/x", "", width=16, height=16, fps=30)
+        args = stream_session.build_args(width=16, height=16, fps=30, audio_fd=7)
+        video_only = stream_session.build_args(width=16, height=16, fps=30)
     finally:
         stream_session.ffmpeg_binary = saved
-    assert args.count("-i") == 1
+    assert args.count("-i") == 1 and args[args.index("-i") + 1] == "pipe:0", "the transcode comes in on stdin, not by address"
     assert args[-1] == "pipe:7" and "pipe:1" in args
     assert "pipe:7" not in video_only
 

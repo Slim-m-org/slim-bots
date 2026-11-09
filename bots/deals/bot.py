@@ -349,7 +349,7 @@ async def offer_choices(ctx, target, target_cents, games):
 
 @bot.group(name="pricewatch", help="`<game name, Steam link or app id> <target price>`, `list`, `remove <id>`", cooldown=3)
 async def watch_group(ctx, rest: str = ""):
-    target, _, price = rest.strip().rpartition(" ")
+    target, price = (["", ""] + rest.rsplit(None, 1))[-2:]
     if not target.strip() or not price.strip():
         await ctx.reply_ephemeral(style.usage_text(f"{bot.prefix}pricewatch <game name, Steam link or app id> <target price>", f"{bot.prefix}pricewatch list", f"{bot.prefix}pricewatch remove <id>"), public_fallback=True)
         return

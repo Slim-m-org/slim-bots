@@ -225,6 +225,18 @@ def test_account_tells_an_unlinked_member_to_ask_an_approver_and_shows_a_link():
     assert "shared default seerr user" in client.ephemerals[-1]["content"]
 
 
+def test_link_reads_the_member_and_the_name_across_any_whitespace():
+    from slimbots import Permissions
+    client = harness.setup(roles=[{"id": "r-everyone", "name": "@everyone", "permissions": 0, "is_everyone": True}])
+    seerr.bot.space.members["u1"]._base_permissions = Permissions.MANAGE_SERVER
+    fake = seerr_api()
+    fake.users = [{"id": 5, "displayName": "amy"}]
+    with Patched(core, "api", fake):
+        process(message("!request link @amy\n  amy"))
+    assert 'linked @amy to the seerr user "amy"' in client.sent[-1]["content"], client.sent[-1]["content"]
+    assert asyncio.run(seerr.bot.store.run(core.get_link, "u2")) == (5, "amy")
+
+
 def test_an_unreachable_seerr_answers_with_a_sentence_not_a_traceback():
     client = setup()
     fake = seerr_api()

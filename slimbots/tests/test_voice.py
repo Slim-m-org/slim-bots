@@ -33,12 +33,27 @@ class FakeRoom:
         self.local_participant = FakeLocalParticipant()
         self.connected_to: tuple[str, str] | None = None
         self.disconnected = False
+        self.disconnect_error: Exception | None = None
+        self._handlers: dict[str, list[Any]] = {}
 
     async def connect(self, url: str, token: str, options: Any = None) -> None:
         self.connected_to = (url, token)
 
+    def on(self, event: str, callback: Any) -> Any:
+        self._handlers.setdefault(event, []).append(callback)
+        return callback
+
+    def emit(self, event: str, *args: Any) -> None:
+        for callback in list(self._handlers.get(event, [])):
+            callback(*args)
+
     async def disconnect(self) -> None:
-        self.disconnected = True
+        """Like the real room: a failure raises, and a first disconnect emits `disconnected` too."""
+        if self.disconnect_error is not None:
+            raise self.disconnect_error
+        was_connected, self.disconnected = not self.disconnected, True
+        if was_connected:
+            self.emit("disconnected", 1)
 
 
 class FakeTrackSource:

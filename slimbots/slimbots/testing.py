@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .authors import AuthorFilter
@@ -144,9 +144,20 @@ class FakeVoiceSession:
         self.publish_count = 0
         self.unpublish_count = 0
         self.left = False
+        self.lost = False
+        self._disconnect_callbacks: list[Callable[[], Awaitable[Any]]] = []
 
     def start_heartbeat(self) -> None:
         self.heartbeat_started = True
+
+    def on_disconnect(self, callback: Callable[[], Awaitable[Any]]) -> None:
+        self._disconnect_callbacks.append(callback)
+
+    async def simulate_disconnect(self) -> None:
+        """What a real session does when the room drops: marks it lost and runs the `on_disconnect` callbacks."""
+        self.lost = True
+        for callback in self._disconnect_callbacks:
+            await callback()
 
     async def publish_screen_share(
         self, *, width: int, height: int, sample_rate: int = 48000, num_channels: int = 2,
@@ -187,6 +198,8 @@ class FakeVideoSource:
 class FakeAudioSource:
     """Stands in for a real `AudioSource`: `capture_frame` (async, like the real one) counts frames, `clear_queue` counts clears."""
 
+    queued_duration = 0.0  # it plays everything the moment it is given, so nothing ever waits in its queue
+
     def __init__(self) -> None:
         self.frame_count = 0
         self.clear_count = 0
@@ -220,6 +233,14 @@ class FakeVoice:
     async def find_member(self, user_id: str) -> str | None:
         """The channel id `member_channels` says `user_id` is in, or None - set it directly in a test."""
         return self.member_channels.get(user_id)
+
+    def forget_members(self) -> None:
+        """Does nothing: a test sets `member_channels` itself, and a reconnect has no frames to have missed."""
+
+    async def leave_all(self) -> None:
+        for session in self.sessions:
+            if not session.left:
+                await session.leave()
 
 
 def human(user_id: str, username: str | None = None, display_name: str | None = None, **extra: Any) -> dict[str, Any]:

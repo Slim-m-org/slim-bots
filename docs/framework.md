@@ -47,7 +47,8 @@ A bot script imports `Bot` and little else.
 Arguments convert from the function's own annotations (`slimbots/commands.py`):
 
 - `int` / `float` - parsed from one whitespace-separated token, or a clear `BadArgument` reply, never a traceback.
-- `str` - one token, unless it is the *last* parameter, in which case it consumes the rest of the message (`!say hello there` -> `text="hello there"`).
+- `str` - one token, unless it is the *last* parameter, in which case it consumes the rest of the message exactly as typed, line breaks and spacing kept (`!say hello there` -> `text="hello there"`). Any whitespace, a line break included, may follow the command name.
+  Because the rest is verbatim, a handler that splits it itself splits on any whitespace (`rest.split(None, 1)`), never on one space: `!remind every monday at  09:00` and `at\n09:00` are both valid.
 - `Member` - resolved from `@username` or a bare username/id against `bot.space`, or a `BadArgument` naming the token that did not resolve.
 - `Duration` - `10m`, `2h30m`, `1d` parsed to an int count of seconds (`slimbots/converters.py`); replaces a bot's own duration regex.
 - `TimeOfDay` - `HH:MM` parsed to a `.hour`/`.minute` pair, range-checked; replaces a bot's own clock regex.
@@ -71,6 +72,7 @@ This is what replaced every bot's own `TRIGGER_X = re.compile(...)` wall of shap
 A prefixed message naming no registered command is silent by default - it fires `on_command_not_found(ctx, error)` if, and only if, something is actually listening for it, so a stray `!` in ordinary conversation costs nothing (no author lookup, no `ctx` built) when nobody cares.
 `error` is a real `CommandNotFound` (`error.invoked_with`, `str(error)`), not just a name string, for the same reason every other command failure is a real exception rather than a tuple.
 A command that raises anything else is logged with its traceback and answered with one generic line, sent privately (publicly on a server without private replies); the exception text never reaches chat, and `on_command_error` still fires.
+The same goes for an event listener, a button handler, a periodic task and the connection loop: a bug in one is logged through `logging` with its traceback, while an `ApiError`, an `OSError` or a dropped websocket (a restart of the server, a proxy 502 on the upgrade) gets a single warning line.
 
 ## Identity
 
@@ -118,6 +120,13 @@ New after 0.17.0: a bot that calls it needs the next `slim-m` release and a serv
 
 `await bot.voice.join(channel_id)` mints a token through `POST .../voice/token`, connects over LiveKit, and returns a `VoiceSession` that heartbeats itself as a `bot.background()` task for as long as it holds the room - `crates/slimm-server/src/voice/heartbeat.rs` evicts a participant whose heartbeat goes stale, so a bot that stops sending one is a bot that gets kicked. `session.can_publish` mirrors the caller's `SPEAK` grant, the same way a human's token does; `await session.publish_screen_share(width=, height=, sample_rate=, num_channels=, video_max_bitrate=, video_max_framerate=, audio_max_bitrate=, simulcast=, audio_queue_ms=, video_codec=, video_encoder=)` publishes a video+audio pair tagged `SOURCE_SCREENSHARE`/`SOURCE_SCREENSHARE_AUDIO` - the same sources a person's own "share your screen" button publishes, so a client renders and plays a bot's stream on the call stage with no bot-specific code - and hands back the `VideoSource`/`AudioSource` a bot pushes its own decoded frames into. The three ceilings default to `None` (the library's own default for an unset `VideoEncoding`/`AudioEncoding`); `degradation_preference` is always set to `MAINTAIN_RESOLUTION`, since pre-recorded video reads worse blurry than a little choppy. `simulcast` defaults to `False`, where livekit's own default is on: a screen share's second layer is encoded at about 3 fps, and a client whose tile is smaller than the top layer is sent that layer, so a movie turns into a slideshow while the extra encode roughly doubles the CPU cost. `audio_queue_ms` sizes the `AudioSource` queue, which livekit defaults to 1000 ms: whatever is queued still plays after a bot stops feeding it, so a bot that seeks or pauses wants it short and calls `clear_queue()` on the source when it cuts to other audio. `video_codec` (`"vp8"`, `"h264"`, ...) and `video_encoder` (`"nvenc"`, `"vaapi"`, `"software"`, ...) pick livekit's codec and encoder backend; `None` keeps livekit's choice (VP8 in software). H.264 only pays off on a hardware encoder, and every viewer has to decode it. `await session.unpublish_screen_share()` takes the pair down again so a bot can republish at another size or ceiling (a `VideoSource`'s size is fixed once built). `await session.leave()` stops the heartbeat, disconnects, and forgets the heartbeat server-side; safe to call more than once.
 
+A session can also end without the bot asking: a moderator kicks or moves the bot, or LiveKit restarts, and the room fires `disconnected`; or the server refuses the heartbeat for good (a 403 after `CONNECT` is revoked, a 404, a 501 on a deployment with no voice).
+Either way only that session ends: it stops heartbeating, leaves the room, sets `session.lost`, and runs whatever was registered with `session.on_disconnect(callback)`, an `async def callback()` that stops the player (`bot-music` and `bot-jellyfin` both do).
+A heartbeat that fails for any other reason (a network error, a 5xx) is logged and tried again 15 seconds later; a revoked token (401) is still fatal, like any background task.
+A handler added after the session was lost runs at once, and one that raises is logged without stopping the bot.
+New in 0.20.0: `session.lost` and `on_disconnect` need that `slim-m` release, and `scripts/check_bot_pr.py` holds a bot that calls `on_disconnect` to it.
+`Bot.start()` leaves every open session (best effort, 5 seconds) before it closes the client, so a redeploy does not leave the bot on the call until LiveKit times it out; `FakeVoiceSession.simulate_disconnect()` is the test hook for the dropped-room case.
+
 The real work happens through `livekit.rtc`, loaded dynamically (`importlib.import_module`, not a static `import`) so neither pyright nor a bot that never touches voice needs the package installed - `bot-jellyfin`'s `!watch` (`stream_session.py`) is the worked example: Jellyfin transcodes server-side, a local `ffmpeg` decodes to raw frames, and those get pushed into the sources `publish_screen_share` returns at the source's own pace.
 
 A bot that decodes media with ffmpeg and pushes it into LiveKit (`bot-music`, `bot-jellyfin`) shares a few helpers.
@@ -125,14 +134,16 @@ A bot that decodes media with ffmpeg and pushes it into LiveKit (`bot-music`, `b
 `slimbots.voice` adds four functions.
 `join_to_speak(bot.voice, channel_id, label=, to=)` joins, and raises a `VoiceError` whose text is the reply when the join fails or the bot cannot speak.
 `start_or_leave(session, start(), doing=)` leaves the call and raises a reply when starting fails, and re-raises a revoked token.
+A leave that itself fails is logged, so the start error is the one the reply names.
 `publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate.
 `watch_empty(bot, channel_id, wake, on_empty)` is the loop that stops a player when only the bot is left.
 They take the voice object or session as an argument, so `FakeVoice` and `FakeVoiceSession` work with them unchanged.
 
 `await bot.voice.find_member(user_id)` answers "which voice channel is this person actually in right now", never "which channel did their command come from" - a command typed in a text channel has no voice call of its own, so a voice-aware command needs this rather than joining `ctx.channel_id`.
 It prefers live state: `voice.participant_joined`/`voice.participant_left` (decision 0032, `{channel_id, user_id}`) update an in-memory cache as they arrive, ungated by `channels=` since presence needs tracking across every voice channel the bot can see, not just the ones it watches for commands.
+The cache is dropped on every reconnect, because the frames a down socket missed are not replayed.
 A cache miss falls back to `GET .../voice/roster` on every voice channel the bot can see, fetched concurrently; a match populates the cache so a second lookup for the same person is free. These events only flow at all on a deployment with the LiveKit webhook configured (decision 0032's own caveat); the roster fallback is what keeps `find_member` correct regardless.
-A member is in at most one call; if roster data somehow shows otherwise (no timestamp travels with it to say which is newer), the last channel checked wins, arbitrarily - the live-event cache is what actually resolves a genuine order between two joins, by recording when each one arrived.
+A member is in at most one call; if roster data somehow shows otherwise (no timestamp travels with it to say which is newer), the last channel checked wins, arbitrarily - the live-event cache is what actually resolves a genuine order between two joins, since the frame that arrived last wins.
 
 ## Config, settings, channel scoping, and durable cursors - all owned by Bot
 
@@ -215,7 +226,10 @@ A column that needs to join the primary key (`bot-casino`'s `hands.hand_index`, 
 `slimbots.http.AsyncClient` is built on `httpx.AsyncClient` rather than `asyncio.to_thread` over `urllib`.
 A bot's steady state is awaiting the websocket, and httpx gives real connection pooling and a timeout that composes with the rest of the event loop, instead of parking a thread-pool worker per in-flight request for something that is I/O-bound anyway.
 httpx was already a transitive dependency in this environment, so it costs nothing new to vet.
-`call()` retries a 429 or 5xx with exponential backoff (slim-m sends no `Retry-After`) and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
+`call()` retries a 5xx or a network failure with exponential backoff and never retries a 401/403/other 4xx - a certain outcome, not an uncertain one.
+A 429 is retried after the wait it names (`Retry-After`, or `retry_after_seconds` in the body, which slow mode and the rate limiter both set) when that is within `max_retry_after` (15 seconds by default), and raised at once otherwise.
+A 429 that names no wait, such as the limit of three private replies per message, is a quota that waiting does not lift, so it is raised without retrying; `ApiError.retry_after` carries the wait when there was one.
+The private reply routes retry only a 429 that names a wait, which the server answers before it acts; a network failure or a 5xx is raised, since a repeated POST would be a second reply.
 `raw_body=` sends bytes as-is instead of JSON-encoding `body`, for an attachment upload (`bot-jellyfin`'s poster re-hosting is the worked example).
 `await bot.client.download(path, max_bytes=)` is the matching read: the raw body of a `GET` (an attachment, say) with the same auth and base URL, never reading past `max_bytes` (10 MiB by default) and giving up after the client's 15 seconds; wrap the call in `asyncio.timeout(...)` for a tighter bound.
 It raises `ApiError` for an HTTP error or a network failure and `ResponseTooLarge` (an `ApiError` with no status, `.limit` set) when the body is bigger; `FakeAsyncClient` answers it from `respond("GET", path, b"...")`.
@@ -267,6 +281,7 @@ Every one of these is still a thin, hand-written wrapper over one REST call rath
 `typing`, `canvas.cursor` and `canvas.stroke_preview` are client->server frames, not REST calls - slim-m's own rate limits and authorization for them mirror the REST routes they stand in for, but there is no request/response, just a frame sent into the open socket.
 `await bot.send_frame(frame)` sends one, raising a clear `RuntimeError` rather than hanging if nothing is connected yet; `await bot.start_typing(channel_id)` is the one-line form.
 `async with ctx.typing():` is the one most commands want: it sends the initial frame on entry and refreshes every four seconds (slim-m's typing TTL is six) for as long as the block runs, so a slow command's typing indicator does not lapse partway through - `ctx.typing()`'s refresh loop is a plain, locally-scoped task cancelled on exit, not a `bot.background()` task, since nothing about it needs to outlive one command.
+Typing is cosmetic, so a frame that cannot be sent (the gateway is reconnecting, say) is logged as a warning and never fails or masks the block.
 `Canvas(client, channel_id, bot=bot)`'s `send_cursor(x, y)` and `send_stroke_preview(object_id, points, ended=)` need that `bot=` (a clear `RuntimeError` otherwise) since they go over the gateway, not REST - the REST-only methods (`place`/`move`/`remove`/`clear`/`restore`/`reorder`/`viewport`) never needed it and still do not.
 
 ## Waiting for a reply
@@ -371,7 +386,7 @@ At most 5 menu entries and 8 call controls, a 32-character label and a 64-charac
 A label may not hold a control, a text-direction mark or a character that draws nothing (the set in `slimbots/hidden_chars.py`, the same one the server uses), and the decorator refuses those too.
 If the server still answers a registration (`PUT /bots/ui` or `PUT /bots/commands`) with a 400, the run logs the server's reason and exits with status 1 instead of reconnecting, because the same body would be refused every time.
 `permission=Permissions.X` hides the entry from members without that bit and the server refuses their use of it, so unlike a command's permission it is enforced.
-`icon` is for call controls and one of `play`, `pause`, `stop`, `skip_next`, `skip_previous`, `volume`, `volume_off`, `repeat`, `shuffle`, `list` or `settings`.
+`icon` is for call controls and one of `play`, `pause`, `stop`, `skip_next`, `skip_previous`, `volume`, `volume_off`, `repeat`, `shuffle`, `list`, `settings` or `captions`.
 `options=[("low", "Low 480p"), ("high", "High 1080p")]` on a call control makes it open a choice (2 to 8 options, ids and labels held to the same rules) instead of firing, and the member's pick arrives as `interaction.option_id`.
 A server older than slim-m migration 0100 ignores the options and shows a plain button, so a handler should treat an `option_id` of `None` as "no choice made".
 

@@ -26,7 +26,7 @@ def live_mentions(text):
 
 MENTION_CASES = [
     "@everyone", "@here free pizza", "hi @nick.", "@[Core Team] ping", "@@nick", "a@b.c email", "\\@nick", "\\\\@nick",
-    "\\\\\\@nick", "@", "@ alone", "@_x", "@[", "x @[Admins]\n@here", "@​nick", "路@nick",
+    "\\\\\\@nick", "@", "@ alone", "@_x", "@[", "x @[Admins]\n@here", "@\u200bnick", "路@nick",
 ]
 
 
@@ -58,7 +58,7 @@ def test_an_already_escaped_mention_keeps_its_one_backslash():
 
 
 def test_breaking_a_mention_inserts_a_zero_width_space():
-    assert break_mentions("@everyone") == "@​everyone"
+    assert break_mentions("@everyone") == "@\u200beveryone"
 
 
 @pytest.mark.parametrize("text, limit, ellipsis, expected", [

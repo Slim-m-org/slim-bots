@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 
@@ -31,7 +32,7 @@ async def drive(func, seconds=5, **kwargs):
         await asyncio.wait_for(run_periodic("job", Periodic(func, seconds, **kwargs)), 2)
 
 
-async def test_a_failing_cycle_is_logged_and_retried_including_an_os_error(sleeps, capsys):
+async def test_a_failing_cycle_is_logged_and_retried_including_an_os_error(sleeps, caplog):
     calls = []
 
     async def job():
@@ -44,8 +45,10 @@ async def test_a_failing_cycle_is_logged_and_retried_including_an_os_error(sleep
 
     await drive(job)
     assert len(calls) == 3 and sleeps == [5, 5]
-    err = capsys.readouterr().err
-    assert "job: OSError: disk gone, retrying next cycle" in err and "job: RuntimeError: boom" in err
+    by_message = {r.getMessage(): r for r in caplog.records}
+    assert by_message["job failed, retrying next cycle: OSError: disk gone"].exc_info is None
+    crash = by_message["job failed, retrying next cycle"]
+    assert crash.levelno == logging.ERROR and "boom" in str(crash.exc_info[1])
 
 
 async def test_a_revoked_token_ends_the_loop(sleeps):

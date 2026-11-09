@@ -13,6 +13,9 @@ from slimbots.web import ServiceError
 from slimbots.limits import Cooldown
 from slimbots.migrations import ensure_columns
 
+import languages
+import tracks
+
 MAX_ITEMS_PER_POLL = 500
 PAGE_SIZE = 200
 OVERVIEW_MAX_CHARS = 220
@@ -61,6 +64,8 @@ JELLYFIN_STREAM_AUDIO_MAX_BITRATE = 128_000
 JELLYFIN_STREAM_VIDEO_CODEC = None
 JELLYFIN_STREAM_VIDEO_ENCODER = None
 JELLYFIN_AUTOPLAY_NEXT = False
+# The language key members read captions in; None never turns captions on by itself.
+SUBTITLE_LANGUAGE = None
 # Where a viewer's own client reaches jellyfin; empty means direct play is not offered.
 JELLYFIN_DIRECT_URL = ""
 JELLYFIN_NEXT_WAIT_SECONDS = 180
@@ -96,6 +101,17 @@ def parse_choice(value, choices, name):
     return value or None
 
 
+def parse_language(value, name):
+    """A language code or name as its key, or None for `off` or empty; anything else unknown is a setting error."""
+    value = str(value or "").strip()
+    if not value or value.lower() == tracks.OFF:
+        return None
+    key = languages.language_key(value)
+    if key is None:
+        raise RuntimeError(f"{name} must be a language such as en, eng or English, or off, not {value!r}")
+    return key
+
+
 def configure(bot):
     """Resolves every JELLYFIN_* setting through `bot.setting()`; called once, right after `Bot()` is built."""
     global JELLYFIN_URL, JELLYFIN_API_KEY, JELLYFIN_ITEM_TYPES, JELLYFIN_LIBRARY_IDS
@@ -104,7 +120,7 @@ def configure(bot):
     global JELLYFIN_STREAM_WEBRTC_MAX_BITRATE, JELLYFIN_STREAM_AUDIO_MAX_BITRATE
     global JELLYFIN_STREAM_VIDEO_CODEC, JELLYFIN_STREAM_VIDEO_ENCODER
     global JELLYFIN_AUTOPLAY_NEXT, JELLYFIN_NEXT_WAIT_SECONDS, JELLYFIN_DIRECT_URL
-    global JELLYFIN_DEDUPE_DAYS, JELLYFIN_REANNOUNCE_REPLACED
+    global JELLYFIN_DEDUPE_DAYS, JELLYFIN_REANNOUNCE_REPLACED, SUBTITLE_LANGUAGE
     JELLYFIN_URL = (bot.setting("JELLYFIN_URL", required=True) or "").rstrip("/")
     JELLYFIN_API_KEY = bot.setting("JELLYFIN_API_KEY", required=True) or ""
     JELLYFIN_ITEM_TYPES = bot.setting("JELLYFIN_ITEM_TYPES", ["Movie", "Episode"], type=list)
@@ -126,6 +142,7 @@ def configure(bot):
     JELLYFIN_AUTOPLAY_NEXT = str(bot.setting("JELLYFIN_AUTOPLAY_NEXT", "") or "").lower() in ("1", "true", "yes", "on")
     JELLYFIN_NEXT_WAIT_SECONDS = bot.setting("JELLYFIN_NEXT_WAIT_SECONDS", 180, type=int)
     JELLYFIN_DIRECT_URL = (bot.setting("JELLYFIN_DIRECT_URL", "") or "").rstrip("/")
+    SUBTITLE_LANGUAGE = parse_language(bot.setting("JELLYFIN_SUBTITLE_LANGUAGE", "en"), "JELLYFIN_SUBTITLE_LANGUAGE")
     JELLYFIN_DEDUPE_DAYS = bot.setting("JELLYFIN_DEDUPE_DAYS", 7, type=int)
     JELLYFIN_REANNOUNCE_REPLACED = str(bot.setting("JELLYFIN_REANNOUNCE_REPLACED", "") or "").lower() in ("1", "true", "yes", "on")
 
@@ -516,18 +533,12 @@ async def next_episode(item, user_id=None):
 
 
 def subtitle_streams(item):
-    return [s for s in item.get("MediaStreams") or [] if s.get("Type") == "Subtitle"]
+    return tracks.streams(item, "Subtitle")
 
 
 def find_subtitle_stream(item, language):
-    """The first subtitle stream whose language code or display title matches `language`, case-insensitively."""
-    language = language.lower()
-    for stream in subtitle_streams(item):
-        if language in (stream.get("Language") or "").lower():
-            return stream
-        if language in (stream.get("DisplayTitle") or "").lower():
-            return stream
-    return None
+    """The subtitle track a typed language names, by code or name; see tracks.find_subtitle."""
+    return tracks.find_subtitle(item, language)
 
 
 def build_stream_url(

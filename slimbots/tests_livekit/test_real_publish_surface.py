@@ -1,4 +1,4 @@
-"""publish_screen_share against the REAL `livekit.rtc`, no server: a missing or renamed attribute fails here, not on a prod !watch."""
+"""publish_screen_share and watch_room against the REAL `livekit.rtc`, no server: a missing or renamed attribute fails here, not on a prod !watch."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from slimbots import Bot
+from slimbots.testing import FakeAsyncClient
 from slimbots.voice import VoiceSession, _audio_encoding, load_rtc
 
 
@@ -60,3 +61,32 @@ def test_publish_screen_share_builds_and_publishes_both_tracks_with_every_ceilin
     assert video_options.HasField("simulcast") and video_options.simulcast is False
     assert audio_options.source == rtc.TrackSource.SOURCE_SCREENSHARE_AUDIO
     assert audio_options.audio_encoding.max_bitrate == 96_000
+
+
+def test_a_real_room_dropping_ends_the_session_through_the_event_watch_room_subscribes_to() -> None:
+    rtc = load_rtc()
+
+    async def run() -> tuple[bool, list[str]]:
+        bot, client = Bot(prefix="!"), FakeAsyncClient()
+        client.respond("DELETE", "/channels/c1/voice/heartbeat", None)
+        bot.client = client
+        session = VoiceSession(bot, "c1", rtc.Room(), True, rtc)
+        session.watch_room()
+        ran: list[str] = []
+
+        async def on_lost() -> None:
+            ran.append("lost")
+
+        session.on_disconnect(on_lost)
+        session.room.emit("disconnected", 1)
+        await asyncio.gather(*bot._background_tasks)
+        return session.lost, ran
+
+    assert asyncio.run(run()) == (True, ["lost"])
+
+
+def test_the_real_audio_source_reports_how_much_sound_is_still_queued() -> None:
+    async def run() -> float:
+        return load_rtc().AudioSource(48000, 2, queue_size_ms=100).queued_duration
+
+    assert asyncio.run(run()) == 0.0

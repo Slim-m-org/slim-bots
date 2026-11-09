@@ -114,10 +114,16 @@ async def _join_and_start(ctx, full_item, start_seconds, voice_channel_id):
     except VoiceError as err:
         await answers.tell(ctx, str(err))
         return
+    voice_session.on_disconnect(lambda: _stop_if_running(session))
     session.jellyfin_user_id = await accounts.user_for(ctx.bot, ctx.author.id)
     session_registry.add(session)
     session.panel = panel.Panel(ctx.bot, ctx.channel_id)
     await session.panel.post(session, reply_to_id=ctx.message.get("id"))
+
+
+async def _stop_if_running(session):
+    if not session.finished:
+        await session.stop(reason="disconnected from the call")
 
 
 async def run_watch(ctx, query):

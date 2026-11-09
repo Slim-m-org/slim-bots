@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.metadata
 import logging
 import os
 import sqlite3
@@ -18,13 +19,13 @@ from . import catchup, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
-from .commands import Command, Group, build_help_text
+from .commands import Command, Group, build_help_text, split_first_word
 from .context import Context
 from .exceptions import CommandError, CommandNotFound, MissingPermissions
 from .gateway import Gateway
 from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_ui
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
-from .lifecycle import Periodic, guard_dispatch, run_periodic, run_with_shutdown
+from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_with_shutdown
 from .models import Member
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
@@ -32,7 +33,16 @@ from .space import Space
 from .store import Store
 from .voice import Voice
 
-DEFAULT_USER_AGENT = "slimbots/0.3"
+
+def library_version() -> str:
+    """The installed `slim-m` package version, or "dev" when running from a checkout that was never installed."""
+    try:
+        return importlib.metadata.version("slim-m")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
+
+
+DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
 
@@ -235,7 +245,7 @@ class Bot:
         if is_token_revoked(err):
             print(f"{label}: token rejected - revoked?", file=sys.stderr)
         else:
-            print(f"{label} failed: {type(err).__name__}: {err}", file=sys.stderr)
+            log_failure(log, err, "%s failed", label)
         if self._main_task is not None:
             self._main_task.cancel()
 
@@ -436,7 +446,7 @@ class Bot:
             await self._dispatch_event("on_message", message)
             return
 
-        invoked_with, _, raw_args = invocation.partition(" ")
+        invoked_with, raw_args = split_first_word(invocation)
         command = self.commands.get(invoked_with)
         if command is None:
             if self._listeners.get("on_command_not_found"):
@@ -735,6 +745,7 @@ class Bot:
         await self._dispatch_event("on_connect")
         async with await Gateway.open(self.client) as gateway:
             self._gateway = gateway
+            self.voice.forget_members()
             head = gateway.hello.get("moderation_seq")
             self.moderation_head = head if isinstance(head, int) else None
             try:
@@ -802,13 +813,11 @@ class Bot:
             except RegistrationRejected as err:
                 print(f"the server refused this bot's registration at {err.route}: {err.reason or err.body}", file=sys.stderr)
                 return 1
-            except ApiError as err:
+            except Exception as err:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
-                print(f"{type(err).__name__}: {err}, retrying in {delay}s", file=sys.stderr)
-            except Exception as err:
-                print(f"{type(err).__name__}: {err}, retrying in {delay}s", file=sys.stderr)
+                log_failure(log, err, "connection failed, retrying in %ss", delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.max_delay)
 
@@ -858,6 +867,7 @@ class Bot:
                 task.cancel()
             if self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            await self.voice.leave_all()
             await self.client.aclose()
             if self._cursor_conn is not None:
                 self._cursor_conn.close()

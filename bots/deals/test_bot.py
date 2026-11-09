@@ -388,6 +388,15 @@ def test_a_game_name_with_one_strong_hit_is_watched_and_echoed():
     assert any("storesearch" in u and "term=Portal%202" in u and "cc=us" in u for u in rig.calls)
 
 
+def test_a_name_and_price_split_on_any_whitespace():
+    rig = Rig()
+    rig.price(620)
+    rig.search("Portal%202", "storesearch_portal_2")
+    rig.say("!pricewatch Portal 2\n4.99", user="u-ann", permissions=0)
+    assert "watching **Portal 2** (app 620)" in rig.last_private()
+    assert rig.sql(db.list_watches)[0]["target_price_cents"] == 499
+
+
 def test_a_name_that_matches_nothing_asks_for_the_app_id():
     rig = Rig()
     rig.search("zzzqqqxx", "storesearch_none")

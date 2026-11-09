@@ -2,6 +2,7 @@ from slimbots import Bot
 from slimbots.http import ApiError
 from slimbots.space import Space
 from slimbots.testing import FakeAsyncClient
+from test_catchup_order import FakeServer, make_bot as make_connected_bot, run_connection
 
 CHANNELS = [
     {"id": "v1", "name": "lounge", "kind": "voice"},
@@ -94,3 +95,15 @@ async def test_voice_frames_are_tracked_for_every_channel_whatever_the_bot_is_sc
     bot.channels = {"t1"}
     await bot._handle_frame({"type": "voice.participant_joined", "channel_id": "v1", "user_id": "u1"})
     assert await bot.voice.find_member("u1") == "v1"
+
+
+async def test_a_reconnect_forgets_who_was_where_because_the_frames_it_missed_are_not_replayed(monkeypatch):
+    bot, client, gateways = make_connected_bot(monkeypatch, FakeServer(), on_open=lambda: gateways[0].queue.put_nowait(None))
+    client.respond("GET", "/channels", CHANNELS)
+    client.respond("GET", "/channels/v1/voice/roster", roster_of())
+    client.respond("GET", "/channels/v2/voice/roster", roster_of())
+    await bot._handle_frame({"type": "voice.participant_joined", "channel_id": "v1", "user_id": "u1"})
+    assert await bot.voice.find_member("u1") == "v1"
+    await run_connection(bot)
+    assert await bot.voice.find_member("u1") is None
+    assert sorted(roster_calls(client)) == ["/channels/v1/voice/roster", "/channels/v2/voice/roster"]

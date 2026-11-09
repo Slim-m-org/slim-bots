@@ -1,7 +1,9 @@
 import pytest
 
 from slimbots import Bot, Duration, TimeOfDay
-from slimbots.commands import build_help_text
+from slimbots.commands import Command, Group, build_help_text
+from slimbots.context import Context
+from slimbots.exceptions import CommandOnCooldown
 from slimbots.registration import registration_body
 from slimbots.testing import FakeAsyncClient
 
@@ -133,3 +135,45 @@ async def test_subcommand_requires_replies_with_its_message_and_still_lets_other
     await bot.process_message({"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "!remind clear"})
     assert client.ephemerals[-1]["content"] == "only an admin can clear."
     assert await send(bot, client, "!remind in 10m buy milk") == "in 600s: buy milk"
+
+
+def test_a_group_carries_every_field_a_command_has():
+    async def handler(ctx, text: str = ""):
+        return None
+
+    command = Command(handler, name="plain", cooldown=3, requires=1 << 3, check=lambda ctx: True, suggest={"text": ("a",)})
+    group = Group(handler, name="grouped", cooldown=3, requires=1 << 3, check=lambda ctx: True, suggest={"text": ("a",)})
+    assert set(vars(command)) <= set(vars(group))
+    for field in ("requires", "cooldown", "cooldown_bucket", "check", "suggested", "choices", "params"):
+        assert type(getattr(group, field)) is type(getattr(command, field))
+
+
+def test_a_commands_usage_can_still_be_reassigned():
+    async def handler(ctx, text: str):
+        return None
+
+    command = Command(handler, name="say")
+    assert command.usage == "<text...>"
+    command.usage = "<anything>"
+    assert command.usage == "<anything>"
+
+
+async def test_a_group_is_gated_in_the_same_order_as_a_command(bot, client):
+    order = []
+
+    async def handler(ctx, text: str = ""):
+        return None
+
+    def checked(ctx):
+        order.append("check")
+        return True
+
+    for kind, name in ((Command, "plain"), (Group, "grouped")):
+        subject = kind(handler, name=name, cooldown=60, cooldown_bucket="channel", check=checked)
+        ctx = Context(bot=bot, message={"id": "m1"}, author=None, channel_id="c1", command=subject, raw_args="")
+        subject.check_permission = lambda member: order.append("permission")
+        await subject.invoke(ctx)
+        with pytest.raises(CommandOnCooldown):
+            await subject.invoke(ctx)
+        order.append("|")
+    assert order == ["permission", "check", "permission", "|"] * 2

@@ -103,7 +103,7 @@ async def names_for(user_ids):
 
 @bot.command(name="event", help='Plan an event: `"movie night" fri 8pm`, or `list`, or `cancel <n>`', usage='"<title>" <day> <time> | list | cancel <n>')
 async def event(ctx, args: str = ""):
-    word, _, rest = args.partition(" ")
+    word, rest = (args.split(None, 1) + ["", ""])[:2]
     if word.lower() == "list":
         await _list(ctx)
     elif word.lower() == "cancel":

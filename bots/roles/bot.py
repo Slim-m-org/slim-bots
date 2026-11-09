@@ -182,7 +182,7 @@ async def roles_cmd(ctx, sub: str = None):
 
 @bot.command(name="role", help="Add a role, `remove <name>` to drop it, `mine` to see what you hold", usage="<name> | remove <name> | mine")
 async def role_cmd(ctx, name: str):
-    action, _, rest = name.strip().partition(" ")
+    action, rest = (name.split(None, 1) + ["", ""])[:2]
     if normalize(name) == "mine":
         await show_mine(ctx)
         return
@@ -211,10 +211,9 @@ async def private(ctx, text):
 
 def parse_create(arg):
     """(pick_one, title, [typed role names]) from `[--one] <title> | <role>, <role>`."""
-    text = arg.strip()
-    pick_one = text.startswith("--one ")
-    if pick_one:
-        text = text[len("--one "):]
+    first, rest = (arg.split(None, 1) + ["", ""])[:2]
+    pick_one = first == "--one"
+    text = rest if pick_one else arg.strip()
     title, _, names = text.partition("|")
     return pick_one, " ".join(title.split()), [n.strip() for n in names.split(",") if n.strip()]
 
@@ -269,7 +268,7 @@ async def redraw(message_id, menu):
 
 
 async def add_to_menu(ctx, args):
-    message_id, _, typed = args.strip().partition(" ")
+    message_id, typed = (args.split(None, 1) + ["", ""])[:2]
     menu = await load_menu(ctx, message_id) if typed.strip() else None
     if menu is None:
         if not typed.strip():
@@ -293,7 +292,7 @@ async def add_to_menu(ctx, args):
 
 
 async def remove_from_menu(ctx, args):
-    message_id, _, typed = args.strip().partition(" ")
+    message_id, typed = (args.split(None, 1) + ["", ""])[:2]
     menu = await load_menu(ctx, message_id) if typed.strip() else None
     if menu is None:
         if not typed.strip():
@@ -342,7 +341,7 @@ MENU_USAGE = "create [--one] <title> | <role>, <role> | add <menu id> <role> | r
 
 @bot.command(name="rolemenu", help="Manage role menus (buttons on a message); needs Manage Roles", usage=MENU_USAGE, requires=Permissions.MANAGE_ROLES, requires_message="only someone with Manage Roles can manage role menus.")
 async def rolemenu_cmd(ctx, args: str = ""):
-    sub, _, rest = args.strip().partition(" ")
+    sub, rest = (args.split(None, 1) + ["", ""])[:2]
     handlers = {"create": create_menu, "add": add_to_menu, "remove": remove_from_menu, "delete": delete_menu}
     if sub.lower() == "list":
         await list_channel_menus(ctx)

@@ -50,6 +50,8 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
   ffmpeg is also limited to `http`, `https`, `tcp`, `tls` and `crypto`, so a URL cannot reach `file:` or a raw socket.
 - **The Jellyfin key only goes to Jellyfin.**
   It is sent as an `Authorization` header on Jellyfin tracks and never on a direct URL.
+  It is also an argument of the ffmpeg process (`-headers`), so anyone who can list processes on the bot host can read it.
+  The Jellyfin watch bot no longer has this exposure, since its transcode reaches ffmpeg on stdin; this bot still does, so run it in its own container.
 - **No volume command.**
   It would mean scaling PCM or restarting ffmpeg mid-track, and every listener already has a per-participant volume slider.
 - **No persistence.**

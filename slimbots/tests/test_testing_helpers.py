@@ -2,7 +2,7 @@ import io
 from contextlib import redirect_stdout
 
 from slimbots.bot import Bot
-from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, FakeAudioSource, handle_frame, human, run_module_tests, wire_bot
 
 
 def test_human_defaults_the_name_from_the_id_and_takes_extras():
@@ -28,3 +28,7 @@ def test_run_module_tests_runs_every_test_callable_and_reports_the_count():
     with redirect_stdout(out):
         run_module_tests(namespace)
     assert ran == ["a", "b"] and "all 2 tests passed" in out.getvalue()
+
+
+def test_the_fake_audio_source_has_nothing_waiting_in_its_queue():
+    assert FakeAudioSource().queued_duration == 0.0

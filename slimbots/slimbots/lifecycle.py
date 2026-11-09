@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 import sys
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
-from .http import is_token_revoked
+from websockets.exceptions import WebSocketException
+
+from .http import ApiError, is_token_revoked
+
+log = logging.getLogger(__name__)
+
+OUTSIDE_FAILURES = (ApiError, OSError, WebSocketException)
+
+
+def log_failure(logger: logging.Logger, err: BaseException, message: str, *args: Any) -> None:
+    """Logs `message` with `err`'s traceback; an API, network or websocket failure is outside the bot and gets one line."""
+    if isinstance(err, OUTSIDE_FAILURES):
+        logger.warning(message + ": %s: %s", *args, type(err).__name__, err)
+    else:
+        logger.error(message, *args, exc_info=err)
 
 
 async def run_with_shutdown(task: asyncio.Task[Any]) -> Any:
@@ -47,7 +62,7 @@ async def guard_dispatch(
         if on_error:
             await on_error(err)
         else:
-            print(f"{type(err).__name__}: {err}", file=sys.stderr)
+            log_failure(log, err, "unhandled error in %s", getattr(func, "__qualname__", None) or repr(func))
         return None
 
 
@@ -77,5 +92,5 @@ async def run_periodic(name: str, spec: Periodic) -> None:
         except Exception as err:
             if is_token_revoked(err) or isinstance(err, spec.fatal):
                 raise
-            print(f"{name}: {type(err).__name__}: {err}, retrying next cycle", file=sys.stderr)
+            log_failure(log, err, "%s failed, retrying next cycle", name)
         await asyncio.sleep(max(spec.interval(), wait))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, Sequence
 
 from .choices import canonical_choice, option_entries, validate_choices
@@ -17,8 +18,16 @@ if TYPE_CHECKING:
     from .context import Context
 
 _NO_DEFAULT = inspect.Parameter.empty
+_WORD = re.compile(r"\S+")
+_WHITESPACE = re.compile(r"\s+")
 _COOLDOWN_BUCKETS = ("user", "channel", "deployment")
 _DEPLOYMENT_COOLDOWN_KEY = "*"
+
+
+def split_first_word(text: str) -> tuple[str, str]:
+    """`text`'s first word and the rest after the whitespace that follows it, the rest left exactly as typed."""
+    parts = _WHITESPACE.split(text, maxsplit=1)
+    return parts[0], parts[1] if len(parts) > 1 else ""
 
 
 def _handler_params(func: Callable[..., Any]) -> list[inspect.Parameter]:
@@ -127,7 +136,15 @@ class Command:
         self.params = _handler_params(func)
         self.choices = validate_choices(self.params, choices)
         self.suggested = validate_choices(self.params, suggest)
-        self.usage = usage or " ".join(_usage_token(p) for p in self.params)
+        self._usage = usage
+
+    @property
+    def usage(self) -> str:
+        return self._usage or " ".join(_usage_token(p) for p in self.params)
+
+    @usage.setter
+    def usage(self, value: str | None) -> None:
+        self._usage = value
 
     @property
     def names(self) -> list[str]:
@@ -167,41 +184,44 @@ class Command:
             return converter(token, name)
         return token
 
-    def _rest_value(self, tokens: list[str], i: int, param: inspect.Parameter) -> str:
-        """The rest-of-message value for the last, str-annotated param; `param`'s default if nothing is left."""
-        rest = " ".join(tokens[i:])
-        if rest:
-            return rest
+    def _rest_value(self, raw_args: str, words: list[re.Match[str]], i: int, param: inspect.Parameter) -> str:
+        """The rest-of-message value for the last, str-annotated param, line breaks and spacing kept; its default if nothing is left."""
+        if i < len(words):
+            return raw_args[words[i].start():].rstrip()
         if param.default is not _NO_DEFAULT:
             return param.default
         raise MissingRequiredArgument(param.name)
 
     async def convert_args(self, ctx: Context, raw_args: str) -> list[Any]:
         """Converts each whitespace-split token per the signature; see docs/framework.md."""
-        tokens = raw_args.split()
+        words = list(_WORD.finditer(raw_args))
         values: list[Any] = []
         i = 0
         for idx, param in enumerate(self.params):
             annotation = param.annotation if param.annotation is not _NO_DEFAULT else str
             if idx == len(self.params) - 1 and annotation is str:
-                rest = self._rest_value(tokens, i, param)
-                values.append(self._pick(param.name, rest) if i < len(tokens) else rest)
-                i = len(tokens)
+                rest = self._rest_value(raw_args, words, i, param)
+                values.append(self._pick(param.name, rest) if i < len(words) else rest)
+                i = len(words)
                 continue
-            if i >= len(tokens):
+            if i >= len(words):
                 if param.default is not _NO_DEFAULT:
                     values.append(param.default)
                     continue
                 raise MissingRequiredArgument(param.name)
-            values.append(await self._convert(ctx, annotation, self._pick(param.name, tokens[i]), param.name))
+            values.append(await self._convert(ctx, annotation, self._pick(param.name, words[i].group()), param.name))
             i += 1
         return values
 
-    async def invoke(self, ctx: Context) -> Any:
+    async def _gate(self, ctx: Context) -> None:
+        """Raises unless `ctx`'s author may run this now: the permission, the cooldown, then the custom check."""
         self.check_permission(ctx.author)
         self.check_cooldown(ctx)
         if self.check is not None and not await _maybe_await(self.check(ctx)):
             raise CheckFailure("you can't use that command right now")
+
+    async def invoke(self, ctx: Context) -> Any:
+        await self._gate(ctx)
         args = await self.convert_args(ctx, ctx.raw_args)
         return await self.func(ctx, *args)
 
@@ -219,18 +239,10 @@ class Group(Command):
         requires: int | None = None, requires_message: str | None = None, check: Callable[[Context], Any] | None = None,
         suggest: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        self.func = func
-        self.name = name
-        self.aliases = list(aliases)
-        self.help = help or ""
-        self.requires = requires
-        self.requires_message = requires_message
-        self.check = check
-        self.cooldown = Cooldown(cooldown) if cooldown else None
-        self.cooldown_bucket = _validate_cooldown_bucket(cooldown_bucket)
-        self.params = _handler_params(func)
-        self.choices: dict[str, tuple[str, ...]] = {}
-        self.suggested = validate_choices(self.params, suggest)
+        super().__init__(
+            func, name=name, aliases=aliases, help=help, cooldown=cooldown, cooldown_bucket=cooldown_bucket,
+            requires=requires, requires_message=requires_message, check=check, suggest=suggest,
+        )
         self.subcommands: dict[str, Command] = {}
         self._unique_subcommands: list[Command] = []
 
@@ -265,11 +277,8 @@ class Group(Command):
 
     async def invoke(self, ctx: Context) -> Any:
         """Dispatches by the first token of `ctx.raw_args`; anything else falls to the group's own handler."""
-        self.check_permission(ctx.author)
-        self.check_cooldown(ctx)
-        if self.check is not None and not await _maybe_await(self.check(ctx)):
-            raise CheckFailure("you can't use that command right now")
-        name_token, _, remainder = ctx.raw_args.partition(" ")
+        await self._gate(ctx)
+        name_token, remainder = split_first_word(ctx.raw_args)
         subcommand = self.subcommands.get(name_token) if name_token else None
         if subcommand is None:
             args = await self.convert_args(ctx, ctx.raw_args)

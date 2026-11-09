@@ -365,6 +365,21 @@ def test_an_empty_call_makes_the_bot_leave():
     assert music_cog.active_sessions() == {}
 
 
+def test_losing_the_call_stops_the_player_instead_of_playing_into_a_dead_room():
+    client = setup()
+
+    async def playing():
+        await until(lambda: music_cog.active_sessions()["v1"].current is not None)
+
+    async def dropped():
+        await music.bot.voice.sessions[0].simulate_disconnect()
+
+    scenario(client, "~play https://93.184.216.34/long.mp3", playing, dropped)
+    assert "music stopped (disconnected from the call)." in replies(client)
+    assert music.bot.voice.sessions[0].left
+    assert music_cog.active_sessions() == {}
+
+
 def test_play_refuses_when_the_bot_cannot_speak():
     client = setup(can_publish=False)
     scenario(client, f"~play {PUBLIC_URL}")

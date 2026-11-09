@@ -36,7 +36,7 @@ To keep it apart from other bots in a shared channel, set `SLIMM_PREFIX` (for ex
 `JELLYFIN_API_KEY` comes from Jellyfin's own Dashboard -> API Keys, as a
 Jellyfin server administrator. It is a credential exactly like a slim-m bot
 token: keep it in the environment, never in source, and this bot never logs
-it or puts it in a URL. It goes in an `Authorization: MediaBrowser
+it or puts it in a URL or on a command line. It goes in an `Authorization: MediaBrowser
 Token="..."` header - confirmed against a real Jellyfin 12.0.0 server that
 this is the only one of four commonly documented forms that works there:
 `X-Emby-Token`, `X-MediaBrowser-Token` and an `api_key` query parameter all
@@ -95,7 +95,7 @@ The chooser closes itself after five minutes. One watch party runs per voice cha
 stream a different title in each call it is in (a second `!watch` in a call
 that already has one is refused, since two shares from one participant would
 read as a single share). The control commands
-(`!pause`/`!resume`/`!seek`/`!np`/`!subs`/`!quality`/`!stop`) work from any
+(`!pause`/`!resume`/`!seek`/`!np`/`!subs`/`!audio`/`!quality`/`!stop`) work from any
 channel this bot listens on and act on the call the person who typed them
 is in. Someone in no call reaches the party if only one is running, and is
 asked to join the call they mean if several are.
@@ -120,7 +120,7 @@ posted publicly instead, so an error is never lost.
   and, for an episode, Next episode. Every button is disabled once the stream ends. Anyone who is in the call can press them;
   someone outside it gets a private "join #call to use these controls" and nothing changes. The text commands still work and
   redraw the panel too. The panel shows the position only while paused (a stopped clock in a message would be wrong within a second); `!np` has the live one.
-- Call dock: while the bot is in the call the dock shows Play or pause, Back 30s, Forward 30s and Stop (`@bot.call_control`, slimbots 0.7.0), a Jump to list (Start, then 10% to 90% of the runtime) and a Quality gear that opens Low 480p / Medium 720p / High 1080p (call control options, which need a slimbots release with `options=` and a slim-m server with migration 0100; an older server shows the gear as a plain button that asks you to pick from the list). They run the same code as the panel's buttons, for the party in the call the member used them in.
+- Call dock: while the bot is in the call the dock shows Play or pause, Back 30s, Forward 30s and Stop (`@bot.call_control`, slimbots 0.7.0), a Jump to list (Start, then 10% to 90% of the runtime) a Captions choice (Off, the `JELLYFIN_SUBTITLE_LANGUAGE` language, Audio language, Next track, drawn with a `captions` glyph that needs slim-m and slimbots releases that list it), an Audio choice (Original language, the same language, Next track) and a Quality gear that opens Low 480p / Medium 720p / High 1080p (call control options, which need a slimbots release with `options=` and a slim-m server with migration 0100; an older server shows the gear as a plain button that asks you to pick from the list). They run the same code as the panel's buttons, for the party in the call the member used them in. The Play or pause control is one registration for every call, so it reads Play/Pause while two parties disagree about which it should be.
 - Watch position: while a party runs the bot states it to the server (`PUT /channels/{id}/watch-session`) on start, pause, resume, seek and a new title, and ticks it every 5 seconds, paused or not, so a member who joins mid-film sees where the room is. A seek sets `seeked`, stopping ends the session, and the bot needs `slim-m>=0.9.4` and a server that has the watch-session routes (0.77.0). A conflict (another bot holds the call) is logged and the party carries on unsynced. The panel is unaffected. Call controls reach the bot whatever `SLIMM_CHANNELS` says.
 - When an episode ends and there is a next one, the bot stays in the call and the panel says
   "finished - next up: ..." with only Next episode and Stop enabled; it leaves after
@@ -144,9 +144,17 @@ posted publicly instead, so an error is never lost.
   played and clears the position when it finishes, so jellyfin's own
   Continue Watching stays correct. It does not use the `/Sessions/Playing`
   endpoints, which need a user token rather than the API key.
-- `!subs <lang|off>` - matches a subtitle track by language code or
-  display title and restarts the transcode with `SubtitleMethod=Encode`
-  burning it in, or clears it with `off`.
+- `!subs <lang|next|off>` - picks a subtitle track and restarts the transcode with `SubtitleMethod=Encode`
+  burning it in, or clears it with `off`; `next` steps through the file's tracks and then off.
+  A language is matched as a language, so `ja`, `jpn` and `Japanese` are one, and `es`, `pt` and `sv` find tracks tagged `spa`, `por` and `swe`
+  (either ISO 639-2 form works); a whole word of a track's title, such as `sdh`, still names it.
+  Among tracks in one language the dialogue track wins over forced, signs-and-songs, karaoke and commentary tracks, then one without hearing-impaired cues, then the file's own default.
+- Captions follow the party: the language picked (or off) is kept for the next episode and matched again against that episode's own tracks,
+  and a title whose audio is in another language than `JELLYFIN_SUBTITLE_LANGUAGE` starts with that language's dialogue track burned in until someone turns it off.
+  A title whose only track in the language is signs or forced stays without captions rather than showing a track that is not the dialogue.
+- `!audio [language|next]` - alone, lists the audio tracks and which one plays; with a language or `next` it restarts the transcode on that track (`AudioStreamIndex`).
+  The track picked carries to the next episode by language. Hearing a dub in the preferred language drops captions the bot turned on by itself, and the original brings them back.
+  `Original language` in the dock means the first track in the file that is not commentary, since Jellyfin does not say which language a title was made in.
 - `!quality [low|medium|high]` - alone, reports the current quality.
   With a preset (480p at 1.5 Mbps, 720p at 4 Mbps, 1080p at 8 Mbps) it
   restarts the transcode and republishes the share at that size from the
@@ -154,7 +162,7 @@ posted publicly instead, so an error is never lost.
   settings below say, reported as `default`. `high` warns about the
   encode cost measured under "Stream quality".
 
-The text commands `!pause`/`!resume`/`!seek`/`!stop`/`!subs`/`!quality <preset>` are refused unless the caller
+The text commands `!pause`/`!resume`/`!seek`/`!stop`/`!subs`/`!audio <track>`/`!quality <preset>` are refused unless the caller
 either started the stream or holds `MANAGE_CHANNELS`. `!watch` itself
 refuses with "join a voice channel first, then run `!watch` again" if the
 invoker is not in any call this bot can see - never "join this channel's
@@ -166,9 +174,11 @@ empties - checked on `on_voice_activity` when the LiveKit webhook (decision
 works even on a deployment that has not wired up the webhook.
 
 Video is Jellyfin's own server-side transcode
-(`/Videos/{id}/stream?VideoCodec=h264&AudioCodec=aac...`), decoded by a
-local `ffmpeg` (a system binary - not pip-installed, and not in the
-hash-locked CI requirements since the test suite never spawns it) into
+(`/Videos/{id}/stream?VideoCodec=h264&AudioCodec=aac...`), fetched by the bot itself and fed to a
+local `ffmpeg` on its stdin (`transcode_feed.py`), so the API key is a header of the bot's own request and never in ffmpeg's command line, where any user on the host could read it with `ps`.
+The feed does not follow redirects, stops reading from Jellyfin while the party is paused, and closes ffmpeg's input when the request fails, which ends or retries the start the same way a failed ffmpeg did.
+`ffmpeg` is a system binary - not pip-installed, and not in the
+hash-locked CI requirements, since the suite only spawns a real one when it finds it on `PATH` - and decodes the stream into
 raw I420 frames letterboxed to `JELLYFIN_STREAM_WIDTH`x`JELLYFIN_STREAM_HEIGHT`
 and PCM audio (one ffmpeg, video on stdout and audio on a second pipe), published through `bot.voice`'s `SOURCE_SCREENSHARE`/
 `SOURCE_SCREENSHARE_AUDIO` tracks - see `stream_session.py`.
@@ -178,6 +188,12 @@ or more to start a transcode and a picture paced from launch raced
 through that second and stayed ahead of the sound. The audio queue is
 kept at 100 ms and cleared on every restart, so a seek or a pause does
 not leave old sound playing over the new picture.
+After that the picture follows the sound (`pump_sync.MediaClock`).
+A frame goes out once the sound has played up to it, so a stall, an underrun or a pause holds the picture instead of leaving it ahead of sound that fell behind.
+A frame the sound has already passed is sent at once, never skipped, so a decoder that cannot keep up shows slow video rather than a frozen one.
+The picture runs on the wall clock while the sound has not started, after it ends, and for good once a frame has waited half a second for sound that did not move, since sound that only comes once the picture moves would freeze both.
+That last case is a title whose audio trails its video by most of a second in the transcode, and it plays as it did before the picture followed the sound.
+The position shown on the panel and reported to Jellyfin is the picture's.
 
 Those raw frames are then re-encoded a second time by LiveKit's own
 WebRTC publish, which used to get no explicit bitrate/framerate ceiling
@@ -194,6 +210,7 @@ what actually limits going past 720p; see below.
 | --- | --- | --- |
 | `JELLYFIN_DIRECT_URL` | unset | Where a viewer's own device reaches jellyfin. Set it to offer direct play: the party then lets viewers play the title themselves, and stops encoding once everyone on the call has. Unset means the shared stream only. |
 | `JELLYFIN_USER_ID` | first enabled user | The shared jellyfin account `!watch` reads and writes for a member who has not run `!jellyfin link`. |
+| `JELLYFIN_SUBTITLE_LANGUAGE` | `en` | The language members read captions in, as a code or a name (`en`, `eng`, `English`). A title whose audio is in another language starts with this language's dialogue track burned in. `off` never turns captions on by itself. |
 | `JELLYFIN_AUTOPLAY_NEXT` | off | When an episode ends, start the next one on its own instead of waiting for Next episode. |
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |
 | `JELLYFIN_STREAM_WIDTH` | `1280` | The published video width; Jellyfin's own aspect ratio is letterboxed into this. |

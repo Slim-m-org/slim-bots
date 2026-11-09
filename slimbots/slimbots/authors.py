@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from typing import TYPE_CHECKING
+
+from .lifecycle import log_failure
 
 if TYPE_CHECKING:
     from .http import AsyncClient
     from .space import Space
+
+log = logging.getLogger(__name__)
 
 
 class AuthorFilter:
@@ -29,7 +33,7 @@ class AuthorFilter:
             profile = await self._client.get_user(user_id)
         except Exception as err:
             # A failed lookup reads as human: wrongly skipping a bot beats wrongly ignoring a person.
-            print(f"author lookup failed for {user_id}: {err}", file=sys.stderr)
+            log_failure(log, err, "author lookup failed for %s", user_id)
             return False
         automated = bool(profile.get("is_bot")) or bool(profile.get("is_webhook"))
         self._automated[user_id] = automated

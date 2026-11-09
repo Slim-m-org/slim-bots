@@ -53,6 +53,7 @@ async def _start_session(ctx, voice_channel_id, track):
     except VoiceError as err:
         await ctx.reply(str(err))
         return
+    voice_session.on_disconnect(lambda: session.stop(reason="disconnected from the call"))
     _sessions[voice_channel_id] = session
     await ctx.reply(f"playing **{track.title}** in {voice_channel_name}.")
 

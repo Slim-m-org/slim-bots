@@ -156,7 +156,7 @@ def _args_without_ffmpeg(**kwargs):
     """CI has no ffmpeg on PATH; the arguments do not need one."""
     saved, stream_session.ffmpeg_binary = stream_session.ffmpeg_binary, lambda: "ffmpeg"
     try:
-        return stream_session.build_args("http://jf/x", "", **kwargs)
+        return stream_session.build_args(**kwargs)
     finally:
         stream_session.ffmpeg_binary = saved
 

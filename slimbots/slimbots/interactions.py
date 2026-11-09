@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from . import components
-from .lifecycle import guard_dispatch
+from .lifecycle import guard_dispatch, log_failure
 from .ui import UiRoutes
 
 if TYPE_CHECKING:
     from .bot import Bot
     from .embeds import Embed
+
+log = logging.getLogger(__name__)
 
 ButtonHandler = Callable[["Interaction"], Awaitable[Any]]
 
@@ -92,7 +94,7 @@ async def dispatch_press(bot: Bot, routes: ButtonRoutes, frame: dict[str, Any]) 
     async def report(err: Exception) -> None:
         nonlocal failed
         failed = True
-        print(f"unhandled error in button `{interaction.custom_id}`: {err}", file=sys.stderr)
+        log_failure(log, err, "unhandled error in button `%s`", interaction.custom_id)
 
     for handler in handlers:
         await guard_dispatch(handler, interaction, on_error=report)
@@ -113,7 +115,7 @@ async def dispatch_ui(bot: Bot, routes: UiRoutes, frame: dict[str, Any]) -> None
     async def report(err: Exception) -> None:
         nonlocal failed
         failed = True
-        print(f"unhandled error in {interaction.kind} `{interaction.custom_id}`: {err}", file=sys.stderr)
+        log_failure(log, err, "unhandled error in %s `%s`", interaction.kind, interaction.custom_id)
 
     await guard_dispatch(handler, interaction, on_error=report)
     if not failed and not interaction.answered:

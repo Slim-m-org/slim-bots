@@ -60,7 +60,7 @@ def test_a_chat_message_cannot_fake_a_join_or_a_second_line():
 def test_slim_text_has_no_markup_mention_or_code_breakout():
     out = core.slim_safe("@everyone `hi` **bold** §cred§r \x1b[31mansi\x1b[0m ‮evil\nnewline")
     assert "`" not in out and "\n" not in out and "‮" not in out and "§" not in out and "\x1b" not in out
-    assert "@everyone" not in out and "@​everyone" in out
+    assert "@everyone" not in out and "@\u200beveryone" in out
 
 
 def test_long_text_is_clipped():

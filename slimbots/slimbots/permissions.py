@@ -24,6 +24,7 @@ class Permissions:
     MENTION_EVERYONE = 1 << 16
     RUN_CODE = 1 << 17
     VIEW_MODERATION_HISTORY = 1 << 18
+    MOVE_MEMBERS = 1 << 19
 
     @classmethod
     def contains(cls, bits: int, permission: int) -> bool:

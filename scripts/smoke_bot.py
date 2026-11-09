@@ -27,6 +27,7 @@ MAX_TIMEOUT = 120
 MAX_READY = 60
 MAX_PAUSE = 30
 REGISTER_WAIT = 60  # how long to wait for a bot to register its commands before typing at it anyway
+STOP_GRACE = 15  # how long a bot gets to exit on SIGTERM before it is killed
 ENV_HELP = """Needs (all from env, none printed):
   SLIMM_URL                  server root
   SLIMM_BOT_TOKEN            the bot's token
@@ -91,6 +92,11 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return data
 
 
+def has_commands(body: Any) -> bool:
+    """True when the commands route answered with a non-empty `commands` list; any other body means the bot is not up yet."""
+    return isinstance(body, dict) and bool(body.get("commands"))
+
+
 def wait_until_registered(
     registered: Callable[[], bool], limit: float, sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
@@ -99,7 +105,7 @@ def wait_until_registered(
         try:
             if registered():
                 return True
-        except httpx.HTTPError:
+        except (httpx.HTTPError, ValueError):
             pass
         sleep(1)
     return False
@@ -183,6 +189,31 @@ def render(bot: str, results: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def stop_bot(proc: subprocess.Popen[bytes], grace: float | None = None) -> None:
+    """Asks the bot to exit and kills it when it does not, so a hung shutdown cannot strand the process."""
+    limit = STOP_GRACE if grace is None else grace
+    proc.terminate()
+    try:
+        proc.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=limit)
+
+
+def write_transcript(name: str, results: list[dict[str, Any]]) -> Path:
+    TRANSCRIPT_DIR.mkdir(exist_ok=True)
+    out = TRANSCRIPT_DIR / f"smoke-{name}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.md"
+    out.write_text(render(name, results))
+    return out
+
+
+def shut_down(proc: subprocess.Popen[bytes], private: PrivateReplies) -> None:
+    try:
+        stop_bot(proc)
+    finally:
+        private.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, epilog=ENV_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("bot", help="directory name under bots/")
@@ -218,17 +249,15 @@ def main(argv: list[str] | None = None) -> int:
         bot_id = os.environ.get("SLIMM_SMOKE_BOT_ID")
         limit = manifest.get("register_wait", REGISTER_WAIT)
         if bot_id and limit:
-            wait_until_registered(lambda: bool(http.get(f"/bots/{bot_id}/commands").json().get("commands")), limit)
+            wait_until_registered(lambda: has_commands(http.get(f"/bots/{bot_id}/commands").json()), limit)
         time.sleep(manifest.get("ready_seconds", 8) if not bot_id or not limit else 2)
         for step in manifest["steps"]:
             results.append(run_step(step, say, fetch, tester_id, private=private.replies_to))
     finally:
-        private.close()
-        proc.terminate()
-        proc.wait(timeout=15)
-    TRANSCRIPT_DIR.mkdir(exist_ok=True)
-    out = TRANSCRIPT_DIR / f"smoke-{name}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.md"
-    out.write_text(render(name, results))
+        try:
+            out = write_transcript(name, results)
+        finally:
+            shut_down(proc, private)
     failed = [r for r in results if not r["ok"]]
     print(f"{len(results) - len(failed)}/{len(results)} steps ok, transcript at {out}")
     return 1 if failed else 0
