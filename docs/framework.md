@@ -258,6 +258,10 @@ A redirect is followed only to the same origin, so a key header is never replaye
 `total_timeout` (default 60 seconds, `None` for no limit) bounds the whole call, every redirect hop and the whole body, where `timeout` bounds each phase on its own.
 `ssl_context=` is the trust for a service with its own certificate authority, such as a Proxmox node.
 `await service.peek(url, size=512)` follows the redirects of a GET and reads only the first `size` bytes of the final body, so a stream can be inspected without being downloaded; `WebResponse.url` is where it ended.
+`async with service.stream(url) as answer:` follows the same redirects but leaves the body to you: `answer.status`, `answer.headers` and `answer.url` are there at once and `answer.chunks()` yields the body as it arrives, for as long as the block lasts.
+It is how a bot hands a member's URL to a program such as ffmpeg through its stdin: the url policy decides every host contacted and the program never opens the URL itself (`bot-music` does this).
+`total_timeout` covers reaching the answer only, `timeout` bounds each read, and `max_bytes` does not apply, since a radio stream has no end; a body cut mid-read raises `ServiceUnreachable` from `chunks()`.
+New in 0.21.0.
 `transport=httpx.MockTransport(handler)` answers in place of the network, which is how a bot's tests fake the service.
 
 `slimbots.jellyfin` is the Jellyfin side that `bot-jellyfin` and `bot-music` used to each carry: `service(url, key, user_agent=...)`, `auth_header(key)` and `url_problem(url)`.

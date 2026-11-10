@@ -349,6 +349,103 @@ async def test_peek_checks_every_hop_of_the_destination_policy():
     assert len(seen) == 1
 
 
+class Body(httpx.AsyncByteStream):
+    """A body still to be streamed, as a real one is, that notes when the connection holding it is closed."""
+
+    def __init__(self, *chunks, then=None):
+        self.chunks = chunks
+        self.then = then
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            yield chunk
+        if self.then is not None:
+            await self.then()
+
+    async def aclose(self):
+        self.closed = True
+
+
+async def read_all(stream):
+    return b"".join([chunk async for chunk in stream.chunks()])
+
+
+async def test_stream_follows_the_redirects_and_hands_over_the_body_chunk_by_chunk():
+    body = Body(b"ID3", b"audio", b"bytes")
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "https://cdn.test/live"})
+        return httpx.Response(200, headers={"Content-Type": "audio/mpeg"}, stream=body)
+
+    service = JsonService("stream", transport=httpx.MockTransport(handler), cross_origin_redirects=True, max_bytes=4)
+    async with service.stream("https://radio.test/start") as answer:
+        assert (answer.status, answer.url, answer.headers["content-type"]) == (200, "https://cdn.test/live", "audio/mpeg")
+        assert [chunk async for chunk in answer.chunks()] == [b"ID3", b"audio", b"bytes"]
+    assert body.closed
+
+
+async def test_stream_vets_and_pins_every_hop_before_sending_it():
+    def handler(request):
+        if request.headers["host"] == "radio.example":
+            return httpx.Response(302, headers={"location": "http://10.0.0.5/admin"})
+        return httpx.Response(200)
+
+    service, seen = vetted(handler, resolving("93.184.216.34"), cross_origin_redirects=True)
+    with pytest.raises(ServiceBlocked):
+        async with service.stream("https://radio.example/live"):
+            raise AssertionError("the LAN hop was opened")
+    assert len(seen) == 1 and seen[0].url.host == "93.184.216.34" and seen[0].headers["host"] == "radio.example"
+
+
+async def test_stream_closes_the_connection_when_the_block_ends_early_or_fails():
+    body = Body(b"a", b"b", b"c")
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=body)))
+    async with service.stream("https://radio.test/live") as answer:
+        async for _chunk in answer.chunks():
+            break
+    assert body.closed
+    again = Body(b"a")
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=again)))
+    with pytest.raises(RuntimeError, match="boom"):
+        async with service.stream("https://radio.test/live"):
+            raise RuntimeError("boom")
+    assert again.closed
+
+
+async def test_stream_deadline_covers_reaching_the_answer_and_not_the_body_already_flowing():
+    async def slow_tail():
+        await asyncio.sleep(0.2)
+
+    service = JsonService(
+        "stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Body(b"a", then=slow_tail))), total_timeout=0.05,
+    )
+    async with service.stream("https://radio.test/live") as answer:
+        assert await read_all(answer) == b"a"
+
+    async def never_answers(request):
+        await asyncio.sleep(5)
+
+    stalled = JsonService("stream", transport=httpx.MockTransport(never_answers), total_timeout=0.05)
+    with pytest.raises(ServiceUnreachable, match="did not finish"):
+        async with stalled.stream("https://radio.test/live"):
+            raise AssertionError("no answer came")
+
+
+async def test_a_stream_cut_mid_body_is_a_service_error_not_an_httpx_one():
+    async def cut():
+        raise httpx.ReadError("connection reset")
+
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Body(b"first", then=cut))))
+    async with service.stream("https://radio.test/live") as answer:
+        got = []
+        with pytest.raises(ServiceUnreachable, match="ReadError"):
+            async for chunk in answer.chunks():
+                got.append(chunk)
+    assert got == [b"first"]
+
+
 def test_a_custom_ca_context_reaches_the_client():
     context = ssl.create_default_context()
     assert JsonService("pve", ssl_context=context)._verify is context
