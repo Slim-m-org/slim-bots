@@ -31,7 +31,10 @@ def setup(**config):
     return client
 
 
-def say(text, user=MOD, permissions=Permissions.KICK_MEMBERS | Permissions.MANAGE_SERVER):
+FULL_MOD = Permissions.KICK_MEMBERS | Permissions.BAN_MEMBERS | Permissions.MANAGE_SERVER
+
+
+def say(text, user=MOD, permissions=FULL_MOD):
     _counter[0] += 1
     member = warns.bot.space._make_member({**user, "role_ids": []})
     member._base_permissions = permissions
@@ -40,9 +43,11 @@ def say(text, user=MOD, permissions=Permissions.KICK_MEMBERS | Permissions.MANAG
     asyncio.run(warns.bot.process_message(frame))
 
 
-def seed_member(client):
+def seed_member(client, permissions=0):
     member = warns.bot.space._make_member({**ANN, "role_ids": []})
+    member._base_permissions = permissions
     warns.bot.space.members["u-ann"] = member
+    return member
 
 
 def calls(client, method, path):
@@ -144,10 +149,98 @@ def test_a_bad_rule_is_explained_and_rules_list():
 
 
 def test_a_reason_cannot_ping():
-    client = setup()
+    client = setup(LOG_CHANNEL="c-log")
     seed_member(client)
     say("!warn @ann @everyone hi")
-    assert "@everyone" not in client.sent[-1]["content"]
+    logged = next(s["content"] for s in client.sent if s["channel_id"] == "c-log")
+    assert "\\@everyone" in logged
+    assert logged.count("@everyone") == 1, "only the escaped one, never a live one"
+
+
+def refused_reply(client):
+    return client.ephemerals[-1]["content"]
+
+
+def test_a_kick_rule_needs_ban_members_from_the_moderator_not_only_from_the_bot():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 kick")
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert "Ban Members" in refused_reply(client)
+    assert not calls(client, "PUT", "/members/u-ann/removal")
+    say("!warns @ann")
+    assert "no active warns" in refused_reply(client), "a refused warn is not recorded"
+
+
+def test_a_timeout_rule_needs_only_kick_members_from_the_moderator():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 timeout 1h")
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_rule_does_not_run_on_someone_who_holds_more_than_the_moderator():
+    client = setup()
+    seed_member(client, permissions=Permissions.KICK_MEMBERS | Permissions.MANAGE_ROLES)
+    say("!warnrule add 1 timeout 1h")
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert "outranks" in refused_reply(client)
+    assert not calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_rule_does_not_run_on_an_equal_peer_unless_the_moderator_is_an_administrator():
+    client = setup()
+    seed_member(client, permissions=Permissions.KICK_MEMBERS)
+    say("!warnrule add 1 timeout 1h")
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert "outranks" in refused_reply(client)
+    assert not calls(client, "PUT", "/members/u-ann/timeout")
+    seed_member(client, permissions=Permissions.ADMINISTRATOR)
+    say("!warn @ann bad", permissions=Permissions.ADMINISTRATOR)
+    assert calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_warn_that_triggers_no_rule_is_recorded_whatever_the_ranks():
+    client = setup()
+    seed_member(client, permissions=Permissions.ADMINISTRATOR)
+    say("!warn @ann note", permissions=Permissions.KICK_MEMBERS)
+    assert "1 active warn." in client.sent[-1]["content"]
+
+
+def serve_permissions(client, user_id, bits):
+    client.respond("GET", f"/members/{user_id}/permissions", {"user_id": user_id, "permissions": int(bits)})
+
+
+def test_without_the_role_table_the_rank_is_read_from_the_permissions_route():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 timeout 1h")
+    warns.bot.space.roles_readable = False
+    warns.bot.permissions_readable = False
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
+    warns.bot.permissions_readable = True
+    serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS)
+    serve_permissions(client, "u-ann", Permissions.KICK_MEMBERS)
+    say("!warn @ann bad")
+    assert "outranks" in refused_reply(client), "an equal peer is still refused"
+    serve_permissions(client, "u-ann", Permissions.SEND_MESSAGES)
+    serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS | Permissions.SEND_MESSAGES)
+    say("!warn @ann bad")
+    assert calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_timed_out_member_cannot_be_ranked_without_the_role_table():
+    client = setup()
+    seed_member(client).timed_out_until = 4_000_000_000_000
+    say("!warnrule add 1 timeout 1h")
+    warns.bot.space.roles_readable = False
+    warns.bot.permissions_readable = True
+    serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS)
+    serve_permissions(client, "u-ann", 0)
+    say("!warn @ann bad")
+    assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
 
 
 def test_the_log_channel_gets_a_line():

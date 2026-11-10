@@ -29,8 +29,15 @@ def staff_role_id():
     return role.id if role else None
 
 
+async def find_member(user_id):
+    try:
+        return await bot.space.find_member(user_id)
+    except ApiError:
+        return None
+
+
 async def is_staff(user_id):
-    member = await bot.space.find_member(user_id)
+    member = await find_member(user_id)
     if member is None:
         return False
     role_id = staff_role_id()
@@ -141,7 +148,7 @@ async def open_ticket(interaction):
 
 
 async def opening_message(number, opener_id, role_id):
-    opener = await bot.space.find_member(opener_id)
+    opener = await find_member(opener_id)
     role = bot.space.get_role(role_id)
     pings = " ".join(p for p in (f"@{opener.username}" if opener else "", f"@[{role.name}]" if role else "") if p)
     return f"Ticket {number:04d} for {pings}. Staff will be with you soon. Say what it is about with `{bot.prefix}ticket reason <text>`."

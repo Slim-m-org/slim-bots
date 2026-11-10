@@ -2,6 +2,7 @@
 
 import io
 
+import pictures
 from plan import Region
 
 UNITS_PER_PIXEL = 2
@@ -163,7 +164,8 @@ def _draw_shape(draw, view, obj):
 
 def _paste_tile(image, view, obj, tile_bytes):
     try:
-        tile = pil_image.open(io.BytesIO(tile_bytes)).convert("RGB")
+        with pictures.open_picture(tile_bytes) as opened:
+            tile = opened.convert("RGB")
     except Exception:
         return False
     left, top = view.px(obj["x"], obj["y"])

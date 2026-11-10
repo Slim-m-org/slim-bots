@@ -23,14 +23,7 @@ import squiggle
 import store_db
 import tracer
 import where
-from slimbots import ApiError, Bot, Permissions
-
-try:
-    from slimbots import BatchUnavailable
-except ImportError:  # slimbots before 0.18 has no batch place
-
-    class BatchUnavailable(Exception):
-        pass
+from slimbots import ApiError, BatchUnavailable, Bot, Permissions
 from slimbots.http import is_rate_limited
 from store_db import SLOTS, add_stroke, add_strokes, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
@@ -76,6 +69,7 @@ AI_THINKING_BUDGET = bot.setting("DRAW_AI_THINKING_BUDGET", 2048, type=int)
 GRID = 96
 
 get = sources.http_get
+get_picture = sources.http_get_public
 planner = ai.make_planner(
     api_key=bot.setting("ANTHROPIC_API_KEY"), model=bot.setting("DRAW_MODEL", "claude-sonnet-4-6"), max_tokens=AI_MAX_TOKENS,
     local_url=bot.setting("DRAW_LLM_URL"), thinking_budget=AI_THINKING_BUDGET, request_timeout=AI_REQUEST_TIMEOUT, local_model=bot.setting("DRAW_LLM_MODEL"), local_key=bot.setting("DRAW_LLM_KEY") or "",
@@ -110,8 +104,6 @@ def grouped(objects):
 
 
 async def batch_with_retry(canvas, wire):
-    if not hasattr(canvas, "place_many"):
-        raise BatchUnavailable("this slimbots has no batch place")
     for attempt in range(RATE_RETRIES):
         try:
             return await canvas.place_many(wire)
@@ -174,7 +166,7 @@ async def find_drawable(query):
         return "no openly licensed picture matched that; try a simpler word."
     for candidate in found[:ATTEMPTS]:
         try:
-            data = await asyncio.to_thread(sources.fetch_picture, get, candidate["url"])
+            data = await asyncio.to_thread(sources.fetch_picture, get_picture, candidate["url"])
             grid, width, height = await asyncio.to_thread(sources.decode_gray, data, GRID)
         except sources.SourceError as err:
             if "Pillow" in str(err):
@@ -261,11 +253,9 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
 
 
 MODES = ("photo", "shaded", "color", "paste", "trace", "undo", "clear")
-# slimbots before 0.18 has no `suggest`, so the composer then just lacks the pick list
-_PICKER = {"suggest": {"mode": MODES}} if "suggest" in inspect.signature(bot.group).parameters else {}
 
 
-@bot.group(name="draw", help="Draw in your call: <idea>, photo, shaded, color, paste <subject>, trace <word>, undo, clear", **_PICKER)
+@bot.group(name="draw", help="Draw in your call: <idea>, photo, shaded, color, paste <subject>, trace <word>, undo, clear", suggest={"mode": MODES})
 async def draw(ctx, mode: str = ""):
     """The composer labels the first word `mode`; anything that is not a mode is the idea to draw."""
     query = mode.strip()
@@ -360,7 +350,7 @@ async def _first_picture(candidates, log, convert):
         for url in [candidate["url"], *([candidate["fallback"]] if candidate.get("fallback") else [])]:
             try:
                 with log.stage("download"):
-                    data = await asyncio.to_thread(sources.fetch_picture, get, url)
+                    data = await asyncio.to_thread(sources.fetch_picture, get_picture, url)
                     if convert:
                         data = await asyncio.to_thread(convert, data)
             except sources.SourceError as err:

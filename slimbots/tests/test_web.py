@@ -1,6 +1,8 @@
 """`JsonService`: JSON in and out over httpx, key rejection, unreachable hosts, redirects, size caps and the destination policy."""
 
+import asyncio
 import json
+import ssl
 
 import httpx
 import pytest
@@ -8,7 +10,8 @@ import pytest
 from slimbots import jellyfin
 from slimbots.urlpolicy import PRIVATE
 from slimbots.web import (
-    JsonService, ServiceAuthError, ServiceBlocked, ServiceError, ServiceHTTPError, ServiceTooLarge, ServiceUnreachable,
+    DEFAULT_PUBLIC_MAX_BYTES, JsonService, ServiceAuthError, ServiceBlocked, ServiceError, ServiceHTTPError, ServiceTooLarge,
+    ServiceUnreachable,
 )
 
 
@@ -171,7 +174,7 @@ async def test_public_only_refuses_a_private_destination_before_any_request():
 
 async def test_public_only_checks_every_redirect_hop():
     def handler(request):
-        return httpx.Response(302, headers={"location": "http://169.254.169.254/latest"}) if request.url.host == "feed.example" else httpx.Response(200)
+        return httpx.Response(302, headers={"location": "http://169.254.169.254/latest"}) if request.headers["host"] == "feed.example" else httpx.Response(200)
 
     service = JsonService(
         "feed", transport=httpx.MockTransport(handler), public_only=True, cross_origin_redirects=True,
@@ -187,6 +190,266 @@ async def test_public_only_lets_the_operator_opt_in_to_a_private_destination():
         allow_private=True, resolver=resolving("10.0.0.5"),
     )
     assert (await service.send("GET", "http://lan.example/feed")).body == b"ok"
+
+
+def vetted(handler, resolver, **options):
+    seen = []
+
+    def record(request):
+        seen.append(request)
+        return handler(request)
+
+    service = JsonService("feed", transport=httpx.MockTransport(record), public_only=True, resolver=resolver, **options)
+    return service, seen
+
+
+async def test_public_only_connects_to_the_address_it_vetted_and_keeps_the_host_and_server_name():
+    service, seen = vetted(lambda r: httpx.Response(200, content=b"ok"), resolving("93.184.216.34"))
+    await service.send("GET", "https://feed.example:8443/a?x=1")
+    request = seen[0]
+    assert (request.url.host, request.url.port, request.url.query) == ("93.184.216.34", 8443, b"x=1")
+    assert request.headers["host"] == "feed.example:8443" and request.extensions["sni_hostname"] == "feed.example"
+
+
+async def test_a_name_that_answers_differently_on_the_second_lookup_cannot_reach_the_lan():
+    answers = [["93.184.216.34"], ["10.0.0.5"]]
+    lookups = []
+
+    async def rebinding(host):
+        lookups.append(host)
+        return answers[min(len(lookups) - 1, 1)]
+
+    service, seen = vetted(lambda r: httpx.Response(200), rebinding)
+    await service.send("GET", "http://feed.example/a")
+    assert len(lookups) == 1 and [r.url.host for r in seen] == ["93.184.216.34"]
+
+
+async def test_a_plain_http_destination_sets_no_server_name_and_a_v6_answer_is_a_valid_host():
+    service, seen = vetted(lambda r: httpx.Response(200), resolving("2606:4700:4700::1111"))
+    await service.send("GET", "http://feed.example/a")
+    assert seen[0].url.host == "2606:4700:4700::1111" and seen[0].headers["host"] == "feed.example"
+    assert "sni_hostname" not in seen[0].extensions
+
+
+async def test_a_literal_address_and_an_operator_opt_in_are_not_rewritten():
+    service, seen = vetted(lambda r: httpx.Response(200), resolving("93.184.216.34"))
+    await service.send("GET", "http://93.184.216.34/a")
+    lan = JsonService(
+        "lan", transport=httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200)), public_only=True,
+        allow_hosts=("lan.example",), resolver=resolving("10.0.0.5"),
+    )
+    await lan.send("GET", "http://lan.example/a")
+    assert [(r.url.host, r.headers["host"]) for r in seen] == [("93.184.216.34", "93.184.216.34"), ("lan.example", "lan.example")]
+
+
+async def test_a_dead_address_falls_back_to_the_next_one_the_lookup_vouched_for():
+    def handler(request):
+        if request.url.host == "93.184.216.34":
+            raise httpx.ConnectError("network unreachable")
+        return httpx.Response(200, content=b"ok")
+
+    service, seen = vetted(handler, resolving("93.184.216.34", "2606:4700:4700::1111"))
+    assert (await service.send("GET", "https://feed.example/a")).body == b"ok"
+    assert [r.url.host for r in seen] == ["93.184.216.34", "2606:4700:4700::1111"]
+
+
+async def test_every_address_failing_is_unreachable():
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    service, seen = vetted(handler, resolving("93.184.216.34", "93.184.216.35"))
+    with pytest.raises(ServiceUnreachable):
+        await service.send("GET", "https://feed.example/a")
+    assert len(seen) == 2
+
+
+async def test_each_redirect_hop_is_looked_up_and_pinned_on_its_own():
+    hosts = {"first.example": "93.184.216.34", "second.example": "93.184.216.35"}
+
+    async def resolve(host):
+        return [hosts[host]]
+
+    def handler(request):
+        if request.headers["host"] == "first.example":
+            return httpx.Response(302, headers={"location": "https://second.example/b"})
+        return httpx.Response(200, content=b"done")
+
+    service, seen = vetted(handler, resolve, cross_origin_redirects=True)
+    response = await service.send("GET", "https://first.example/a")
+    assert [r.url.host for r in seen] == ["93.184.216.34", "93.184.216.35"] and response.url == "https://second.example/b"
+
+
+async def test_a_slow_drip_body_is_cut_off_by_the_overall_deadline():
+    async def drip():
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            yield b"x"
+
+    service = JsonService(
+        "feed", transport=httpx.MockTransport(lambda r: httpx.Response(200, content=drip())), timeout=5, total_timeout=0.1,
+    )
+    with pytest.raises(ServiceUnreachable, match="did not finish"):
+        await service.send("GET", "https://api.test/slow")
+
+
+async def test_the_overall_deadline_spans_every_redirect_hop():
+    async def slow_bounce(request):
+        await asyncio.sleep(0.05)
+        return httpx.Response(302, headers={"location": "/again"})
+
+    service = JsonService(
+        "feed", "https://api.test", transport=httpx.MockTransport(slow_bounce), max_redirects=10, total_timeout=0.12,
+    )
+    with pytest.raises(ServiceUnreachable, match="did not finish"):
+        await service.send("GET", "/again")
+
+
+async def test_a_service_can_opt_out_of_the_overall_deadline():
+    async def slow(request):
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, content=b"ok")
+
+    service = JsonService("feed", "https://api.test", transport=httpx.MockTransport(slow), total_timeout=None)
+    assert (await service.send("GET", "/x")).body == b"ok"
+
+
+async def test_a_public_only_service_caps_the_body_unless_told_otherwise():
+    assert JsonService("a", public_only=True).max_bytes == DEFAULT_PUBLIC_MAX_BYTES
+    assert JsonService("a", public_only=True, max_bytes=5).max_bytes == 5
+    assert JsonService("a").max_bytes is None
+    service, _ = vetted(lambda r: httpx.Response(200, content=b"x" * (DEFAULT_PUBLIC_MAX_BYTES + 1)), resolving("93.184.216.34"))
+    with pytest.raises(ServiceTooLarge):
+        await service.send("GET", "https://feed.example/big")
+
+
+async def test_peek_reads_only_the_head_and_reports_where_the_redirects_ended():
+    async def endless():
+        while True:
+            await asyncio.sleep(0)
+            yield b"a" * 400
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "https://cdn.test/live"})
+        return httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=endless())
+
+    service = JsonService("stream", transport=httpx.MockTransport(handler), cross_origin_redirects=True, total_timeout=2)
+    response = await service.peek("https://radio.test/start", size=512)
+    assert (response.status, response.url, len(response.body)) == (200, "https://cdn.test/live", 512)
+    assert response.headers["content-type"] == "audio/mpeg"
+
+
+async def test_peek_checks_every_hop_of_the_destination_policy():
+    def handler(request):
+        return httpx.Response(302, headers={"location": "http://10.0.0.5/admin"}) if request.headers["host"] == "radio.example" else httpx.Response(200)
+
+    service, seen = vetted(handler, resolving("93.184.216.34"), cross_origin_redirects=True)
+    with pytest.raises(ServiceBlocked):
+        await service.peek("https://radio.example/live")
+    assert len(seen) == 1
+
+
+class Body(httpx.AsyncByteStream):
+    """A body still to be streamed, as a real one is, that notes when the connection holding it is closed."""
+
+    def __init__(self, *chunks, then=None):
+        self.chunks = chunks
+        self.then = then
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            yield chunk
+        if self.then is not None:
+            await self.then()
+
+    async def aclose(self):
+        self.closed = True
+
+
+async def read_all(stream):
+    return b"".join([chunk async for chunk in stream.chunks()])
+
+
+async def test_stream_follows_the_redirects_and_hands_over_the_body_chunk_by_chunk():
+    body = Body(b"ID3", b"audio", b"bytes")
+
+    def handler(request):
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "https://cdn.test/live"})
+        return httpx.Response(200, headers={"Content-Type": "audio/mpeg"}, stream=body)
+
+    service = JsonService("stream", transport=httpx.MockTransport(handler), cross_origin_redirects=True, max_bytes=4)
+    async with service.stream("https://radio.test/start") as answer:
+        assert (answer.status, answer.url, answer.headers["content-type"]) == (200, "https://cdn.test/live", "audio/mpeg")
+        assert [chunk async for chunk in answer.chunks()] == [b"ID3", b"audio", b"bytes"]
+    assert body.closed
+
+
+async def test_stream_vets_and_pins_every_hop_before_sending_it():
+    def handler(request):
+        if request.headers["host"] == "radio.example":
+            return httpx.Response(302, headers={"location": "http://10.0.0.5/admin"})
+        return httpx.Response(200)
+
+    service, seen = vetted(handler, resolving("93.184.216.34"), cross_origin_redirects=True)
+    with pytest.raises(ServiceBlocked):
+        async with service.stream("https://radio.example/live"):
+            raise AssertionError("the LAN hop was opened")
+    assert len(seen) == 1 and seen[0].url.host == "93.184.216.34" and seen[0].headers["host"] == "radio.example"
+
+
+async def test_stream_closes_the_connection_when_the_block_ends_early_or_fails():
+    body = Body(b"a", b"b", b"c")
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=body)))
+    async with service.stream("https://radio.test/live") as answer:
+        async for _chunk in answer.chunks():
+            break
+    assert body.closed
+    again = Body(b"a")
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=again)))
+    with pytest.raises(RuntimeError, match="boom"):
+        async with service.stream("https://radio.test/live"):
+            raise RuntimeError("boom")
+    assert again.closed
+
+
+async def test_stream_deadline_covers_reaching_the_answer_and_not_the_body_already_flowing():
+    async def slow_tail():
+        await asyncio.sleep(0.2)
+
+    service = JsonService(
+        "stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Body(b"a", then=slow_tail))), total_timeout=0.05,
+    )
+    async with service.stream("https://radio.test/live") as answer:
+        assert await read_all(answer) == b"a"
+
+    async def never_answers(request):
+        await asyncio.sleep(5)
+
+    stalled = JsonService("stream", transport=httpx.MockTransport(never_answers), total_timeout=0.05)
+    with pytest.raises(ServiceUnreachable, match="did not finish"):
+        async with stalled.stream("https://radio.test/live"):
+            raise AssertionError("no answer came")
+
+
+async def test_a_stream_cut_mid_body_is_a_service_error_not_an_httpx_one():
+    async def cut():
+        raise httpx.ReadError("connection reset")
+
+    service = JsonService("stream", transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Body(b"first", then=cut))))
+    async with service.stream("https://radio.test/live") as answer:
+        got = []
+        with pytest.raises(ServiceUnreachable, match="ReadError"):
+            async for chunk in answer.chunks():
+                got.append(chunk)
+    assert got == [b"first"]
+
+
+def test_a_custom_ca_context_reaches_the_client():
+    context = ssl.create_default_context()
+    assert JsonService("pve", ssl_context=context)._verify is context
+    assert JsonService("pve")._verify is True
 
 
 def test_a_service_with_a_base_url_takes_only_paths_and_one_without_takes_only_urls():

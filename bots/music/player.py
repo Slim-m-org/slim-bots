@@ -13,8 +13,10 @@ from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
 from slimbots.voice import publish_microphone, watch_empty
 
 import music_core
+import stream_feed
 
 AUDIO_MAX_BITRATE = 128_000
+AUDIO_QUEUE_MS = 100  # livekit buffers a second by default, which is how late a pause or skip would be heard
 CHUNK_SAMPLES = media.pcm_chunk_samples()
 CHUNK_BYTES = media.pcm_chunk_bytes()
 
@@ -28,12 +30,15 @@ def ffmpeg_binary():
 
 
 def build_ffmpeg_args(track):
-    """Decodes to raw s16le on stdout; the protocol whitelist keeps a URL from reaching `file:` or a socket."""
-    args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "http,https,tcp,tls,crypto"]
-    args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
-    if track.headers:
-        args += ["-headers", track.headers]
-    args += ["-i", track.url, "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
+    """Decodes to raw s16le on stdout.
+    A direct url reaches ffmpeg on stdin and ffmpeg may open nothing else; a Jellyfin track is fetched by ffmpeg, limited to the http protocols."""
+    args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error"]
+    if track.is_direct:
+        args += ["-protocol_whitelist", "pipe", "-i", "pipe:0"]
+    else:
+        args += ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+        args += ["-headers", track.headers, "-i", track.url]
+    args += ["-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
     return args
 
 
@@ -64,7 +69,7 @@ class MusicSession:
         return self._chunks_sent * AUDIO_CHUNK_MS / 1000
 
     async def start(self, first_track):
-        self._source = await publish_microphone(self.voice_session, max_bitrate=AUDIO_MAX_BITRATE)
+        self._source = await publish_microphone(self.voice_session, max_bitrate=AUDIO_MAX_BITRATE, audio_queue_ms=AUDIO_QUEUE_MS)
         self.queue.append(first_track)
         self._runner_task = self.bot.background(self._run(), name=f"music-runner-{self.voice_channel_id}")
         self._monitor_task = self.bot.background(self._monitor_loop(), name=f"music-monitor-{self.voice_channel_id}")
@@ -133,13 +138,23 @@ class MusicSession:
         self._chunks_sent = 0
         self._interrupted = False
         self._process = await asyncio.create_subprocess_exec(
-            *build_ffmpeg_args(track), stdin=asyncio.subprocess.DEVNULL,
+            *build_ffmpeg_args(track), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
+        feeder = stream_feed.start(track.url, self._process.stdin) if track.is_direct else None
         try:
             await self._pump(self._process.stdout)
         finally:
+            await self._stop_feeder(feeder)
             await self._kill_process()
+            if self._interrupted:
+                self._source.clear_queue()
+
+    @staticmethod
+    async def _stop_feeder(feeder):
+        if feeder is not None:
+            feeder.cancel()
+            await asyncio.gather(feeder, return_exceptions=True)
 
     async def _pump(self, stream):
         rtc = self.voice_session.rtc

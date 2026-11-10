@@ -95,8 +95,15 @@ def buttons(event_id):
     return rows([Button("Going", f"event:{event_id}:yes", style="primary"), Button("Not going", f"event:{event_id}:no", style="secondary")])
 
 
+async def _find_member(user_id):
+    try:
+        return await bot.space.find_member(user_id)
+    except ApiError:
+        return None
+
+
 async def names_for(user_ids):
-    members = [await bot.space.find_member(u) for u in user_ids[:MAX_MENTIONS]]
+    members = [await _find_member(u) for u in user_ids[:MAX_MENTIONS]]
     shown = " ".join(m.mention() for m in members if m is not None)
     return shown + (f" and {len(user_ids) - MAX_MENTIONS} more" if len(user_ids) > MAX_MENTIONS else "")
 

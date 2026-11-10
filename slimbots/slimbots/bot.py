@@ -9,6 +9,7 @@ import importlib
 import importlib.metadata
 import logging
 import os
+import random
 import sqlite3
 import sys
 import time
@@ -19,6 +20,7 @@ from . import catchup, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
+from .client import base_url_problem
 from .commands import Command, Group, build_help_text, split_first_word
 from .context import Context
 from .exceptions import CommandError, CommandNotFound, MissingPermissions
@@ -27,6 +29,7 @@ from .interactions import ButtonHandler, ButtonRoutes, dispatch_press, dispatch_
 from .http import ApiError, AsyncClient, is_forbidden, is_token_revoked
 from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_with_shutdown
 from .models import Member
+from .reconnect import Backoff
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
@@ -45,6 +48,12 @@ def library_version() -> str:
 DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
+
+# Seconds a noted message seq waits to be written with its neighbours, and before a failed write is tried again.
+CURSOR_FLUSH_SECONDS = 0.1
+CURSOR_RETRY_SECONDS = 1.0
+# Seconds the cursor connection waits on a lock another connection to the same file holds.
+CURSOR_BUSY_SECONDS = 1.0
 
 log = logging.getLogger(__name__)
 UNEXPECTED_ERROR_REPLY = "something went wrong running that command; try again in a moment."
@@ -116,13 +125,14 @@ class Bot:
         max_delay: float = 60.0, help_command: bool = True, channels: set[str] | list[str] | None = None,
         require_channels: bool = False, cursor_path: str | None = None, default_data_path: str | None = None,
         store_migrate: Callable[[Any], None] | None = None, listen_voice_chats: bool = False,
-        mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE,
+        mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE, ordered_events: bool = False,
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
         self.permissions_readable: bool | None = None
         self.mention_commands = mention_commands
         self.max_replay_age = max_replay_age
+        self.ordered_events = ordered_events
         self.listen_voice_chats = listen_voice_chats or os.environ.get("SLIMM_LISTEN_VOICE_CHATS") == "1"
         self._url = url
         self._token = token
@@ -150,7 +160,10 @@ class Bot:
         self.authors: AuthorFilter | None = None
         self.me_id: str | None = None
         self._cursor_conn: sqlite3.Connection | None = None
+        self._pending_seqs = cursor.Pending()
+        self._cursor_flush: asyncio.TimerHandle | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._handler_tail: asyncio.Task[Any] | None = None
         self._periodic: dict[str, Periodic] = {}
         self._periodic_started: set[str] = set()
         self._fatal_error: BaseException | None = None
@@ -161,6 +174,7 @@ class Bot:
         self.moderation_head: int | None = None
         self._clock: Callable[[], float] = time.monotonic
         self._wall_clock: Callable[[], float] = time.time
+        self._jitter: Callable[[float, float], float] = random.uniform
         self._channel_miss_at: dict[str, float] = {}
         self.store: Store | None = None
         self._extensions: dict[str, ModuleType] = {}
@@ -398,12 +412,14 @@ class Bot:
             await ctx.reply_ephemeral(build_help_text(self, command_name=command_name), public_fallback=True)
 
     async def _dispatch_event(self, name: str, *args: Any) -> None:
-        for handler in self._listeners.get(name, []):
+        for handler in list(self._listeners.get(name, [])):
             await guard_dispatch(handler, *args)
 
     async def _resolve_author(self, author_id: str) -> Member | None:
         assert self.space is not None, "_resolve_author needs an open connection"
         member = await self.space.find_member(author_id)
+        if member is None:
+            log.debug("no such user %s; dropped what they sent", author_id)
         if member is not None and self.space.roles_readable is False and self.permissions_readable:
             await self._refresh_author_permissions(member)
         return member
@@ -525,6 +541,16 @@ class Bot:
         elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
             await guard_dispatch(self.space.fetch_member, frame["user_id"])
 
+    async def _track_members(self, kind: str, frame: dict[str, Any]) -> None:
+        """Drops a removed member from `space.members` and refetches a restored or renamed one, so lookups are never stale."""
+        user_id = frame.get("user_id")
+        if self.space is None or not user_id:
+            return
+        if kind == "member.removed":
+            self.space.members.pop(user_id, None)
+        elif kind == "member.restored" or (kind == "profile.changed" and user_id in self.space.members):
+            await guard_dispatch(self.space.fetch_member, user_id)
+
     async def _reload_roles(self) -> None:
         assert self.space is not None
         if await self._load_roles():
@@ -618,64 +644,111 @@ class Bot:
             log.exception("could not tell the invoker a command failed")
 
     async def _handle_frame(self, frame: dict[str, Any]) -> None:
+        """One server frame: a malformed one is logged and skipped, and only a revoked token ends the connection."""
+        await guard_dispatch(self._route_frame, frame)
+
+    async def _route_frame(self, frame: dict[str, Any]) -> None:
         kind: str = frame.get("type") or ""
-        await guard_dispatch(self._dispatch_event, "on_frame", frame)
+        self._spawn_event("on_frame", frame)
         await self._track_channels(kind, frame)
         await self._track_roles(kind, frame)
+        await self._track_members(kind, frame)
         if kind == "message.created":
-            channel_id = frame.get("channel_id")
-            if not await self._accepts_channel(channel_id, kind):
-                return
-            message = frame.get("message") or {}
-            if message.get("id") in self._replayed_ids:
-                return
-            if self._held_live is not None:
-                await guard_dispatch(self._dispatch_event, "on_raw_message", message)
-                self._held_live.append((channel_id, message))
-                return
-            self._note_seq(channel_id, message.get("seq"))
-            await guard_dispatch(self._dispatch_event, "on_raw_message", message)
-            self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
-            return
-        if kind == "interaction.created":
+            await self._route_message(frame)
+        elif kind == "interaction.created":
             # A call control is used on a call, which a channel-scoped bot is not scoped to, so scope never gates it.
             if frame.get("kind") == "call_control" or await self._accepts_channel(frame.get("channel_id"), kind):
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
-            return
-        if kind == "voice.participant_joined":
+        elif kind == "voice.participant_joined":
             # Never gated on self.channels - find_member() tracks every voice channel the bot can see.
             self.voice._note_joined(frame["channel_id"], frame["user_id"])
-            return
-        if kind == "voice.participant_left":
+        elif kind == "voice.participant_left":
             self.voice._note_left(frame["channel_id"], frame["user_id"])
-            return
-        if kind == "member.joined":
+        elif kind == "member.joined":
             # Special-cased, not a _GLOBAL_EVENT_FRAMES entry: on_member_join needs a resolved Member, which payload_cls(frame) cannot fetch.
-            user_id = frame.get("user_id")
-            member = await self._resolve_author(user_id) if user_id else None
-            if member is not None:
-                await guard_dispatch(self._dispatch_event, "on_member_join", member)
+            self._start_handler("on_member_join", self._dispatch_member_join, frame.get("user_id"))
+        elif kind in _GLOBAL_EVENT_FRAMES:
+            self._spawn_typed(*_GLOBAL_EVENT_FRAMES[kind], frame)
+        elif kind in _CHANNEL_EVENT_FRAMES and await self._accepts_channel(frame.get("channel_id"), kind):
+            self._spawn_typed(*_CHANNEL_EVENT_FRAMES[kind], frame)
+
+    async def _route_message(self, frame: dict[str, Any]) -> None:
+        channel_id = frame.get("channel_id")
+        if not await self._accepts_channel(channel_id, "message.created"):
             return
-        global_event = _GLOBAL_EVENT_FRAMES.get(kind)
-        if global_event:
-            await self._dispatch_typed(*global_event, frame)
+        message = frame.get("message") or {}
+        if message.get("id") in self._replayed_ids:
             return
-        channel_event = _CHANNEL_EVENT_FRAMES.get(kind)
-        if channel_event:
-            if not await self._accepts_channel(frame.get("channel_id"), kind):
-                return
-            await self._dispatch_typed(*channel_event, frame)
+        self._spawn_event("on_raw_message", message)
+        if self._held_live is not None:
+            self._held_live.append((channel_id, message))
+            return
+        self._note_seq(channel_id, message.get("seq"))
+        self.background(guard_dispatch(self.process_message, message), name=f"message-{message.get('id', '?')}")
+
+    def _spawn_event(self, name: str, *args: Any) -> None:
+        if self._listeners.get(name):
+            self._start_handler(name, self._dispatch_event, name, *args)
+
+    def _spawn_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
+        if self._listeners.get(name):
+            self._start_handler(name, self._dispatch_typed, name, payload_cls, frame)
+
+    def _start_handler(self, name: str, func: Callable[..., Awaitable[Any]], *args: Any) -> None:
+        """Runs a frame's handlers as their own task, so a slow one never holds up the next frame; `ordered_events` chains them."""
+        previous = self._handler_tail if self.ordered_events else None
+
+        async def run() -> None:
+            if previous is not None and not previous.done():
+                await asyncio.wait([previous])
+            await guard_dispatch(func, *args)
+
+        task = self.background(run(), name=name)
+        if self.ordered_events:
+            self._handler_tail = task
 
     async def _dispatch_typed(self, name: str, payload_cls: type[Any] | None, frame: dict[str, Any]) -> None:
         """Wraps `frame` in `payload_cls` unless it is `None` (the pre-typed events keep the raw frame dict)."""
         payload = payload_cls(frame) if payload_cls else frame
-        await guard_dispatch(self._dispatch_event, name, payload)
+        await self._dispatch_event(name, payload)
+
+    async def _dispatch_member_join(self, user_id: str | None) -> None:
+        member = await self._resolve_author(user_id) if user_id else None
+        if member is not None:
+            await self._dispatch_event("on_member_join", member)
 
     def _note_seq(self, channel_id: str | None, seq: int | None) -> None:
         if self._cursor_conn is not None and seq is not None and channel_id is not None:
-            cursor.set(self._cursor_conn, channel_id, seq)
+            self._pending_seqs.note(channel_id, seq)
+            self._schedule_cursor_flush(CURSOR_FLUSH_SECONDS)
+
+    def _schedule_cursor_flush(self, delay: float) -> None:
+        if self._cursor_flush is None:
+            self._cursor_flush = asyncio.get_running_loop().call_later(delay, self._flush_cursor)
+
+    def _close_cursor(self) -> None:
+        """Saves what is still noted and closes the connection; a save that fails here is dropped, not retried."""
+        self._flush_cursor()
+        if self._cursor_flush is not None:
+            self._cursor_flush.cancel()
+            self._cursor_flush = None
+        if self._cursor_conn is not None:
+            self._cursor_conn.close()
+
+    def _flush_cursor(self) -> None:
+        """Writes the noted seqs now; a locked database is logged and retried later, never raised into a frame handler."""
+        if self._cursor_flush is not None:
+            self._cursor_flush.cancel()
+            self._cursor_flush = None
+        if self._cursor_conn is None:
+            return
+        try:
+            self._pending_seqs.flush(self._cursor_conn)
+        except sqlite3.Error as err:
+            log.warning("could not save the message cursor (%s); trying again in %ss", err, CURSOR_RETRY_SECONDS)
+            self._schedule_cursor_flush(CURSOR_RETRY_SECONDS)
 
     def _catch_up_channels(self) -> list[str]:
         """The configured channels, or every visible channel for a bot that was not scoped."""
@@ -686,6 +759,7 @@ class Bot:
     async def _catch_up(self) -> None:
         """Replays the `/sync` backlog through `process_message`, page by page, persisting the cursor as it goes."""
         assert self.client is not None, "_catch_up needs start() to have run"
+        self._flush_cursor()
         pending = self._catch_up_channels()
         if not pending or self._cursor_conn is None:
             return
@@ -729,7 +803,7 @@ class Bot:
             return False
         return self._wall_clock() * 1000 - created_at > self.max_replay_age * 1000
 
-    async def _connect_once(self, reset_delay: Callable[[], None]) -> None:
+    async def _connect_once(self, mark_ready: Callable[[], None]) -> None:
         assert self.client is not None and self.space is not None, "_connect_once needs start() to have run"
         me = await self.client.me()
         self.me_id = me["id"]
@@ -749,16 +823,16 @@ class Bot:
             head = gateway.hello.get("moderation_seq")
             self.moderation_head = head if isinstance(head, int) else None
             try:
-                await self._serve(gateway, reset_delay)
+                await self._serve(gateway, mark_ready)
             finally:
                 self._gateway = None
                 self._held_live = None
 
-    async def _serve(self, gateway: Gateway, reset_delay: Callable[[], None]) -> None:
+    async def _serve(self, gateway: Gateway, mark_ready: Callable[[], None]) -> None:
         """Runs the frame loop and the backlog replay side by side, so a replayed command has a live socket."""
         self._held_live = []
         self._replayed_ids.clear()
-        ready = asyncio.create_task(self._catch_up_then_ready(reset_delay))
+        ready = asyncio.create_task(self._catch_up_then_ready(mark_ready))
         pump = asyncio.create_task(self._pump_frames(gateway))
         pending = {ready, pump}
         try:
@@ -775,10 +849,10 @@ class Bot:
         async for frame in gateway.frames():
             await self._handle_frame(frame)
 
-    async def _catch_up_then_ready(self, reset_delay: Callable[[], None]) -> None:
+    async def _catch_up_then_ready(self, mark_ready: Callable[[], None]) -> None:
         await self._catch_up()
         self._release_held_messages()
-        reset_delay()
+        mark_ready()
         await self._dispatch_event("on_ready")
 
     def _release_held_messages(self) -> None:
@@ -801,15 +875,12 @@ class Bot:
         await self.send_frame({"type": "typing", "channel_id": channel_id})
 
     async def _run_forever(self):
-        delay = self.base_delay
-
-        def reset_delay():
-            nonlocal delay
-            delay = self.base_delay
-
+        backoff = Backoff(self.base_delay, self.max_delay, clock=self._clock, jitter=self._jitter)
         while True:
+            backoff.connecting()
+            failure = None
             try:
-                await self._connect_once(reset_delay)
+                await self._connect_once(backoff.ready)
             except RegistrationRejected as err:
                 print(f"the server refused this bot's registration at {err.route}: {err.reason or err.body}", file=sys.stderr)
                 return 1
@@ -817,9 +888,11 @@ class Bot:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
-                log_failure(log, err, "connection failed, retrying in %ss", delay)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, self.max_delay)
+                failure = err
+            wait = backoff.next_wait()
+            if failure is not None:
+                log_failure(log, failure, "connection failed, retrying in %.1fs", wait)
+            await asyncio.sleep(wait)
 
     def _resolve_channels_from_env(self):
         raw = os.environ.get("SLIMM_CHANNELS", "")
@@ -834,6 +907,8 @@ class Bot:
             if env_channels:
                 self.channels = env_channels
 
+        if base and (problem := base_url_problem(base)):
+            raise RuntimeError(f"SLIMM_URL: {problem}")
         missing = []
         if not base:
             missing.append("SLIMM_URL")
@@ -848,7 +923,7 @@ class Bot:
 
     def _open_cursor(self):
         path = self.cursor_path or self.data_path or os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB
-        self._cursor_conn = sqlite3.connect(path, isolation_level=None)
+        self._cursor_conn = sqlite3.connect(path, isolation_level=None, timeout=CURSOR_BUSY_SECONDS)
         cursor.init_table(self._cursor_conn)
 
     async def start(self, *, url=None, token=None):
@@ -869,8 +944,7 @@ class Bot:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
             await self.voice.leave_all()
             await self.client.aclose()
-            if self._cursor_conn is not None:
-                self._cursor_conn.close()
+            self._close_cursor()
             if self.store is not None:
                 await self.store.close()
 

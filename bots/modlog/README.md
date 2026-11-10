@@ -156,7 +156,7 @@ decision 0028, not something to route around here.
   delete.** `role.changed` fires for all four and says only the id. Naming
   which one happened would need `GET /roles` (`MANAGE_ROLES`) plus a
   before/after diff, and this bot does not hold that permission on purpose.
-- **Persist the name and role-name caches.** Only `events`, `gaps` and the moderation cursor tables live
+- **Persist the name and role-name caches.** Only `events`, `gaps`, `unposted` and the moderation cursor tables live
   in `SLIMM_DB_PATH`; the in-memory lookups are cheap to rebuild from the
   next few events and simply start cold again after a restart.
 - **Watch more than these five events.** Reactions, threads, polls, pins,
@@ -174,6 +174,14 @@ To keep that apart from a real hole, the bot also reads `/version` on each conne
 A gap where the fingerprint changed is recorded as "server restarted, events may have been missed"; one on an unchanged fingerprint is a plain gap, and `!modlog gaps` counts them separately.
 A server too old to send `build_id` falls back to version and capabilities, where two deploys of `main` look identical and still read as plain gaps.
 The first connect seeds the seq and the fingerprint and records nothing.
+
+## An entry that cannot be posted is kept and retried
+
+The cursor moves as soon as a moderation frame arrives, so the bot also writes the frame to an `unposted` table first and deletes it once the handler has posted it.
+A post the channel refuses (its permission was revoked, the channel is gone, the timeout on this bot's own account has not lifted) or a lookup that fails for longer than the library's own retries leaves the frame there.
+Every minute a sweep runs those frames again, waiting twice as long after each failure up to about an hour.
+A post goes out under an id made from the frame (its type, seq, member and role), so a retry after a post that did get through is the same message and never a second one.
+`!modlog gaps` says how many are still waiting.
 
 ## Output
 

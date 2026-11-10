@@ -1,8 +1,8 @@
 """A tonal picture drawn as wavy scanlines: each row's wave gets taller and tighter where the picture is darker; Pillow only."""
 
-import io
 import math
 
+import pictures
 import sizing
 from plan import Planned
 from sources import SourceError
@@ -32,11 +32,11 @@ def _smoothstep(low, high, value):
 
 def _load(data):
     try:
-        from PIL import Image, ImageFilter
+        from PIL import ImageFilter
     except ImportError as err:
         raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
     try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("RGB", (WORK_SIDE * 2, WORK_SIDE * 2))
             rgb = picture.convert("RGB")
             rgb.thumbnail((WORK_SIDE, WORK_SIDE))

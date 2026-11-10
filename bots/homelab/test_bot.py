@@ -7,6 +7,8 @@ import os
 import sys
 import tempfile
 
+import httpx
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as homelab  # noqa: E402
@@ -188,6 +190,84 @@ def test_the_token_never_reaches_a_reply():
     rig = Rig()
     rig.tick()
     assert "SECRET" not in rig.say("!homelab")
+
+
+def scripted_transport(handler):
+    seen = []
+    sources.TRANSPORT = httpx.MockTransport(lambda request: seen.append(request) or handler(request))
+    return seen
+
+
+def fetched(url, headers=None):
+    try:
+        return sources.http_get(url, headers or {})
+    except sources.SourceError as err:
+        return str(err)
+    finally:
+        sources.TRANSPORT = None
+
+
+def test_a_fetch_sends_the_token_and_the_bots_user_agent():
+    seen = scripted_transport(lambda request: httpx.Response(200, content=b"{}"))
+    assert fetched("https://pve.lan:8006/api2/json/x", {"authorization": "PVEAPIToken=t"}) == (200, b"{}")
+    assert seen[0].headers["authorization"] == "PVEAPIToken=t" and seen[0].headers["user-agent"] == sources.USER_AGENT
+
+
+def test_the_proxmox_ca_file_is_the_trust_the_fetch_uses():
+    import certifi
+
+    scripted_transport(lambda request: httpx.Response(200, content=b"{}"))
+    try:
+        assert sources.http_get("https://pve.lan:8006/x", {}, cafile=certifi.where()) == (200, b"{}")
+    finally:
+        sources.TRANSPORT = None
+
+
+def test_a_redirect_to_another_host_is_refused_and_the_token_is_never_replayed():
+    seen = scripted_transport(lambda request: httpx.Response(302, headers={"location": "https://elsewhere.example/steal"}))
+    answer = fetched("https://pve.lan:8006/api2/json/x", {"authorization": "PVEAPIToken=SECRET"})
+    assert answer == "homelab redirected to another host" and [r.url.host for r in seen] == ["pve.lan"]
+
+
+def test_a_redirect_that_stays_on_the_host_is_followed():
+    scripted_transport(lambda request: httpx.Response(302, headers={"location": "/final"}) if request.url.path == "/start" else httpx.Response(200, content=b"ok"))
+    assert fetched("https://jf.lan/start") == (200, b"ok")
+
+
+def test_an_oversized_answer_and_a_dead_host_are_sentences_that_name_no_url():
+    scripted_transport(lambda request: httpx.Response(200, content=b"x" * (sources.MAX_BODY + 1)))
+    assert fetched("https://pve.lan:8006/x") == "the answer is larger than 4 MB"
+
+    def refuse(request):
+        raise httpx.ConnectError("refused")
+
+    scripted_transport(refuse)
+    assert fetched("https://pve.lan:8006/x?token=SECRET") == "homelab could not be reached (ConnectError)"
+
+
+def test_a_plaintext_lan_url_stops_the_bot_unless_the_operator_allows_it():
+    Rig(PROXMOX_URL="http://pve.lan:8006")
+    homelab.ALLOW_HTTP = False
+    assert "refusing a plaintext HOMELAB_PROXMOX_URL" in homelab.check_config() and "HOMELAB_ALLOW_HTTP" in homelab.check_config()
+    homelab.ALLOW_HTTP = True
+    assert homelab.check_config() is None
+    homelab.ALLOW_HTTP = False
+    Rig(JELLYFIN_URL="http://10.0.0.100:8096", JELLYFIN_KEY="k")
+    assert "HOMELAB_JELLYFIN_URL" in homelab.check_config()
+
+
+def test_https_loopback_a_bare_docker_name_and_unset_sources_pass_the_url_check():
+    for urls in ({"PROXMOX_URL": "https://pve.lan:8006"}, {"PROXMOX_URL": "http://localhost:8006"}, {"JELLYFIN_URL": "http://jellyfin:8096", "JELLYFIN_KEY": "k"}, {"PROXMOX_URL": "", "PROXMOX_TOKEN": ""}):
+        Rig(**urls)
+        homelab.ALLOW_HTTP = False
+        assert homelab.check_config() is None, urls
+
+
+def test_a_url_that_carries_credentials_is_refused():
+    Rig(PROXMOX_URL="https://root:hunter2@pve.lan:8006")
+    homelab.ALLOW_HTTP = False
+    problem = homelab.check_config()
+    assert "must not embed credentials" in problem and "hunter2" not in problem
 
 
 def test_a_non_voice_channel_is_refused_at_connect():

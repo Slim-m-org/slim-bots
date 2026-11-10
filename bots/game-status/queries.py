@@ -2,8 +2,11 @@
 Parsers are pure functions; the query_* coroutines add the socket and always run under a timeout. See README.md."""
 
 import asyncio
+import errno
 import json
+import socket
 import struct
+import sys
 from dataclasses import dataclass
 
 KINDS = ("a2s", "minecraft", "tcp")
@@ -191,14 +194,26 @@ async def query_tcp(host, port):
 QUERIES = {"a2s": query_a2s, "minecraft": query_minecraft, "tcp": query_tcp}
 
 
+NO_ROUTE = (errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN, errno.ENETDOWN)
+
+
 def reason(err):
+    """A short phrase from a closed set; an OS error text names the host and port it dialled, which the board must not show."""
     if isinstance(err, asyncio.TimeoutError):
         return "timed out"
     if isinstance(err, asyncio.IncompleteReadError):
         return "connection closed early"
     if isinstance(err, ConnectionRefusedError):
         return "connection refused"
-    return str(err) or type(err).__name__
+    if isinstance(err, ConnectionError):
+        return "connection lost"
+    if isinstance(err, socket.gaierror):
+        return "host not found"
+    if isinstance(err, OSError):
+        return "unreachable" if err.errno in NO_ROUTE else "network error"
+    if isinstance(err, ProtocolError):
+        return str(err)
+    return type(err).__name__
 
 
 async def check(kind, host, port, timeout):
@@ -206,4 +221,6 @@ async def check(kind, host, port, timeout):
     try:
         return await asyncio.wait_for(QUERIES[kind](host, port), timeout)
     except Exception as err:
+        if not isinstance(err, (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionRefusedError, ProtocolError)):
+            print(f"game-status: {kind} check of {host}:{port}: {type(err).__name__}: {err}", file=sys.stderr)
         return down(reason(err))

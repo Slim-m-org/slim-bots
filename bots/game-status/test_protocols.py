@@ -2,9 +2,12 @@
 """Protocol tests: pure parsers plus real loopback servers for the socket paths; run directly: python3 test_protocols.py."""
 
 import asyncio
+import errno
 import json
+import socket
 import struct
 
+import gs_core
 import queries
 from queries import ProtocolError, Status
 from slimbots.testing import run_module_tests
@@ -178,6 +181,36 @@ def test_tcp_check_is_up_when_it_connects_and_down_when_refused():
 def test_an_unresolvable_host_is_down_not_an_exception():
     status = asyncio.run(queries.check("tcp", "nonexistent.invalid", 1, 3))
     assert not status.up and status.error
+
+
+def failing_with(err):
+    async def fail(host, port):
+        raise err
+
+    queries.QUERIES["tcp"] = fail
+    try:
+        return asyncio.run(queries.check("tcp", "10.0.0.50", 25565, 1))
+    finally:
+        queries.QUERIES["tcp"] = queries.query_tcp
+
+
+def test_the_down_reason_never_carries_the_servers_address():
+    dialled = OSError(errno.EHOSTUNREACH, "Connect call failed ('10.0.0.50', 25565)")
+    for err, expected in [
+        (dialled, "unreachable"),
+        (OSError(errno.ENETUNREACH, "Connect call failed ('10.0.0.50', 25565)"), "unreachable"),
+        (OSError(errno.EACCES, "Connect call failed ('10.0.0.50', 25565)"), "network error"),
+        (ConnectionResetError(errno.ECONNRESET, "Connection reset by peer"), "connection lost"),
+        (socket.gaierror(socket.EAI_NONAME, "Name or service not known"), "host not found"),
+        (ValueError("10.0.0.50:25565 said no"), "ValueError"),
+    ]:
+        status = failing_with(err)
+        assert status.error == expected and "10.0.0.50" not in status.error and not status.up
+    assert "10.0.0.50" not in gs_core.server_line(failing_with(dialled))
+
+
+def test_a_protocol_error_keeps_its_own_fixed_wording():
+    assert failing_with(queries.ProtocolError("not an A2S packet")).error == "not an A2S packet"
 
 
 if __name__ == "__main__":

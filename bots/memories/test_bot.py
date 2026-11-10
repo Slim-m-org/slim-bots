@@ -91,7 +91,7 @@ def test_fetch_window_pages_back_and_stops_past_the_window():
     client = setup({"c-gen": rows})
     start, end = history.day_window_ms(date(2025, 11, 4))
     got = asyncio.run(history.fetch_window(client, "c-gen", start, end, 10))
-    assert len(got) == 150
+    assert len(got.messages) == 150 and not got.truncated
 
 
 def test_onthisday_quotes_a_public_message_from_a_year_ago_and_defuses_mentions():
@@ -100,7 +100,7 @@ def test_onthisday_quotes_a_public_message_from_a_year_ago_and_defuses_mentions(
     client = setup({"c-gen": [old], "c-priv": [private]})
     say("!onthisday")
     text = client.sent[-1]["content"]
-    assert "1 year ago, in #general" in text and "watch that film again" in text and "@everyone" not in text
+    assert "1 year ago, in #general" in text and "watch that film again" in text and "\\@everyone" in text and text.count("@everyone") == 1
     assert "c-priv" not in client.pages and "c-unk" not in client.pages
 
 
@@ -111,6 +111,62 @@ def test_onthisday_falls_back_to_a_shorter_age_and_then_to_a_sentence():
     client = setup({"c-gen": [msg(ms(2026, 5, 4), "short")]}, ages=(12, 6))
     say("!onthisday")
     assert "could not find" in client.sent[-1]["content"]
+
+
+def busy_channel(window_day, in_window, newer):
+    """Seq-ordered history: a few old messages, `in_window` on `window_day`, then `newer` messages after it."""
+    rows = [msg(ms(2025, 6, 1), f"long before the window, number {i}") for i in range(30)]
+    rows += [msg(window_day, f"short {i}") for i in range(in_window)]
+    rows += [msg(ms(2026, 3, 1) + i, f"recent chatter number {i}") for i in range(newer)]
+    for i, m in enumerate(rows):
+        m["seq"] = i + 1
+    return rows
+
+
+def test_a_window_far_behind_a_busy_channel_is_found_without_reading_everything_after_it():
+    rows = busy_channel(ms(2025, 11, 4), in_window=40, newer=6000)
+    client = setup({"c-gen": rows})
+    start, end = history.day_window_ms(date(2025, 11, 4))
+    got = asyncio.run(history.fetch_window(client, "c-gen", start, end, 40))
+    assert len(got.messages) == 40 and not got.truncated
+    assert len(client.pages) < 25, "a plain walk would have spent all 40 pages and still not arrived"
+
+
+def test_a_small_channel_still_costs_one_request():
+    client = setup({"c-gen": busy_channel(ms(2025, 11, 4), in_window=3, newer=10)})
+    start, end = history.day_window_ms(date(2025, 11, 4))
+    got = asyncio.run(history.fetch_window(client, "c-gen", start, end, 40))
+    assert len(got.messages) == 3 and len(client.pages) == 1
+
+
+def test_a_window_with_more_messages_than_the_page_cap_says_it_was_cut_short():
+    rows = busy_channel(ms(2025, 11, 4), in_window=350, newer=500)
+    client = setup({"c-gen": rows})
+    start, end = history.day_window_ms(date(2025, 11, 4))
+    got = asyncio.run(history.fetch_window(client, "c-gen", start, end, 2))
+    assert len(got.messages) == 200 and got.truncated
+
+
+def test_onthisday_says_when_a_busy_day_was_only_partly_read():
+    memories.QUOTE_PAGES = 1
+    try:
+        client = setup({"c-gen": busy_channel(ms(2025, 11, 4), in_window=300, newer=50)})
+        say("!onthisday")
+    finally:
+        memories.QUOTE_PAGES = 40
+    reply = client.sent[-1]["content"]
+    assert "could not find a quotable message" in reply and "more messages on those days than I read" in reply
+
+
+def test_recap_says_which_channels_it_only_partly_read():
+    memories.RECAP_PAGES = 1
+    try:
+        rows = [msg(ms(2026, 10, 5), f"talk number {i} of the month") for i in range(250)]
+        client = setup({"c-gen": rows})
+        say("!recap 2026-10")
+    finally:
+        memories.RECAP_PAGES = 150
+    assert "- partial: #general had more messages than I read" in client.sent[-1]["content"]
 
 
 def test_quotable_skips_bot_commands_links_and_the_bot_itself():

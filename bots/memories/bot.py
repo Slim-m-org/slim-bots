@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import history
 from slimbots import ApiError, Bot
+from slimbots.text import escape_mentions
 
 bot = Bot(prefix="!", default_data_path="memories.db")
 
@@ -35,23 +36,24 @@ def age_label(months):
 
 
 def quote_block(text):
-    return "\n".join("> " + line for line in text.replace("@", " at ").splitlines() if line.strip())
+    return "\n".join("> " + escape_mentions(line) for line in text.splitlines() if line.strip())
 
 
 async def find_memory(today):
-    """(age in months, channel name, message) for the first age that has a quotable message, else None."""
+    """((age in months, channel name, message) for the first age that has a quotable message, else None), and whether a busy channel was only partly read."""
     channels = public_channels()
+    cut_short = False
     for months in AGES:
         start_ms, end_ms = history.day_window_ms(history.months_before(today, months))
         candidates = []
         for channel in channels:
-            for message in await history.fetch_window(bot.client, channel.id, start_ms, end_ms, QUOTE_PAGES):
-                if history.quotable(message, bot.me_id, bot.prefix):
-                    candidates.append({**message, "_channel": channel.name})
+            window = await history.fetch_window(bot.client, channel.id, start_ms, end_ms, QUOTE_PAGES)
+            cut_short = cut_short or window.truncated
+            candidates.extend({**m, "_channel": channel.name} for m in window.messages if history.quotable(m, bot.me_id, bot.prefix))
         chosen = history.pick(candidates, f"{today.isoformat()}:{months}")
         if chosen:
-            return months, chosen["_channel"], chosen
-    return None
+            return (months, chosen["_channel"], chosen), cut_short
+    return None, cut_short
 
 
 def memory_text(found):
@@ -60,12 +62,17 @@ def memory_text(found):
 
 
 NOTHING_TEXT = "I could not find a quotable message from that date in the public channels."
+CUT_SHORT_TEXT = " Some channels had more messages on those days than I read, so I may have missed one."
+
+
+def nothing_text(cut_short):
+    return NOTHING_TEXT + (CUT_SHORT_TEXT if cut_short else "")
 
 
 async def recap_text(year, month):
     start_ms, end_ms = history.month_bounds(year, month)
-    per_channel = {c.name: await history.fetch_window(bot.client, c.id, start_ms, end_ms, RECAP_PAGES) for c in public_channels()}
-    stats = history.summarise(per_channel)
+    windows = {c.name: await history.fetch_window(bot.client, c.id, start_ms, end_ms, RECAP_PAGES) for c in public_channels()}
+    stats = history.summarise({name: window.messages for name, window in windows.items()})
     title = f"{MONTH_NAMES[month - 1]} {year}"
     if not stats["total"]:
         return f"{title}: nothing was said in the public channels."
@@ -80,6 +87,9 @@ async def recap_text(year, month):
         text = (message.get("content") or "").strip()
         if text:
             lines.append(f"- most reacted message ({count} reactions, #{channel}):\n{quote_block(text[:history.MAX_QUOTE])}")
+    cut_short = [f"#{name}" for name, window in windows.items() if window.truncated]
+    if cut_short:
+        lines.append(f"- partial: {', '.join(cut_short)} had more messages than I read, so these numbers undercount.")
     return "\n".join(lines)
 
 
@@ -99,8 +109,8 @@ def parse_month(text, today):
 @bot.command(name="onthisday", help="Quote a public message from months or years ago on this date", cooldown=30, cooldown_bucket="deployment")
 async def onthisday(ctx):
     async with ctx.typing():
-        found = await find_memory(datetime.now(timezone.utc).date())
-    await ctx.reply(memory_text(found) if found else NOTHING_TEXT)
+        found, cut_short = await find_memory(datetime.now(timezone.utc).date())
+    await ctx.reply(memory_text(found) if found else nothing_text(cut_short))
 
 
 @bot.command(name="recap", help="A month in the public channels, with no ranking of people: defaults to last month", usage="[YYYY-MM]", cooldown=20, cooldown_bucket="deployment")
@@ -134,7 +144,7 @@ async def daily():
     today = now.date()
 
     async def memory():
-        found = await find_memory(today)
+        found, _ = await find_memory(today)
         return memory_text(found) if found else ""
 
     try:

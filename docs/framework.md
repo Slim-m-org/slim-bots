@@ -38,6 +38,9 @@ bot.run()  # reads SLIMM_URL and SLIMM_BOT_TOKEN from the environment
 `bot.run_cli(check=...)` is the `__main__` entry point: it runs each pre-flight check (a function returning a problem string or `None`), then `run()`, and turns a failed check or a config `RuntimeError` into the process's exit message.
 
 `Bot(...)` owns config, auth, the websocket, reconnect with backoff, the `seq`-less full-roster refresh, command registration, graceful SIGTERM, and `run()`/`start()`.
+A dropped connection is retried after `base_delay` (1s), doubling to `max_delay` (60s), each wait jittered to between half and one and a half times that, so bots that lost the server together do not return together.
+The wait starts over only for a connection that stayed ready for 30 seconds, so a server that accepts the socket and drops it again keeps being retried at the longer wait.
+A hello the server never answers is given up on after 15 seconds and retried like any other failed connection.
 A bot script imports `Bot` and little else.
 
 ## Commands
@@ -78,12 +81,13 @@ The same goes for an event listener, a button handler, a periodic task and the c
 
 Store your own data under `member.storage_key` (an alias for the stable slim-m user id, never `username`, which can change).
 Look a stored key back up to a live member with `await bot.space.member_for_key(key)` or `await bot.space.resolve_member(key)`, which fetches directly if the id fell out of the cached roster.
-`await bot.space.find_member(user_id)` is the same cache-then-fetch but returns `None` instead of raising when the user is gone.
+`await bot.space.find_member(user_id)` is the same cache-then-fetch but returns `None` only when the server answers 404 for that user.
+Any other failure (a 5xx, a network error, a revoked token) raises `ApiError`, so a handler that can carry on without the name catches it and one that cannot lets it reach the dispatch guard, which logs it.
 One line each way, by construction: neither name is spelled `id`, so a bot cannot casually key on the wrong field.
 
 ## The Space model
 
-`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed` and `member.role_changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
+`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed`, `member.role_changed`, `member.removed`, `member.restored` and `profile.changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
 
 - `space.get_member(id_or_name)`, `space.get_channel(...)`, `space.get_role(...)`
 - `await space.find_channel_by_path("category/channel")` (or a bare `"channel"`) returns the channel id by name without case, or `None`
@@ -135,7 +139,7 @@ A bot that decodes media with ffmpeg and pushes it into LiveKit (`bot-music`, `b
 `join_to_speak(bot.voice, channel_id, label=, to=)` joins, and raises a `VoiceError` whose text is the reply when the join fails or the bot cannot speak.
 `start_or_leave(session, start(), doing=)` leaves the call and raises a reply when starting fails, and re-raises a revoked token.
 A leave that itself fails is logged, so the start error is the one the reply names.
-`publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate.
+`publish_microphone(session, max_bitrate=)` publishes a speaking track at a music-grade bitrate; `audio_queue_ms=` shortens its buffer from livekit's second, so a pause or skip is heard sooner, and `source.clear_queue()` drops what is still waiting.
 `watch_empty(bot, channel_id, wake, on_empty)` is the loop that stops a player when only the bot is left.
 They take the voice object or session as an argument, so `FakeVoice` and `FakeVoiceSession` work with them unchanged.
 
@@ -153,6 +157,7 @@ A member is in at most one call; if roster data somehow shows otherwise (no time
 
 `bot.setting(name, default=None, *, type=str, required=False)` reads one of a bot's *own* env vars the same way, converting via `type` (`int`, `float`, `bool`, `list` for a comma-separated one, or `dict` for comma-separated `key:value` pairs; a malformed pair is reported at `start()`) - `bot-jellyfin`'s nine `JELLYFIN_*` variables are the worked example.
 A missing `required=True` value is never raised at the `setting()` call itself (which usually runs at import time, before `Bot.start()`); it is collected and reported together with a missing `SLIMM_URL`/token/channels in the same one-line error when `start()` runs.
+`start()` also refuses a `SLIMM_URL` that is plaintext http to anything but loopback before any request, since every call carries the bot token.
 
 ## Where a bot listens, and how it is addressed
 
@@ -188,6 +193,9 @@ Unscoped bots, decided per bot: `deals`, `feeds`, `game-status`, `tickets` and `
 `automod` acts in `on_raw_message`, which a replay never reaches, so it neither re-moderates nor double-acts; spam posted while it was down is not swept.
 `greeter` acts on `on_member_join`, a live frame, so nothing is re-greeted.
 `cursor_path=` on `Bot()` still exists to point the cursor at a file *other* than `data_path`, for the rare bot that wants them separate.
+A live message's seq is noted in memory and written about a tenth of a second later with its neighbours in one transaction, so a burst of messages costs one commit and the frame loop never waits on sqlite.
+The cursor connection waits one second for a lock another connection to the same file holds; a write that still fails is logged and retried, and what is noted is also written before a replay reads it and when the bot stops.
+A hard crash can therefore lose the last tenth of a second of seqs, and a command in that window is replayed on the next start if it is within `max_replay_age`.
 
 `on_raw_message(message)` still fires for every in-scope message, command or not - for a bot that wants its own hook into every message, not for cursor-keeping any more.
 `on_frame(frame)` fires for every frame of any type, recognised or not, before any other dispatch - a liveness signal (a modlog-style bot marking itself "still connected") is the reason this exists; most bots have no reason to listen for it.
@@ -247,6 +255,13 @@ A failure is one of these, and `str(err)` never carries a key or a URL.
 `ServiceTooLarge` is a body past `max_bytes`, and `ServiceBlocked` is a destination the url policy refused.
 A redirect is followed only to the same origin, so a key header is never replayed at another host.
 `cross_origin_redirects=True` is for a service that holds no key, and `max_redirects=0` follows none.
+`total_timeout` (default 60 seconds, `None` for no limit) bounds the whole call, every redirect hop and the whole body, where `timeout` bounds each phase on its own.
+`ssl_context=` is the trust for a service with its own certificate authority, such as a Proxmox node.
+`await service.peek(url, size=512)` follows the redirects of a GET and reads only the first `size` bytes of the final body, so a stream can be inspected without being downloaded; `WebResponse.url` is where it ended.
+`async with service.stream(url) as answer:` follows the same redirects but leaves the body to you: `answer.status`, `answer.headers` and `answer.url` are there at once and `answer.chunks()` yields the body as it arrives, for as long as the block lasts.
+It is how a bot hands a member's URL to a program such as ffmpeg through its stdin: the url policy decides every host contacted and the program never opens the URL itself (`bot-music` does this).
+`total_timeout` covers reaching the answer only, `timeout` bounds each read, and `max_bytes` does not apply, since a radio stream has no end; a body cut mid-read raises `ServiceUnreachable` from `chunks()`.
+New in 0.21.0.
 `transport=httpx.MockTransport(handler)` answers in place of the network, which is how a bot's tests fake the service.
 
 `slimbots.jellyfin` is the Jellyfin side that `bot-jellyfin` and `bot-music` used to each carry: `service(url, key, user_agent=...)`, `auth_header(key)` and `url_problem(url)`.
@@ -265,7 +280,9 @@ It returns `urlpolicy.PRIVATE` or `urlpolicy.UNRESOLVABLE`, or `None` when every
 Private, loopback, link-local, carrier-grade NAT, multicast, reserved and unspecified addresses all fail, in IPv4, IPv6 and IPv4-mapped IPv6 form, and so does a name with even one such answer.
 `allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` exempts its Jellyfin host).
 `JsonService(public_only=True)` runs the same check before the request and again for every redirect hop.
-It cannot close the gap between its lookup and the connection, so it guards against pointing a bot at the LAN, not against a hostile resolver.
+It then connects to the addresses it checked, with the Host header and the TLS server name still the original host's, so a name that answers differently the second time cannot reach the LAN.
+It also caps the body at 10 MiB unless `max_bytes` says otherwise.
+`vet_destination(url, ...)` is the same check returning those addresses as well as the verdict.
 
 ## Typed REST wrappers
 
@@ -291,6 +308,14 @@ Typing is cosmetic, so a frame that cannot be sent (the gateway is reconnecting,
 `bot-canvas-board`'s `!board clear` is the worked example: it used to require retyping `!board clear yes` to confirm; it now asks and waits for a real reply.
 
 `_handle_frame` runs each `message.created` frame's `process_message` as its own `bot.background()` task rather than awaiting it inline, precisely so a command's own `wait_for`/`ctx.confirm` can be answered at all: the gateway loop is a single sequential `async for frame in gateway.frames(): await self._handle_frame(frame)`, so an inline await would block that loop inside the command, and the very reply frame a `wait_for` is waiting for would never be read until the wait's own timeout fired - a deadlock, not a race, for any command that waits on a later frame in the same connection. `process_message`'s own error handling (`_invoke` catches and replies to `CommandError`/`ApiError`/any other `Exception`, re-raising only a revoked-token `ApiError`) already narrows what can escape a message's task to the one case `bot.background()`'s fatal-on-exception policy should apply to, so no new exception handling was added - the fix is only where the coroutine is scheduled. Task *creation* order still matches frame arrival order (the loop spawns one task per frame before reading the next), but task *completion* order is not guaranteed - a slower command finishes after a faster later one. A per-channel queue was considered and rejected: serializing a channel's messages to completion before the next would reintroduce the same deadlock one level down, since a command's `wait_for` blocking its own channel's queue can never dequeue the very reply that would resolve it.
+
+Every other frame handler follows the same rule: `on_raw_message`, `on_frame`, `on_member_join` and each typed event run as their own `bot.background()` task, so a handler that makes several REST calls (automod removing a flagged message, say) cannot hold up the frame loop until the server drops the socket as a slow subscriber.
+Tasks start in frame arrival order and may finish in any order.
+`Bot(ordered_events=True)` is for a bot whose handlers must also finish in that order (`bot-modlog` posting entries, `bot-starboard` recording a message before its edit): each handler task then waits for the one before it, still off the frame loop.
+An ordered handler must not `wait_for` a later frame, since that frame's handlers queue behind it until the wait times out.
+An event nobody listens for starts no task.
+The library's own upkeep of `space` (channels, roles, members) still runs inline before a frame's handlers start, so a handler always sees the cache that frame produced.
+A frame with an unexpected shape is logged with its traceback and skipped; only a revoked token ends the connection.
 
 ## Splitting a bot across files
 
@@ -434,6 +459,8 @@ The styles are `exact` (`1h`), `interval` (`5m`), `compact` (`1h5m`), `spaced` (
 `slimbots.testing.FakeAsyncClient` never touches the network: pre-stubbed `/me`/`/channels`/`/members`/`/roles`, `respond(method, path, response_or_exception)` to stub anything else, and an unstubbed call fails loud rather than hanging.
 Drive a `Bot` directly with `await bot.process_message({...})` to exercise argument conversion, cooldowns, permission gating, and the bot-ignore default with no deployment; `await bot._handle_frame({...})` reaches an `@bot.event` handler the same way.
 A `wait_for`/`ctx.confirm` round trip needs `_handle_frame`, not `process_message` directly, since only `_handle_frame` schedules the command as its own background task the way the real gateway loop does; call it sequentially for each frame (command, then reply) with a short `await asyncio.sleep(0.01)` between them so the spawned task gets a turn to start and register its listener before the next frame arrives - `slimbots/tests/test_frame_loop_does_not_block_on_wait_for.py` and `bots/canvas-board/test_bot.py`'s `!board clear` tests are the worked examples.
+`await slimbots.testing.feed_frame(bot, frame)` is `_handle_frame` plus a wait for the handler tasks that frame started, and `handle_frame(bot, frame)` is the same for a synchronous test.
+A bare `await bot._handle_frame(frame)` returns once those tasks are started, not when they finish.
 `slimbots.testing.FakeVoice`/`FakeVoiceSession` stand in for `bot.voice`: `bot.voice = FakeVoice()`, then `await bot.voice.join(...)` hands back a session that records `publish_screen_share`'s arguments and whether `leave()` was called - no LiveKit package or network involved, which is also why CI never installs `livekit` (`bot-jellyfin`'s `test_bot.py` and `slimbots/tests/test_voice.py` are the worked examples).
 It is not a mock of slim-m's own validation or concurrency - `bots/casino/test_concurrency.py` is what proves money-safety, with a real sqlite connection and real threads.
 

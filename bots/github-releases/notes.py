@@ -2,6 +2,8 @@
 
 import re
 
+from slimbots.text import escape_mentions
+
 MAX_BULLETS = 8
 MAX_MESSAGE = 1499
 MAX_LINE = 200
@@ -29,7 +31,7 @@ def _clean(line):
     text = _drop_suffixes(" ".join(line[2:].split()))
     text = _INLINE_LINK.sub(r"\1", _SCOPE.sub("", text)).replace("**", "")
     text = " ".join(text.split())
-    return text if len(text) <= MAX_LINE else text[: MAX_LINE - 3].rstrip() + "..."
+    return escape_mentions(text if len(text) <= MAX_LINE else text[: MAX_LINE - 3].rstrip() + "...")
 
 
 def bullets(body):
@@ -62,6 +64,7 @@ def condense(body, limit=MAX_MESSAGE):
 
 
 def render(product, version, url, body):
-    head = f"**{product} {version}**\n{url}"
+    title = escape_mentions(f"{product} {version}")
+    head = f"**{title}**\n{url}"
     text = condense(body, MAX_MESSAGE - len(head) - 2)
     return f"{head}\n\n{text}" if text else head

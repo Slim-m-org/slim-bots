@@ -23,7 +23,7 @@ FRAMES = 5
 
 STAND_IN = """#!/bin/sh
 audio=/dev/null
-for out; do case "$out" in pipe:1) ;; pipe:*) audio=/dev/fd/${out#pipe:};; esac; done
+for out; do case "$out" in pipe:0|pipe:1) ;; pipe:*) audio=/dev/fd/${out#pipe:};; esac; done
 # An audio writer aimed at /dev/null never gets SIGPIPE, so teardown, which ends only this process, would orphan it.
 [ "$audio" = /dev/null ] && audio=
 case "$STAND_IN_MODE" in

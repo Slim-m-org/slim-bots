@@ -1,7 +1,6 @@
 """How big and how fine to draw a picture, from the picture itself: detailed pictures get more rows and more of the free region; Pillow only."""
 
-import io
-
+import pictures
 from sources import SourceError
 
 MEASURE_SIDE = 256
@@ -14,11 +13,11 @@ MAX_WIDTH = 1600.0  # board units: the widest a drawing is made
 def measure(data):
     """Detail of a picture from 0 (smooth, simple) to 1 (busy, fine): the share of pixels on a clear edge in a downscaled copy."""
     try:
-        from PIL import Image, ImageFilter
+        from PIL import ImageFilter
     except ImportError as err:
         raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
     try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("L", (MEASURE_SIDE * 2, MEASURE_SIDE * 2))
             gray = picture.convert("L")
             gray.thumbnail((MEASURE_SIDE, MEASURE_SIDE))

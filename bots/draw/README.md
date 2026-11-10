@@ -5,7 +5,7 @@ A slim-m bot (directory `bots/draw`, command `!draw`) that draws on the Voice Ca
 `!draw trace <word>` is the older picture tracer: it finds an openly licensed picture and redraws a simplified version as stroke objects, crediting the source.
 Without a model configured, `!draw <word>` does the tracing.
 
-Needs `slim-m>=0.15.0` and Pillow (to read the canvas and downloaded pictures); the model call uses the official `anthropic` package.
+Needs `slim-m>=0.21.0` and Pillow (to read the canvas and downloaded pictures); the model call uses the official `anthropic` package.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps the ids of the objects it placed in its own sqlite file (`SLIMM_DB_PATH`, default `draw.db`) so undo works after a restart.
 
@@ -120,6 +120,9 @@ Without Pillow installed the bot starts and answers `!draw` with a sentence sayi
 5. Wikimedia Commons picture files (a file search in namespace 6).
 
 With no keys the order is Bing, Wikipedia, Commons.
+
+A picture is downloaded only from a public address: a result that points at a private or loopback host, or redirects to one, is skipped.
+A picture, or a canvas image the bot looks at, that declares more than 25 megapixels is not decoded.
 
 ### SerpAPI
 

@@ -2,6 +2,8 @@
 
 import os
 
+import pictures
+
 os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")  # OpenCV 4.11 warns about DNN targets on every detector it builds
 
 MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_detection_yunet_2023mar.onnx")
@@ -10,7 +12,18 @@ DETECT_SIDE = 960  # pixels on the long side the picture is shrunk to for detect
 HAAR = "haarcascade_frontalface_default.xml"
 
 
+def _within_bound(data):
+    """Whether Pillow reads `data` and its header declares no more pixels than the bot decodes anywhere else; OpenCV allocates width*height*3 bytes from that header."""
+    try:
+        pictures.open_picture(data).close()
+    except Exception:
+        return False
+    return True
+
+
 def _decode(data):
+    if not _within_bound(data):
+        return None
     import cv2
     import numpy as np
 

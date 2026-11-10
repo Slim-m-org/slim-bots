@@ -5,6 +5,7 @@ import asyncio
 
 import steam
 from slimbots import ApiError, Bot
+from slimbots.text import escape_mentions
 
 MAX_LINKED = 50
 MAX_NOTE = 100
@@ -79,7 +80,10 @@ async def summaries(players):
 
 
 async def name_of(user_id):
-    member = await bot.space.find_member(user_id)
+    try:
+        member = await bot.space.find_member(user_id)
+    except ApiError:
+        return "someone"
     return member.mention() if member else "someone"
 
 
@@ -178,7 +182,7 @@ async def cs2_lfg(ctx, note: str = ""):
         return
     mentions = " ".join([await name_of(u) for u in free])
     lead = f"@{LFG_ROLE}" if LFG_ROLE else mentions
-    extra = f" - {note.strip().replace('@', ' at ')[:MAX_NOTE]}" if note.strip() else ""
+    extra = f" - {escape_mentions(note.strip()[:MAX_NOTE])}" if note.strip() else ""
     await ctx.reply(f"{lead} {ctx.author.mention()} wants a CS2 game{extra}. Free now: {mentions}")
 
 

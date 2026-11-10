@@ -322,13 +322,19 @@ async def _leave_quietly(session: Any) -> None:
 
 
 async def publish_microphone(
-    session: Any, *, max_bitrate: int, name: str = "music", sample_rate: int = 48000, num_channels: int = 2
+    session: Any, *, max_bitrate: int, name: str = "music", sample_rate: int = 48000, num_channels: int = 2,
+    audio_queue_ms: int | None = None,
 ) -> Any:
-    """Publishes a speaking-participant audio track (not a screen-share tile) and returns its `AudioSource`."""
+    """Publishes a speaking-participant audio track (not a screen-share tile) and returns its `AudioSource`.
+    `audio_queue_ms` shortens the source's buffer (livekit's default is a second) so pause and skip are heard sooner."""
     if not session.can_publish:
         raise VoiceError("this token cannot publish - the bot needs SPEAK in this channel")
     rtc = session.rtc
-    source = rtc.AudioSource(sample_rate, num_channels)
+    source = (
+        rtc.AudioSource(sample_rate, num_channels)
+        if audio_queue_ms is None
+        else rtc.AudioSource(sample_rate, num_channels, queue_size_ms=audio_queue_ms)
+    )
     track = rtc.LocalAudioTrack.create_audio_track(name, source)
     options = rtc.TrackPublishOptions(
         source=rtc.TrackSource.SOURCE_MICROPHONE, audio_encoding=_audio_encoding(rtc, max_bitrate)

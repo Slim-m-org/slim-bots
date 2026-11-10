@@ -10,7 +10,7 @@ import bot as starboard
 from slimbots import Message, Store
 from slimbots.events import ReactionsChanged
 from slimbots.http import ApiError, is_token_revoked
-from slimbots.testing import FakeAsyncClient, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, run_module_tests, wire_bot
 
 
 def member(user_id, name, **flags):
@@ -41,7 +41,7 @@ def setup():
 
 
 def frame(kind, **fields):
-    asyncio.run(starboard.bot._handle_frame({"type": kind, **fields}))
+    handle_frame(starboard.bot, {"type": kind, **fields})
 
 
 def created(msg_id="m1", content="hello world", channel_id="c1", author_id="u1", **extra):
@@ -214,6 +214,32 @@ def test_original_edit_updates_the_highlight():
     patch = [c for c in client.calls if c[0] == "PATCH"][-1]
     assert "> after" in patch[2]["content"]
     assert db("SELECT content FROM starred") == [("after",)]
+
+
+def an_edit_right_behind_a_slow_record():
+    setup()
+    plain_run = starboard.bot.store.run
+
+    async def run(fn, *args, **kwargs):
+        if fn is starboard.remember_message:
+            await asyncio.sleep(0.05)
+        return await plain_run(fn, *args, **kwargs)
+
+    starboard.bot.store.run = run
+
+    async def both():
+        created_frame = {"type": "message.created", "channel_id": "c1", "message": {"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "before", "seq": 1}}
+        await starboard.bot._handle_frame(created_frame)
+        await starboard.bot._handle_frame({"type": "message.edited", "channel_id": "c1", "seq": 2, "message": {"id": "m1", "content": "after"}})
+        await asyncio.gather(*list(starboard.bot._background_tasks))
+
+    asyncio.run(both())
+    starboard.bot.store.run = plain_run
+    return db("SELECT content FROM seen")
+
+
+def test_an_edit_that_arrives_right_behind_the_message_is_not_lost_to_a_slow_record():
+    assert an_edit_right_behind_a_slow_record() == [("after",)]
 
 
 def test_original_delete_removes_the_highlight():

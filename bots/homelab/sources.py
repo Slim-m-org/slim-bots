@@ -1,17 +1,20 @@
 """Homelab readers (Proxmox, Docker, Jellyfin) and the tile text for each; every fetch is an injectable callable."""
 
+import asyncio
 import http.client
 import json
 import socket
 import ssl
-import urllib.error
-import urllib.request
+
+from slimbots.web import JsonService, ServiceError, ServiceTooLarge
 
 TIMEOUT = 8
 MAX_BODY = 4 * 1024 * 1024
 MAX_NAMES = 4
 MAX_TILE_CHARS = 300
 USER_AGENT = "slimm-bot-homelab/1.0"
+# A test points this at an httpx transport instead of the network.
+TRANSPORT = None
 
 
 class SourceError(Exception):
@@ -19,16 +22,19 @@ class SourceError(Exception):
 
 
 def http_get(url, headers, cafile=None):
-    """One GET returning (status, body); a connection failure is a SourceError naming only the exception type."""
+    """One GET returning (status, body); a redirect to another host or a connection failure is a SourceError that names no url or key.
+    Blocking, so call it from a worker thread."""
     context = ssl.create_default_context(cafile=cafile) if cafile else None
-    request = urllib.request.Request(url, headers={"user-agent": USER_AGENT, **headers})
+    service = JsonService(
+        "homelab", user_agent=USER_AGENT, headers=headers, timeout=TIMEOUT, max_bytes=MAX_BODY, ssl_context=context, transport=TRANSPORT,
+    )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:
-            return response.status, response.read(MAX_BODY + 1)[:MAX_BODY]
-    except urllib.error.HTTPError as err:
-        return err.code, b""
-    except Exception as err:
-        raise SourceError(f"could not connect ({type(err).__name__})") from err
+        response = asyncio.run(service.send("GET", url))
+    except ServiceTooLarge:
+        raise SourceError("the answer is larger than 4 MB") from None
+    except ServiceError as err:
+        raise SourceError(str(err)) from err
+    return response.status, response.body
 
 
 def json_of(status, body):

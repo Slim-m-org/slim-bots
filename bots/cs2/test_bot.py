@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as cs2  # noqa: E402
 import steam  # noqa: E402
+from slimbots.http import ApiError  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
 
 ANN = human("u-ann", "ann", "Ann")
@@ -121,7 +122,8 @@ def test_lfg_pings_only_when_enough_linked_members_are_online_and_free():
     rig.players[ID_BOB] = ("Bob", 1, "")
     rig.say("!cs2 lfg tonight @everyone")
     text = rig.client.sent[-1]["content"]
-    assert "@ann" in text and "@bob" in text and "@cal" not in text.split("Free now:")[1] and "@everyone" not in text
+    assert "@ann" in text and "@bob" in text and "@cal" not in text.split("Free now:")[1]
+    assert "tonight \\@everyone" in text and text.count("@everyone") == 1
 
 
 def test_lfg_pings_the_role_when_one_is_set():
@@ -166,6 +168,12 @@ def test_server_status_reads_a_query_and_degrades_without_one():
     cs2.query_server = silent
     assert "did not answer" in rig.say("!cs2 server")
     cs2.query_server = steam.query_server
+
+
+def test_a_member_the_server_cannot_look_up_is_named_someone():
+    rig = Rig()
+    rig.client.respond("GET", "/users/u-zed", ApiError(503, "unavailable"))
+    assert asyncio.run(cs2.name_of("u-zed")) == "someone"
 
 
 def test_the_key_never_reaches_a_reply():

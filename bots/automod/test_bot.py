@@ -7,7 +7,7 @@ import time
 import bot as automod
 from slimbots.http import ApiError
 from slimbots.permissions import Permissions
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
 
 CHANNELS = [
     {"id": "c-chat", "name": "chat", "kind": "text", "category_id": "cat-1", "created_at": 0},
@@ -44,7 +44,7 @@ def setup(**config):
 def say(text, user_id="u1", channel="c-chat"):
     _counter[0] += 1
     frame = {"id": f"m{_counter[0]}", "channel_id": channel, "author_id": user_id, "content": text, "seq": _counter[0]}
-    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": channel, "message": frame}))
+    handle_frame(automod.bot, {"type": "message.created", "channel_id": channel, "message": frame})
     return frame["id"]
 
 
@@ -176,7 +176,7 @@ def test_a_refused_delete_with_no_timeout_logs_that_no_action_was_taken():
     message_id = "m-refused"
     client.respond("DELETE", f"/channels/c-chat/messages/{message_id}", ApiError(403, "forbidden"))
     frame = {"id": message_id, "channel_id": "c-chat", "author_id": "u1", "content": "https://evil.example", "seq": 1}
-    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": "c-chat", "message": frame}))
+    handle_frame(automod.bot, {"type": "message.created", "channel_id": "c-chat", "message": frame})
     text = logged(client)[0]
     assert "no action taken" in text
     assert "message deleted refused (403)" in text
@@ -185,7 +185,7 @@ def test_a_refused_delete_with_no_timeout_logs_that_no_action_was_taken():
 def _spam_link_with_refused_delete(client):
     client.respond("DELETE", "/channels/c-chat/messages/m-refused", ApiError(403, "forbidden"))
     frame = {"id": "m-refused", "channel_id": "c-chat", "author_id": "u1", "content": "https://evil.example", "seq": 1}
-    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": "c-chat", "message": frame}))
+    handle_frame(automod.bot, {"type": "message.created", "channel_id": "c-chat", "message": frame})
 
 
 def test_no_removed_notice_is_posted_when_the_delete_was_refused():
@@ -205,7 +205,7 @@ def test_a_failing_notice_send_still_reaches_the_modlog():
 
     client.call = call
     frame = {"id": "m-ok", "channel_id": "c-chat", "author_id": "u1", "content": "https://evil.example", "seq": 1}
-    asyncio.run(automod.bot._handle_frame({"type": "message.created", "channel_id": "c-chat", "message": frame}))
+    handle_frame(automod.bot, {"type": "message.created", "channel_id": "c-chat", "message": frame})
     assert logged(client), "modlog never written"
 
 

@@ -27,8 +27,10 @@ If your server does not say which channels are public, list them in `MEMORIES_CH
 
 A message is quoted only if it is 20 to 280 characters, has no link, is not from a bot and is not a command.
 The pick is the same all day, so asking twice shows the same message.
-An at-sign in a quote is defused so it cannot ping anyone.
-Both commands read history page by page with a limit, so a very busy server may see a partial recap; `!onthisday` and `!recap` each have a cooldown for the whole deployment.
+An at-sign in a quote is escaped so it cannot ping anyone.
+Both commands read history page by page, and `!onthisday` and `!recap` each have a cooldown for the whole deployment.
+A window that lies behind a busy channel is reached by halving over message numbers (about 15 requests for a channel of thousands of messages) instead of paging through everything newer.
+A channel with more messages inside the window than the page limit allows is read only in part, and the reply says so: `!recap` adds a `partial` line naming the channel, and `!onthisday` mentions it when it found nothing.
 
 ## Settings
 

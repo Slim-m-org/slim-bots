@@ -1,8 +1,8 @@
 """A whole picture as coloured brushwork: rows of horizontal strokes that touch, each a run of one palette colour; Pillow only."""
 
-import io
 import math
 
+import pictures
 import sizing
 from plan import Planned
 from sources import SourceError
@@ -20,15 +20,13 @@ def hex_colour(rgb):
 
 def _load(data):
     try:
-        from PIL import Image
-    except ImportError as err:
-        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
-    try:
-        with Image.open(io.BytesIO(data)) as picture:
+        with pictures.open_picture(data) as picture:
             picture.draft("RGB", (WORK_SIDE * 2, WORK_SIDE * 2))
             rgb = picture.convert("RGB")
             rgb.thumbnail((WORK_SIDE, WORK_SIDE))
             return rgb
+    except pictures.PillowMissing as err:
+        raise SourceError(str(err)) from err
     except Exception as err:
         raise SourceError("the picture could not be read") from err
 

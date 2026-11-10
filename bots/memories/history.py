@@ -3,6 +3,7 @@
 import calendar
 import hashlib
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 PAGE = 100
@@ -10,19 +11,59 @@ MIN_QUOTE = 20
 MAX_QUOTE = 280
 
 
+@dataclass
+class Window:
+    messages: list
+    truncated: bool = False
+
+
+async def _messages(client, channel_id, **params):
+    return await client.call("GET", f"/channels/{channel_id}/messages", params={"limit": PAGE, **params})
+
+
+async def _newest_below(client, channel_id, seq):
+    page = await _messages(client, channel_id, limit=1, before=seq)
+    return page[0] if page else None
+
+
+async def cursor_below(client, channel_id, end_ms, high):
+    """The largest `before` cursor, at most `high`, whose newest message is older than end_ms; created_at grows with seq, so it is found by halving."""
+    newest = await _newest_below(client, channel_id, high)
+    if newest is None or newest["created_at"] < end_ms:
+        return high
+    low = 1
+    while high - low > 1:
+        middle = (low + high) // 2
+        newest = await _newest_below(client, channel_id, middle)
+        if newest is None or newest["created_at"] < end_ms:
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+async def _first_page(client, channel_id, end_ms):
+    """The newest page, or, when all of it is after the window, the page just below the window's end."""
+    page = await _messages(client, channel_id)
+    if len(page) < PAGE or min(m["created_at"] for m in page) < end_ms:
+        return page
+    cursor = await cursor_below(client, channel_id, end_ms, min(m["seq"] for m in page))
+    return await _messages(client, channel_id, before=cursor)
+
+
 async def fetch_window(client, channel_id, start_ms, end_ms, max_pages):
-    """Messages with start_ms <= created_at < end_ms, paging back from the newest; stops at max_pages."""
-    found, before = [], None
-    for _ in range(max_pages):
-        params = {"limit": PAGE, **({"before": before} if before else {})}
-        page = await client.call("GET", f"/channels/{channel_id}/messages", params=params)
+    """Messages with start_ms <= created_at < end_ms; `truncated` is set when max_pages ran out before the window's start."""
+    found = []
+    page = await _first_page(client, channel_id, end_ms)
+    for index in range(max_pages):
+        if index:
+            page = await _messages(client, channel_id, before=min(m["seq"] for m in page))
         if not page:
-            break
+            return Window(found)
         found.extend(m for m in page if start_ms <= m["created_at"] < end_ms)
-        before = min(m["seq"] for m in page)
         if len(page) < PAGE or min(m["created_at"] for m in page) < start_ms:
-            break
-    return found
+            return Window(found)
+    return Window(found, truncated=True)
 
 
 def months_before(day, months):

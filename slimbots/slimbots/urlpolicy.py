@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from typing import Awaitable, Callable, Iterable
+from typing import Awaitable, Callable, Iterable, NamedTuple
 from urllib.parse import urlsplit
 
 UNRESOLVABLE = "unresolvable"
@@ -80,24 +80,43 @@ async def _resolve(host: str) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
-async def destination_problem(
+class Destination(NamedTuple):
+    """`problem` is `UNRESOLVABLE`, `PRIVATE` or None; `pins` are the public addresses a lookup vouched for, to connect to instead of resolving again."""
+
+    problem: str | None
+    pins: tuple[str, ...] = ()
+
+
+async def vet_destination(
     url: str, *, allow_private: bool = False, allow_hosts: Iterable[str] = (), resolver: Resolver | None = None
-) -> str | None:
-    """`UNRESOLVABLE` or `PRIVATE` when `url` is not an http(s) URL to a public host, else None.
+) -> Destination:
+    """Whether `url` is an http(s) URL to a public host, and the addresses to connect to, IPv4 first so a host without IPv6 never waits on one.
     `allow_private` and `allow_hosts` are the operator's opt-ins; every resolved answer must be public, not just the first."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
     if parts.scheme not in ("http", "https") or not host:
-        return UNRESOLVABLE
+        return Destination(UNRESOLVABLE)
     if allow_private or host in {h.lower() for h in allow_hosts}:
-        return None
+        return Destination(None)
+    if _address(host) is not None:
+        return Destination(None if is_public_address(host) else PRIVATE)
     try:
-        addresses = [host] if _address(host) is not None else list(await (resolver or _resolve)(host))
+        addresses = list(await (resolver or _resolve)(host))
     except OSError:
-        return UNRESOLVABLE
+        return Destination(UNRESOLVABLE)
     if not addresses:
-        return UNRESOLVABLE
-    return None if all(is_public_address(a) for a in addresses) else PRIVATE
+        return Destination(UNRESOLVABLE)
+    if not all(is_public_address(a) for a in addresses):
+        return Destination(PRIVATE)
+    distinct = dict.fromkeys(str(_address(a)) for a in addresses)
+    return Destination(None, tuple(sorted(distinct, key=lambda a: ":" in a)))
+
+
+async def destination_problem(
+    url: str, *, allow_private: bool = False, allow_hosts: Iterable[str] = (), resolver: Resolver | None = None
+) -> str | None:
+    """`UNRESOLVABLE` or `PRIVATE` when `url` is not an http(s) URL to a public host, else None."""
+    return (await vet_destination(url, allow_private=allow_private, allow_hosts=allow_hosts, resolver=resolver)).problem
 
 
 def host_of(url: str) -> str:

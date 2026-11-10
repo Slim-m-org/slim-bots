@@ -4,7 +4,7 @@ import pytest
 
 from slimbots import Bot, Member, Permissions
 from slimbots.http import ApiError
-from slimbots.testing import FakeAsyncClient
+from slimbots.testing import FakeAsyncClient, feed_frame
 
 
 @pytest.fixture
@@ -253,10 +253,10 @@ async def test_on_raw_message_fires_for_every_in_scope_message(bot, client):
     async def ping(ctx):
         await ctx.reply("pong")
 
-    await bot._handle_frame(
+    await feed_frame(bot, 
         {"type": "message.created", "channel_id": "c1", "message": {"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "just chatting"}}
     )
-    await bot._handle_frame(
+    await feed_frame(bot, 
         {"type": "message.created", "channel_id": "c1", "message": {"id": "m2", "author_id": "u1", "channel_id": "c1", "content": "!ping"}}
     )
     assert seen == ["m1", "m2"]
@@ -269,8 +269,8 @@ async def test_on_frame_fires_for_every_frame_including_unrecognised(bot, client
     async def on_frame(frame):
         seen.append(frame["type"])
 
-    await bot._handle_frame({"type": "message.created", "channel_id": "c1", "message": {"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "hi"}})
-    await bot._handle_frame({"type": "some_future_event"})
+    await feed_frame(bot, {"type": "message.created", "channel_id": "c1", "message": {"id": "m1", "author_id": "u1", "channel_id": "c1", "content": "hi"}})
+    await feed_frame(bot, {"type": "some_future_event"})
     assert seen == ["message.created", "some_future_event"]
 
 
@@ -290,9 +290,9 @@ async def test_channel_scoped_canvas_event_only_fires_in_scope():
     async def on_canvas_object_placed(frame):
         seen.append(frame["channel_id"])
 
-    await bot._handle_frame({"type": "canvas.object.placed", "channel_id": "other"})
+    await feed_frame(bot, {"type": "canvas.object.placed", "channel_id": "other"})
     assert seen == []
-    await bot._handle_frame({"type": "canvas.object.placed", "channel_id": "c1"})
+    await feed_frame(bot, {"type": "canvas.object.placed", "channel_id": "c1"})
     assert seen == ["c1"]
 
 
@@ -306,7 +306,7 @@ async def test_member_events_are_never_channel_scoped():
     async def on_member_removed(frame):
         seen.append(frame["user_id"])
 
-    await bot._handle_frame({"type": "member.removed", "user_id": "u1"})
+    await feed_frame(bot, {"type": "member.removed", "user_id": "u1"})
     assert seen == ["u1"]
 
 

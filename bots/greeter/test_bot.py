@@ -5,7 +5,7 @@ import asyncio
 
 import bot as greeter
 from slimbots.permissions import Permissions
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
 
 NEWBIE = human("u-new", "newbie", "Newbie")
 CHANNELS = [
@@ -30,7 +30,7 @@ def setup(pinned=None, channel="general/chat"):
 
 
 def handle(frame):
-    asyncio.run(greeter.bot._handle_frame(frame))
+    handle_frame(greeter.bot, frame)
 
 
 def join(client):

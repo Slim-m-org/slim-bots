@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from .client import socket_url
+from .client import base_url_problem, socket_url
 from .components import Rows
 from .components import to_wire as components_to_wire
 from .models import Attachment, DmConversation, Message
@@ -91,6 +91,15 @@ def _error_from_response(response: httpx.Response) -> ApiError:
     return ApiError(response.status_code, detail, retry_after=_retry_after(response, detail))
 
 
+def _seg(value: str) -> str:
+    """One path segment, so text a member typed cannot add a slash, a dot segment or a query to the request.
+    A lone `.` or `..` is left unescaped by `quote` and collapsed by httpx, so it is refused as a 404, which no id or emoji ever is."""
+    text = str(value)
+    if text in (".", ".."):
+        raise ApiError(404, {"error": "not found"})
+    return urllib.parse.quote(text, safe="")
+
+
 def _backoff(attempt: int, base_delay: float, max_delay: float) -> float:
     return min(base_delay * (2**attempt), max_delay)
 
@@ -122,6 +131,9 @@ class AsyncClient:
     def __init__(self, base: str, token: str, user_agent: str, *, timeout: float = DEFAULT_TIMEOUT) -> None:
         if not base or not token:
             raise ValueError("an AsyncClient needs both a base URL and a token")
+        problem = base_url_problem(base)
+        if problem is not None:
+            raise ValueError(problem)
         self.base = base.rstrip("/")
         self.token = token
         self.user_agent = user_agent
@@ -208,7 +220,7 @@ class AsyncClient:
         return ticket["ticket"]
 
     async def get_user(self, user_id: str) -> Any:
-        return await self.call("GET", f"/users/{user_id}")
+        return await self.call("GET", f"/users/{_seg(user_id)}")
 
     async def list_members(self, *, after: str | None = None, limit: int = 200) -> Any:
         params: dict[str, Any] = {"limit": limit}
@@ -218,7 +230,7 @@ class AsyncClient:
 
     async def member_permissions(self, user_id: str) -> Any:
         """A member's effective permission bits; a bot may read these without MANAGE_ROLES."""
-        return await self.call("GET", f"/members/{user_id}/permissions")
+        return await self.call("GET", f"/members/{_seg(user_id)}/permissions")
 
     async def list_channels(self) -> Any:
         return await self.call("GET", "/channels")
@@ -227,20 +239,20 @@ class AsyncClient:
         return await self.call("GET", "/roles")
 
     async def assign_role(self, user_id: str, role_id: str) -> None:
-        await self.call("PUT", f"/members/{user_id}/roles/{role_id}")
+        await self.call("PUT", f"/members/{_seg(user_id)}/roles/{_seg(role_id)}")
 
     async def unassign_role(self, user_id: str, role_id: str) -> None:
-        await self.call("DELETE", f"/members/{user_id}/roles/{role_id}")
+        await self.call("DELETE", f"/members/{_seg(user_id)}/roles/{_seg(role_id)}")
 
     async def time_out_member(self, user_id: str, duration_seconds: int, *, reason: str | None = None) -> Any:
         """Needs KICK_MEMBERS; returns `{user_id, until}`, `until` in Unix milliseconds. The server caps it at 28 days."""
         return await self.call(
-            "PUT", f"/members/{user_id}/timeout", {"duration_seconds": duration_seconds, "reason": reason},
+            "PUT", f"/members/{_seg(user_id)}/timeout", {"duration_seconds": duration_seconds, "reason": reason},
         )
 
     async def lift_member_timeout(self, user_id: str) -> None:
         """Needs KICK_MEMBERS; idempotent, so lifting one that already lapsed is not an error."""
-        await self.call("DELETE", f"/members/{user_id}/timeout")
+        await self.call("DELETE", f"/members/{_seg(user_id)}/timeout")
 
     async def send(
         self, channel_id: str, content: str, *, message_id: str | None = None, reply_to_id: str | None = None,
@@ -259,13 +271,13 @@ class AsyncClient:
         if components:
             body["components"] = components_to_wire(components)
         try:
-            data = await self.call("POST", f"/channels/{channel_id}/messages", body)
+            data = await self.call("POST", f"/channels/{_seg(channel_id)}/messages", body)
         except ApiError as err:
             if err.status != 400 or not embeds or fallback_content is None:
                 raise
             log.warning("the server refused the embed (%s); sending %s as plain text", err.reason, message_id)
             plain = {key: value for key, value in body.items() if key != "embeds"}
-            data = await self.call("POST", f"/channels/{channel_id}/messages", {**plain, "content": fallback_content})
+            data = await self.call("POST", f"/channels/{_seg(channel_id)}/messages", {**plain, "content": fallback_content})
         return Message(data, client=self, channel_id=channel_id)
 
     async def send_ephemeral(
@@ -274,7 +286,7 @@ class AsyncClient:
     ) -> Any:
         """Answers the author of `in_reply_to_id` privately; only a rate limit is retried, since a repeat would be a second reply. See docs/framework.md."""
         body = {"in_reply_to_id": in_reply_to_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
+        return await self.call("POST", f"/channels/{_seg(channel_id)}/ephemeral-messages", body, only_unprocessed=True)
 
     async def send_ephemeral_to_press(
         self, channel_id: str, interaction_id: str, content: str, *,
@@ -282,7 +294,7 @@ class AsyncClient:
     ) -> Any:
         """Answers whoever pressed the button behind `interaction_id`; only a rate limit is retried, and a separate field from a message anchor."""
         body = {"interaction_id": interaction_id, "content": content, **_rich(attachment_ids, embeds)}
-        return await self.call("POST", f"/channels/{channel_id}/ephemeral-messages", body, only_unprocessed=True)
+        return await self.call("POST", f"/channels/{_seg(channel_id)}/ephemeral-messages", body, only_unprocessed=True)
 
     async def edit_components(
         self, channel_id: str, message_id: str, components: Rows, *, interaction_id: str | None = None,
@@ -291,15 +303,15 @@ class AsyncClient:
         body: dict[str, Any] = {"components": components_to_wire(components)}
         if interaction_id:
             body["interaction_id"] = interaction_id
-        return await self.call("PUT", f"/channels/{channel_id}/messages/{message_id}/components", body)
+        return await self.call("PUT", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}/components", body)
 
     async def ack_interaction(self, channel_id: str, interaction_id: str) -> None:
         """Says a button press was seen and needs no visible answer."""
-        await self.call("POST", f"/channels/{channel_id}/interactions/{interaction_id}/ack")
+        await self.call("POST", f"/channels/{_seg(channel_id)}/interactions/{_seg(interaction_id)}/ack")
 
     async def get_message(self, channel_id: str, message_id: str) -> Message:
         """Fetches one message by id; a channel the bot cannot view answers the same 404 as a missing message."""
-        data = await self.call("GET", f"/channels/{channel_id}/messages/{message_id}")
+        data = await self.call("GET", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}")
         return Message(data, client=self, channel_id=channel_id)
 
     async def edit_message(
@@ -309,32 +321,32 @@ class AsyncClient:
         body: dict[str, Any] = {"content": content}
         if embeds is not None:
             body["embeds"] = embeds
-        return await self.call("PATCH", f"/channels/{channel_id}/messages/{message_id}", body)
+        return await self.call("PATCH", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}", body)
 
     async def delete_message(self, channel_id: str, message_id: str) -> None:
-        await self.call("DELETE", f"/channels/{channel_id}/messages/{message_id}")
+        await self.call("DELETE", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}")
 
     async def add_reaction(self, message_id: str, emoji: str) -> None:
-        await self.call("PUT", f"/messages/{message_id}/reactions/{urllib.parse.quote(emoji, safe='')}")
+        await self.call("PUT", f"/messages/{_seg(message_id)}/reactions/{_seg(emoji)}")
 
     async def remove_reaction(self, message_id: str, emoji: str) -> None:
-        await self.call("DELETE", f"/messages/{message_id}/reactions/{urllib.parse.quote(emoji, safe='')}")
+        await self.call("DELETE", f"/messages/{_seg(message_id)}/reactions/{_seg(emoji)}")
 
     async def pin_message(self, channel_id: str, message_id: str) -> None:
-        await self.call("PUT", f"/channels/{channel_id}/messages/{message_id}/pin")
+        await self.call("PUT", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}/pin")
 
     async def unpin_message(self, channel_id: str, message_id: str) -> None:
-        await self.call("DELETE", f"/channels/{channel_id}/messages/{message_id}/pin")
+        await self.call("DELETE", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}/pin")
 
     async def list_pinned_messages(self, channel_id: str, *, limit: int | None = None) -> Any:
         params = {"limit": limit} if limit else None
-        return await self.call("GET", f"/channels/{channel_id}/pins", params=params)
+        return await self.call("GET", f"/channels/{_seg(channel_id)}/pins", params=params)
 
     async def open_thread(self, channel_id: str, message_id: str) -> Any:
-        return await self.call("POST", f"/channels/{channel_id}/messages/{message_id}/thread")
+        return await self.call("POST", f"/channels/{_seg(channel_id)}/messages/{_seg(message_id)}/thread")
 
     async def vote_poll(self, message_id: str, option: int) -> None:
-        await self.call("PUT", f"/messages/{message_id}/polls/vote", {"option": option})
+        await self.call("PUT", f"/messages/{_seg(message_id)}/polls/vote", {"option": option})
 
     async def upload_attachment(self, data: bytes, *, filename: str | None = None) -> Attachment:
         """Uploads raw bytes and returns an `Attachment` whose `.id` `send`'s `attachment_ids` accepts."""
@@ -348,23 +360,23 @@ class AsyncClient:
 
     async def voice_token(self, channel_id: str) -> Any:
         """Mints a join token for a channel's LiveKit room; see `crates/slimm-server/src/http/voice.rs`."""
-        return await self.call("POST", f"/channels/{channel_id}/voice/token")
+        return await self.call("POST", f"/channels/{_seg(channel_id)}/voice/token")
 
     async def voice_heartbeat(self, channel_id: str) -> None:
         """Refreshes this caller's liveness on a channel's call; send every ~15s while connected."""
-        await self.call("POST", f"/channels/{channel_id}/voice/heartbeat")
+        await self.call("POST", f"/channels/{_seg(channel_id)}/voice/heartbeat")
 
     async def forget_voice_heartbeat(self, channel_id: str) -> None:
         """Tells the server this caller left a channel's call cleanly."""
-        await self.call("DELETE", f"/channels/{channel_id}/voice/heartbeat")
+        await self.call("DELETE", f"/channels/{_seg(channel_id)}/voice/heartbeat")
 
     async def voice_roster(self, channel_id: str) -> Any:
         """Who is currently connected to a channel's voice room."""
-        return await self.call("GET", f"/channels/{channel_id}/voice/roster")
+        return await self.call("GET", f"/channels/{_seg(channel_id)}/voice/roster")
 
     async def get_watch_session(self, channel_id: str) -> Any:
         """What the call is watching and where it is; 404 when nothing is playing or the bot has gone quiet."""
-        return await self.call("GET", f"/channels/{channel_id}/watch-session")
+        return await self.call("GET", f"/channels/{_seg(channel_id)}/watch-session")
 
     async def set_watch_session(
         self, channel_id: str, *, item_id: str, title: str, playing: bool, position_ms: int,
@@ -382,23 +394,23 @@ class AsyncClient:
             body["controller_user_id"] = controller_user_id
         if direct_play is not None:
             body["direct_play"] = direct_play
-        await self.call("PUT", f"/channels/{channel_id}/watch-session", body, retries=0)
+        await self.call("PUT", f"/channels/{_seg(channel_id)}/watch-session", body, retries=0)
 
     async def tick_watch_session(self, channel_id: str, *, playing: bool, position_ms: int) -> None:
         """Re-samples the session; send about every 5 seconds, paused or not, since it is the session's heartbeat."""
         await self.call(
-            "POST", f"/channels/{channel_id}/watch-session/tick", {"playing": playing, "position_ms": position_ms}, retries=0,
+            "POST", f"/channels/{_seg(channel_id)}/watch-session/tick", {"playing": playing, "position_ms": position_ms}, retries=0,
         )
 
     async def end_watch_session(self, channel_id: str) -> None:
         """Ends this bot's session; leaving the call with `forget_voice_heartbeat` ends it too."""
-        await self.call("DELETE", f"/channels/{channel_id}/watch-session", retries=0)
+        await self.call("DELETE", f"/channels/{_seg(channel_id)}/watch-session", retries=0)
 
     async def list_dms(self) -> list[DmConversation]:
         return [DmConversation(d) for d in await self.call("GET", "/dms")]
 
     async def open_dm(self, user_id: str) -> DmConversation:
-        return DmConversation(await self.call("POST", f"/dms/{user_id}"))
+        return DmConversation(await self.call("POST", f"/dms/{_seg(user_id)}"))
 
     async def close_dm(self, user_id: str) -> None:
-        await self.call("DELETE", f"/dms/{user_id}")
+        await self.call("DELETE", f"/dms/{_seg(user_id)}")

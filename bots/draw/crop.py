@@ -3,6 +3,7 @@
 import io
 
 import face
+import pictures
 from sources import SourceError
 
 TRIM_SIDE = 160
@@ -15,11 +16,9 @@ WHOLE = (0.0, 0.0, 1.0, 1.0)
 
 def _open(data):
     try:
-        from PIL import Image
-    except ImportError as err:
-        raise SourceError("Pillow is not installed on this bot, so it cannot read pictures") from err
-    try:
-        return Image.open(io.BytesIO(data))
+        return pictures.open_picture(data)
+    except pictures.PillowMissing as err:
+        raise SourceError(str(err)) from err
     except Exception as err:
         raise SourceError("the picture could not be read") from err
 

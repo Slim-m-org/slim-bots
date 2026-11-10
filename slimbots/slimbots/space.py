@@ -97,14 +97,16 @@ class Space:
             member._apply_roles(member.role_ids, self._base_permissions(member.role_ids))
 
     async def find_member(self, user_id: str) -> Member | None:
-        """The cached member for `user_id`, else one fetched directly; None when the server has no such user."""
+        """The cached member for `user_id`, else one fetched directly; None only when the server answers 404 for that user."""
         member = self.members.get(user_id)
         if member is not None:
             return member
         try:
             return await self.fetch_member(user_id)
-        except ApiError:
-            return None
+        except ApiError as err:
+            if is_not_found(err):
+                return None
+            raise
 
     async def get_member(self, id_or_name: str) -> Member | None:
         """A cached member by id or by username/display name (case-insensitive)."""

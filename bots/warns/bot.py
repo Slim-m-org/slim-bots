@@ -5,11 +5,14 @@ import time
 
 from slimbots import ApiError, Bot, Duration, Member, Permissions, style
 from slimbots.http import is_forbidden
+from slimbots.text import escape_mentions
 
 MAX_REASON = 300
 MAX_SHOWN = 15
 MAX_RULES = 10
 SECONDS_PER_DAY = 86400
+RULE_NEEDS = {"kick": Permissions.BAN_MEMBERS, "timeout": Permissions.KICK_MEMBERS}
+ALL_BITS = tuple(bit for name, bit in vars(Permissions).items() if name.isupper() and name != "NONE" and isinstance(bit, int))
 
 
 def init_db(conn):
@@ -35,11 +38,6 @@ EXPIRE_DAYS = bot.setting("WARNS_EXPIRE_DAYS", 0, type=int)
 
 NEEDS_KICK = "only someone with Kick Members can do that."
 NEEDS_SERVER = "only someone with Manage Server can change the escalation rules."
-
-
-def clean(text):
-    """Keeps a reason from pinging anyone: an at-sign in typed text never reaches a channel."""
-    return text.replace("@", " at ")
 
 
 def _cutoff():
@@ -130,9 +128,8 @@ async def write_log(text):
         print(f"warns: the log channel refused a post (http {err.status})")
 
 
-async def escalate(member, count):
-    """Runs the rule set for exactly this many warns; returns a sentence about what happened, or '' for no rule."""
-    rule = await bot.store.run(rule_at, count)
+async def escalate(member, count, rule):
+    """Runs the rule for exactly this many warns; returns a sentence about what happened, or '' for no rule."""
     if rule is None:
         return ""
     action, seconds = rule
@@ -148,16 +145,56 @@ async def escalate(member, count):
     return f"At {count} warns: {describe_rule(action, seconds)}."
 
 
+def _held(member):
+    return {bit for bit in ALL_BITS if member.has_permission(bit)}
+
+
+async def _rank_is_known(target):
+    """Whether the target's granted permissions are readable; without the role table the route's timeout-reduced bits would understate them."""
+    space = bot.space
+    if space.roles_readable is not False:
+        return True
+    if target.timed_out_until or not bot.permissions_readable:
+        return False
+    try:
+        return await space.refresh_permissions(target)
+    except ApiError:
+        return False
+
+
+async def refusal_for(invoker, target, rule):
+    """Why `invoker` could not run this rule on `target` themselves, which is the server's own test, or None when they could."""
+    if rule is None:
+        return None
+    action, seconds = rule
+    if not invoker.has_permission(RULE_NEEDS[action]):
+        need = "Ban Members" if action == "kick" else "Kick Members"
+        return f"this warn would {describe_rule(action, seconds)}, and only someone with {need} can do that."
+    name = escape_mentions(target.display_name)
+    if not await _rank_is_known(target):
+        return f"this warn would {describe_rule(action, seconds)}, but I cannot read {name}'s permissions to check you may."
+    theirs, yours = _held(target), _held(invoker)
+    if not theirs <= yours or (theirs == yours and not invoker.has_permission(Permissions.ADMINISTRATOR)):
+        return f"this warn would {describe_rule(action, seconds)}, and {name} ranks at or above you; ask someone who outranks them."
+    return None
+
+
 @bot.command(name="warn", help="Give a member a warn; a rule may time them out or remove them", usage="<@member> [reason]", requires=Permissions.KICK_MEMBERS, requires_message=NEEDS_KICK)
 async def warn(ctx, member: Member, reason: str = ""):
     if member.id == ctx.author.id or member.is_bot:
         await ctx.reply_ephemeral("you can warn another person, not yourself or a bot.", public_fallback=True)
         return
-    reason = clean(reason.strip())[:MAX_REASON] or "no reason given"
+    reason = escape_mentions(reason.strip()[:MAX_REASON]) or "no reason given"
     store = bot.store
-    await store.run(add_warn, member.id, ctx.author.id, reason)
+    warn_id = await store.run(add_warn, member.id, ctx.author.id, reason)
     count = len(await store.run(active_warns, member.id))
-    outcome = await escalate(member, count)
+    rule = await store.run(rule_at, count)
+    refusal = await refusal_for(ctx.author, member, rule)
+    if refusal:
+        await store.run(delete_warn, warn_id)
+        await ctx.reply_ephemeral(f"not warned: {refusal}", public_fallback=True)
+        return
+    outcome = await escalate(member, count, rule)
     line = f"{ctx.author.mention()} warned {member.mention()} ({count} active): {reason}"
     await write_log(line + (f"\n{outcome}" if outcome else ""))
     await ctx.reply(f"{member.mention()} has {count} active warn{'s' if count != 1 else ''}." + (f" {outcome}" if outcome else ""))
@@ -235,7 +272,7 @@ async def warnrule_add(ctx, args: str = ""):
 @warnrule.command(name="remove", help="Drop the rule at a number of warns", usage="<count>", requires=Permissions.MANAGE_SERVER, requires_message=NEEDS_SERVER)
 async def warnrule_remove(ctx, count: str = ""):
     if not count.isdigit() or not await bot.store.run(delete_rule, int(count)):
-        await ctx.reply_ephemeral(f"there is no rule at {clean(count)[:20] or 'that'} warns.", public_fallback=True)
+        await ctx.reply_ephemeral(f"there is no rule at {escape_mentions(count[:20]) or 'that'} warns.", public_fallback=True)
         return
     await ctx.reply_ephemeral(f"removed the rule at {int(count)} warns.", public_fallback=True)
 

@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import ssl
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, AsyncIterator, Awaitable, Iterable, Iterator, Mapping, TypeVar
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from .urlpolicy import Resolver, destination_problem
+from .urlpolicy import Resolver, vet_destination
 
 DEFAULT_TIMEOUT = 20.0
+DEFAULT_TOTAL_TIMEOUT = 60.0
+DEFAULT_PUBLIC_MAX_BYTES = 10 * 1024 * 1024
+MAX_PINNED_ATTEMPTS = 4
 REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+_T = TypeVar("_T")
 
 
 class ServiceError(Exception):
@@ -52,9 +59,28 @@ class WebResponse:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
     body: bytes = b""
+    url: str = ""
 
     def json(self) -> Any:
         return json.loads(self.body) if self.body.strip() else None
+
+
+class WebStream:
+    """An answer whose body is still on the wire: `chunks()` reads it and ends when the server does, `url` is where the redirects ended."""
+
+    def __init__(self, response: httpx.Response, url: str, name: str) -> None:
+        self.status = response.status_code
+        self.headers = {k.lower(): v for k, v in response.headers.items()}
+        self.url = url
+        self._response = response
+        self._name = name
+
+    async def chunks(self) -> AsyncIterator[bytes]:
+        try:
+            async for chunk in self._response.aiter_bytes():
+                yield chunk
+        except httpx.HTTPError as err:
+            raise ServiceUnreachable(f"{self._name} could not be reached ({type(err).__name__})") from None
 
 
 def _origin(url: str) -> tuple[str, str, int | None]:
@@ -62,9 +88,16 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return parts.scheme, (parts.hostname or "").lower(), parts.port or {"http": 80, "https": 443}.get(parts.scheme)
 
 
+def _pinned(url: str, address: str) -> tuple[httpx.URL, dict[str, str], dict[str, str]]:
+    """`url` aimed at `address`, with the Host header and TLS server name left as the original host's."""
+    original = httpx.URL(url)
+    extensions = {"sni_hostname": original.raw_host.decode("ascii")} if original.scheme == "https" else {}
+    return original.copy_with(host=address), {"host": original.netloc.decode("ascii")}, extensions
+
+
 class JsonService:
     """One outside service: a base url, fixed headers, JSON in and out, and a redirect and destination policy.
-    Redirects stay on the origin unless `cross_origin_redirects`, so a key header is never replayed elsewhere."""
+    Redirects stay on the origin unless `cross_origin_redirects`; `public_only` connects to the addresses it vetted, so a name cannot change its answer between check and connect."""
 
     def __init__(
         self, name: str, base_url: str | None = None, *, headers: Mapping[str, str] | None = None,
@@ -72,6 +105,7 @@ class JsonService:
         max_redirects: int = 5, cross_origin_redirects: bool = False, max_bytes: int | None = None,
         public_only: bool = False, allow_private: bool = False, allow_hosts: Iterable[str] = (),
         transport: httpx.AsyncBaseTransport | None = None, resolver: Resolver | None = None,
+        total_timeout: float | None = DEFAULT_TOTAL_TIMEOUT, ssl_context: ssl.SSLContext | None = None,
     ) -> None:
         self.name = name
         self.base_url = base_url.rstrip("/") if base_url is not None else None
@@ -79,15 +113,17 @@ class JsonService:
         if user_agent:
             self.headers["user-agent"] = user_agent
         self.timeout = timeout
+        self.total_timeout = total_timeout
         self.auth_statuses = tuple(auth_statuses)
         self.max_redirects = max_redirects
         self.cross_origin_redirects = cross_origin_redirects
-        self.max_bytes = max_bytes
+        self.max_bytes = DEFAULT_PUBLIC_MAX_BYTES if max_bytes is None and public_only else max_bytes
         self.public_only = public_only
         self.allow_private = allow_private
         self.allow_hosts = tuple(allow_hosts)
         self._transport = transport
         self._resolver = resolver
+        self._verify: ssl.SSLContext | bool = ssl_context or True
 
     def url_for(self, path: str) -> str:
         if path.startswith(("http://", "https://")):
@@ -98,14 +134,26 @@ class JsonService:
             raise ValueError("this service has no base url, so every path must be an absolute url")
         return f"{self.base_url}{path}"
 
-    async def _check_destination(self, url: str) -> None:
+    async def _check_destination(self, url: str) -> tuple[str, ...]:
+        """The addresses to connect to for `url`, empty when the host is not vetted by lookup; `ServiceBlocked` when refused."""
         if not self.public_only:
-            return
-        reason = await destination_problem(
+            return ()
+        vetted = await vet_destination(
             url, allow_private=self.allow_private, allow_hosts=self.allow_hosts, resolver=self._resolver
         )
-        if reason is not None:
-            raise ServiceBlocked(f"{self.name} host is not publicly routable", reason)
+        if vetted.problem is not None:
+            raise ServiceBlocked(f"{self.name} host is not publicly routable", vetted.problem)
+        return vetted.pins
+
+    async def _bounded(self, call: Awaitable[_T]) -> _T:
+        """`call` within `total_timeout`, which spans every redirect hop and the whole body; httpx's own timeout is per phase."""
+        if self.total_timeout is None:
+            return await call
+        try:
+            async with asyncio.timeout(self.total_timeout):
+                return await call
+        except TimeoutError:
+            raise ServiceUnreachable(f"{self.name} did not finish answering in {self.total_timeout:g}s") from None
 
     async def send(
         self, method: str, path: str, *, params: Mapping[str, Any] | None = None, body: Any = None,
@@ -117,38 +165,104 @@ class JsonService:
         content = json.dumps(body).encode() if body is not None else None
         if content is not None:
             merged.setdefault("content-type", "application/json")
+        return await self._bounded(self._follow(method, url, merged, content, params, None))
+
+    async def peek(
+        self, path: str, *, size: int = 1024, params: Mapping[str, Any] | None = None, headers: Mapping[str, str] | None = None,
+    ) -> WebResponse:
+        """A GET followed through its redirects that reads only the first `size` bytes of the final body, so a stream can be inspected.
+        `url` on the result is where the redirects ended."""
+        merged = {**self.headers, **{k.lower(): v for k, v in (headers or {}).items()}}
+        return await self._bounded(self._follow("GET", self.url_for(path), merged, None, params, size))
+
+    @contextlib.asynccontextmanager
+    async def stream(
+        self, path: str, *, params: Mapping[str, Any] | None = None, headers: Mapping[str, str] | None = None,
+    ) -> AsyncIterator[WebStream]:
+        """A GET followed through its redirects whose body the caller reads with `chunks()` while the block lasts.
+        `total_timeout` covers reaching the answer only; a body already flowing is bounded by `timeout` for each read, and by no size."""
+        merged = {**self.headers, **{k.lower(): v for k, v in (headers or {}).items()}}
+        async with contextlib.AsyncExitStack() as stack:
+            opened = stack.enter_async_context(self._open("GET", self.url_for(path), merged, None, params))
+            response, url = await self._bounded(opened)
+            yield WebStream(response, url, self.name)
+
+    async def _follow(
+        self, method: str, url: str, headers: dict[str, str], content: bytes | None,
+        params: Mapping[str, Any] | None, peek: int | None,
+    ) -> WebResponse:
+        async with self._open(method, url, headers, content, params) as (response, final_url):
+            with self._translated():
+                return await self._read(response, final_url, peek)
+
+    @contextlib.asynccontextmanager
+    async def _open(
+        self, method: str, url: str, headers: dict[str, str], content: bytes | None, params: Mapping[str, Any] | None,
+    ) -> AsyncIterator[tuple[httpx.Response, str]]:
+        """The last response after the redirects, unread and open for the block, with the url it answered; each hop is vetted before it is sent."""
         origin = _origin(url)
-        async with httpx.AsyncClient(timeout=self.timeout, transport=self._transport, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout, transport=self._transport, verify=self._verify, follow_redirects=False
+        ) as client:
             for hop in range(self.max_redirects + 1):
-                await self._check_destination(url)
-                response = await self._once(client, method, url, merged, content, params if hop == 0 else None)
+                pins = await self._check_destination(url)
+                with self._translated():
+                    response = await self._connect(client, method, url, headers, content, params if hop == 0 else None, pins)
                 target = response.headers.get("location")
-                if response.status not in REDIRECT_STATUSES or not target or hop == self.max_redirects:
-                    return response
+                if response.status_code not in REDIRECT_STATUSES or not target or hop == self.max_redirects:
+                    try:
+                        yield response, url
+                    finally:
+                        await response.aclose()
+                    return
+                await response.aclose()
                 url = urljoin(url, target)
                 if not self.cross_origin_redirects and _origin(url) != origin:
-                    raise ServiceError(f"{self.name} redirected to another host", response.status)
-                if response.status == 303 or (response.status in (301, 302) and method not in ("GET", "HEAD")):
+                    raise ServiceError(f"{self.name} redirected to another host", response.status_code)
+                if response.status_code == 303 or (response.status_code in (301, 302) and method not in ("GET", "HEAD")):
                     method, content = "GET", None
-                    merged.pop("content-type", None)
+                    headers = {k: v for k, v in headers.items() if k != "content-type"}
         raise AssertionError("unreachable")
 
-    async def _once(
+    async def _connect(
         self, client: httpx.AsyncClient, method: str, url: str, headers: dict[str, str], content: bytes | None,
-        params: Mapping[str, Any] | None,
-    ) -> WebResponse:
+        params: Mapping[str, Any] | None, pins: tuple[str, ...],
+    ) -> httpx.Response:
+        """One hop sent and its headers read, trying each vetted address in turn when a connection cannot be made, so a dead AAAA record still falls back."""
+        addresses = pins[:MAX_PINNED_ATTEMPTS] or (None,)
+        for index, address in enumerate(addresses):
+            target, extra, extensions = (url, {}, {}) if address is None else _pinned(url, address)
+            request = client.build_request(
+                method, target, headers={**headers, **extra}, content=content, params=params, extensions=extensions
+            )
+            try:
+                return await client.send(request, stream=True)
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                if index == len(addresses) - 1:
+                    raise
+        raise AssertionError("unreachable")
+
+    @contextlib.contextmanager
+    def _translated(self) -> Iterator[None]:
+        """httpx's own failures as this module's, so `str(err)` stays free of the address."""
         try:
-            async with client.stream(method, url, headers=headers, content=content, params=params) as response:
-                data = bytearray()
-                async for chunk in response.aiter_bytes():
-                    data += chunk
-                    if self.max_bytes is not None and len(data) > self.max_bytes:
-                        raise ServiceTooLarge(f"{self.name} answered with more than {self.max_bytes} bytes")
-                return WebResponse(response.status_code, {k.lower(): v for k, v in response.headers.items()}, bytes(data))
+            yield
         except httpx.InvalidURL:
             raise ServiceError(f"{self.name} url is not valid") from None
         except httpx.HTTPError as err:
             raise ServiceUnreachable(f"{self.name} could not be reached ({type(err).__name__})") from None
+
+    async def _read(self, response: httpx.Response, url: str, peek: int | None) -> WebResponse:
+        data = bytearray()
+        async for chunk in response.aiter_bytes():
+            data += chunk
+            if peek is not None and len(data) >= peek:
+                del data[peek:]
+                break
+            if peek is None and self.max_bytes is not None and len(data) > self.max_bytes:
+                raise ServiceTooLarge(f"{self.name} answered with more than {self.max_bytes} bytes")
+        headers = {k.lower(): v for k, v in response.headers.items()}
+        return WebResponse(response.status_code, headers, bytes(data), url)
 
     def _raise_for_status(self, response: WebResponse) -> None:
         if response.status in self.auth_statuses:

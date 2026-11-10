@@ -53,6 +53,7 @@ GamerPower asks callers to stay under about four requests per second and to link
 Each offer is posted once, keyed by offer id in sqlite, and its message id is derived from that key, so a crash between the post and the bookkeeping cannot double post.
 An offer whose post is refused is not marked seen and is retried on the next run.
 A run posts at most 10 offers.
+A check whose fetch failed (GamerPower down, or every Steam price lookup failing) is tried again in 10 minutes, not after the full interval.
 
 ## Daily digest
 

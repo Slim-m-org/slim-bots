@@ -59,8 +59,8 @@ def test_bad_input_gets_a_sentence():
     assert "within 60 days" in fails("x 2027-06-01 8pm")
 
 
-def test_an_at_sign_in_the_title_is_defused():
-    assert "@" not in planning.parse_event("@everyone fri 8pm", NOW)[0]
+def test_an_at_sign_in_the_title_is_escaped_so_it_cannot_ping():
+    assert planning.parse_event("@everyone fri 8pm", NOW)[0] == "\\@everyone"
 
 
 if __name__ == "__main__":

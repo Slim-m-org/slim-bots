@@ -12,7 +12,7 @@ import parse as parsemod
 import source
 from slimbots import ApiError, Bot, Duration, Permissions, style
 from slimbots.http import is_token_revoked
-from slimbots.text import format_duration
+from slimbots.text import escape_mentions, format_duration
 
 POST_NAMESPACE = uuid.UUID("b2f4e1a6-7c35-4d0e-8a19-6f3c9d2e5b47")
 MAX_INTERVAL = 7 * 86400
@@ -49,10 +49,11 @@ def build_embed(entry, source_name):
 async def post_entry(feed, entry, source_name):
     assert bot.client is not None, "post runs only once connected"
     embed = build_embed(entry, source_name)
-    fallback = f"{entry.title}\n{entry.link}".strip()
+    title = escape_mentions(entry.title)
+    fallback = f"{title}\n{entry.link}".strip()
     try:
         await bot.client.send(
-            feed["channel_id"], entry.link or entry.title, message_id=str(uuid.uuid5(POST_NAMESPACE, f"{feed['id']}|{entry.key}")),
+            feed["channel_id"], entry.link or title, message_id=str(uuid.uuid5(POST_NAMESPACE, f"{feed['id']}|{entry.key}")),
             **style.send_kwargs(embed, fallback),
         )
     except ApiError as err:
@@ -146,7 +147,7 @@ async def feed_add(ctx, url: str, keywords: str = ""):
     feed = await bot.store.run(db.get_feed, feed_id)
     problem = await finish_add(feed, result)
     tail = f" Posting the latest item failed ({problem}); it retries on the next poll." if problem else ""
-    await ctx.reply(f"following **{name}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, "interval")}. Only the latest item is posted now, then new ones as they appear.{tail}")
+    await ctx.reply(f"following **{escape_mentions(name)}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, "interval")}. Only the latest item is posted now, then new ones as they appear.{tail}")
 
 
 async def finish_add(feed, result):
@@ -160,7 +161,7 @@ async def finish_add(feed, result):
 
 
 def describe(feed):
-    bits = [f"`{feed['id']}` {feed['name']}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], "interval")}"]
+    bits = [f"`{feed['id']}` {escape_mentions(feed['name'])}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], "interval")}"]
     if feed["keywords"]:
         bits.append(f"filter: {feed['keywords']}")
     if feed["failures"] >= db.FAILING_AFTER:
