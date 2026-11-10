@@ -1,0 +1,15 @@
+{
+  "ready_seconds": 8,
+  "env": {
+    "CS2_HOST": "play.invalid",
+    "CS2_DOCKER_NETWORK": "smoke",
+    "CS2_DOCKER_HOST": "http://127.0.0.1:1"
+  },
+  "steps": [
+    {"say": "!1v1 help", "expect_contains": ["first start"], "timeout": 15},
+    {"say": "!1v1 nomap", "expect_contains": ["Maps"], "timeout": 15},
+    {"say": "!1v1", "expect_contains": ["reach Docker"], "timeout": 15},
+    {"say": "!1v1 status", "expect_contains": ["reach Docker"], "timeout": 15},
+    {"say": "!1v1 stop", "expect_contains": ["reach Docker"], "timeout": 15}
+  ]
+}

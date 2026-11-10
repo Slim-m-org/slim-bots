@@ -1,0 +1,41 @@
+# Add under `services:` and `volumes:` in the fleet compose on the prod host; this file is not read by anything.
+# The bot reaches Docker only through the socket proxy, which allows container calls and image pulls and nothing else.
+# Forward UDP CS2_PORT (27015 by default) on the router to this host; add 27016 and up when CS2_MAX_SERVERS is above 1.
+
+services:
+  cs2-docker-proxy:
+    # Pin by digest; this is the tecnativa/docker-socket-proxy:latest index at the time of writing.
+    image: tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      POST: 1
+      # Everything else stays at the proxy's default of 0: no exec, volumes, networks, swarm, build, info or system calls.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [cs2net]
+
+  cs2-1v1:
+    <<: *bot
+    command: ["python", "bots/cs2-1v1/bot.py"]
+    environment:
+      SLIMM_URL: ${SLIMM_URL}
+      SLIMM_BOT_TOKEN: ${CS2_1V1_BOT_TOKEN}
+      CS2_HOST: ${CS2_PUBLIC_HOST}
+      CS2_DOCKER_HOST: http://cs2-docker-proxy:2375
+      CS2_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME}_cs2net
+      # CS2_GSLT: ${CS2_GSLT}
+      # CS2_CHANNEL: <channel id>
+    depends_on: [cs2-docker-proxy]
+    networks: [default, cs2net]
+
+networks:
+  cs2net:
+    # The game containers join this network, so the bot can query them by name.
+    name: ${COMPOSE_PROJECT_NAME}_cs2net
+
+volumes:
+  cs2-server:
+    # The shared CS2 install (about 60 GB); the bot mounts it into every server it starts.
+    name: cs2-server
