@@ -3,7 +3,6 @@
 
 import asyncio
 import shutil
-import subprocess
 import sys
 
 import bot as music
@@ -113,8 +112,10 @@ def stream_answer(request):
 
 
 def scripted_ffmpeg(track):
-    """A stand-in decoder: `long` in the url never ends on its own, anything else emits 3 chunks and stops."""
-    if "long" in track.url:
+    """A stand-in decoder: `long` in the url never ends on its own, `echo` passes its stdin through, anything else emits 3 chunks and stops."""
+    if "echo" in track.url:
+        code = "import sys\nsys.stdout.buffer.write(sys.stdin.buffer.read())"
+    elif "long" in track.url:
         code = f"import sys,time\nwhile True:\n    sys.stdout.buffer.write(b'\\x01'*{player.CHUNK_BYTES}); sys.stdout.flush(); time.sleep(0.01)"
     else:
         code = f"import sys\nsys.stdout.buffer.write(b'\\x01'*{player.CHUNK_BYTES * 3})"
@@ -247,41 +248,20 @@ def test_jellyfin_track_carries_the_auth_header_and_a_direct_url_does_not():
     assert music_core.track_from_url(PUBLIC_URL).headers is None
 
 
-def test_ffmpeg_args_whitelist_protocols_and_scope_the_header_to_jellyfin():
+def test_a_direct_url_reaches_ffmpeg_on_stdin_and_ffmpeg_may_open_nothing_else():
+    shutil.which = lambda name: "/usr/bin/ffmpeg"
+    args = REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
+    assert args[args.index("-protocol_whitelist") + 1] == "pipe" and args[args.index("-i") + 1] == "pipe:0"
+    assert PUBLIC_URL not in args and args[-1] == "pipe:1"
+    assert not {"-headers", "-reconnect", "-max_redirects"} & set(args)
+
+
+def test_a_jellyfin_track_is_fetched_by_ffmpeg_with_the_key_header_and_only_the_http_protocols():
     shutil.which = lambda name: "/usr/bin/ffmpeg"
     args = REAL_BUILD_ARGS(music_core.Track("t", "https://jf.example/Audio/1/stream", headers="Authorization: x\r\n"))
     assert args[args.index("-protocol_whitelist") + 1] == "http,https,tcp,tls,crypto"
-    assert "-headers" in args and args[-1] == "pipe:1"
-    assert "-headers" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
-
-
-def test_a_direct_url_may_not_redirect_again_where_ffmpeg_can_refuse_it():
-    shutil.which = lambda name: "/usr/bin/ffmpeg"
-    original = player.ffmpeg_limits_redirects
-    try:
-        player.ffmpeg_limits_redirects = lambda: True
-        direct = REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
-        assert direct[direct.index("-max_redirects") + 1] == "0" and direct.index("-max_redirects") < direct.index("-i")
-        assert "-max_redirects" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL, headers="Authorization: x\r\n"))
-        player.ffmpeg_limits_redirects = lambda: False
-        assert "-max_redirects" not in REAL_BUILD_ARGS(music_core.Track("t", PUBLIC_URL))
-    finally:
-        player.ffmpeg_limits_redirects = original
-
-
-def test_the_redirect_limit_is_used_only_when_this_ffmpeg_lists_it():
-    original = subprocess.run
-    try:
-        for listing, expected in (("  -max_redirects <int> Maximum number of redirects", True), ("  -reconnect <boolean>", False)):
-            player.ffmpeg_limits_redirects.cache_clear()
-            subprocess.run = lambda *args, _listing=listing, **kwargs: subprocess.CompletedProcess(args, 0, _listing, "")
-            assert player.ffmpeg_limits_redirects() is expected
-        player.ffmpeg_limits_redirects.cache_clear()
-        subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("ffmpeg"))
-        assert player.ffmpeg_limits_redirects() is False
-    finally:
-        subprocess.run = original
-        player.ffmpeg_limits_redirects.cache_clear()
+    assert args[args.index("-headers") + 1] == "Authorization: x\r\n" and args[args.index("-i") + 1] == "https://jf.example/Audio/1/stream"
+    assert args[args.index("-reconnect") + 1] == "1" and args[-1] == "pipe:1"
 
 
 def test_play_requires_the_invoker_to_be_in_a_call():
@@ -358,6 +338,17 @@ def test_play_plays_into_the_invokers_call_as_a_microphone_track_and_leaves_when
     assert track["source"].clear_count == 0, "a track that ends on its own plays out its tail"
     assert "queue finished, leaving the call." in replies(client)
     assert music_cog.active_sessions() == {}
+
+
+def test_a_direct_streams_bytes_reach_the_decoder_on_its_stdin():
+    client = setup()
+
+    async def finished():
+        await until(lambda: music.bot.voice.sessions[0].left)
+
+    scenario(client, "~play https://93.184.216.34/echo.mp3", finished)
+    source = music.bot.voice.sessions[0].room.local_participant.published[0][0]["source"]
+    assert source.frame_count == 1, "the 603 bytes served should arrive as one padded chunk"
 
 
 def test_a_second_play_queues_and_a_skip_keeps_the_queue():

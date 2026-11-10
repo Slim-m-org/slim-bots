@@ -1,4 +1,4 @@
-# Opens stream urls and talks to Jellyfin through slimbots' JsonService (peek needs 0.21.0) and uses slimbots' Bot and voice helpers.
+# Opens stream urls and talks to Jellyfin through slimbots' JsonService (peek and stream need 0.21.0) and uses slimbots' Bot and voice helpers.
 websockets>=12
 httpx>=0.27
 slim-m>=0.21.0

@@ -44,13 +44,16 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
   Direct URLs cover internet radio and files on a server you control.
   There is no YouTube or Spotify playback: that means scraping a third party against its terms, so it is not built here.
 - **Direct URLs to private addresses are refused.**
-  ffmpeg fetches on the bot host, so `~play http://192.168.x.x/...` would otherwise let a chat member probe the host's network.
+  ffmpeg runs on the bot host, so `~play http://192.168.x.x/...` would otherwise let a chat member probe the host's network.
   The configured Jellyfin host is exempt.
-  Before ffmpeg sees a URL the bot opens it itself, follows every redirect and checks each hop against the same rule, connecting to the address it checked.
-  ffmpeg is then given the address that answered, and a playlist or manifest (`.m3u8`, `.pls`, `.mpd`) is refused because its entries would be fetched without that check.
-  An ffmpeg that lists the http `max_redirects` option is also told not to follow a redirect from that address; one that does not cannot be, so a server that answers ffmpeg differently from the bot's own request is not caught there.
+  The bot opens a direct URL itself, follows every redirect, checks each hop against that rule and connects to the address it checked.
+  It hands the bytes to ffmpeg on stdin, and ffmpeg is limited to `pipe` and never given the URL.
+  A server that answers ffmpeg differently from the bot, or a name that resolves differently the second time, cannot make it fetch anything.
+  The URL is checked when `~play` is typed, so the reply is immediate, and again when the track starts.
+  A playlist or manifest (`.m3u8`, `.pls`, `.mpd`) is refused, because its entries would name hosts nobody checked.
   A server that answers in the old `ICY 200 OK` form instead of HTTP is refused too, since the bot cannot check what it cannot parse.
-  ffmpeg is also limited to `http`, `https`, `tcp`, `tls` and `crypto`, so a URL cannot reach `file:` or a raw socket.
+  A live stream, one that sends no `Content-Length`, is opened again when the connection drops; a file that is cut ends the track.
+  ffmpeg reads a direct URL as a pipe and cannot seek in it, so a container that needs that may not play; Jellyfin tracks are fetched by ffmpeg and are not affected.
 - **The Jellyfin key only goes to Jellyfin.**
   It is sent as an `Authorization` header on Jellyfin tracks and never on a direct URL.
   It is also an argument of the ffmpeg process (`-headers`), so anyone who can list processes on the bot host can read it.
@@ -69,6 +72,8 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
 - `bot.py` - the entry point.
 - `music_core.py` - settings, the Jellyfin audio search, track model and URL vetting.
 - `player.py` - `MusicSession`: the queue, the ffmpeg decode and the LiveKit publish.
+- `stream_feed.py` - copies a direct stream into ffmpeg's stdin, and opens a live one again when it drops.
 - `music_cog.py` - the commands and the per-voice-channel session registry.
 - `test_bot.py` - run with `python3 test_bot.py`.
   ffmpeg is replaced by a scripted decoder and LiveKit by a fake room, so CI needs neither.
+- `test_stream_feed.py` - the feed against fake servers, plus one run with a real ffmpeg that is skipped when there is none.

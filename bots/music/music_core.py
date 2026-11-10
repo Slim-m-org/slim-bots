@@ -24,8 +24,9 @@ PLAYLIST_HEADS = (b"#extm3u", b"[playlist]", b"<?xml", b"<mpd")
 # Populated once by configure(); empty JELLYFIN_URL means direct URLs only.
 JELLYFIN_URL = ""
 JELLYFIN_API_KEY = ""
-# A test points this at an httpx transport instead of the network.
+# A test points these at an httpx transport and a name resolver instead of the network.
 TRANSPORT = None
+RESOLVER = None
 
 
 @dataclass
@@ -101,14 +102,19 @@ def _is_playlist(answer):
     return any(t in kind for t in PLAYLIST_TYPES) or path.endswith(PLAYLIST_SUFFIXES) or head.startswith(PLAYLIST_HEADS)
 
 
-async def open_stream(url):
-    """The track for a direct stream URL after following and vetting every redirect, so ffmpeg is handed the address that answered.
-    A private or unresolvable host, a playlist or a stream that does not answer raises `StreamRefused`; the configured Jellyfin host is exempt."""
+def stream_service():
+    """The client for a member-supplied stream url: public hosts only, each redirect hop vetted, and the configured Jellyfin host exempt."""
     allowed = [host_of(JELLYFIN_URL)] if JELLYFIN_URL else []
-    service = JsonService(
+    return JsonService(
         "stream", user_agent=USER_AGENT, timeout=STREAM_TIMEOUT_SECONDS, total_timeout=STREAM_DEADLINE_SECONDS,
-        public_only=True, allow_hosts=allowed, cross_origin_redirects=True, transport=TRANSPORT,
+        public_only=True, allow_hosts=allowed, cross_origin_redirects=True, transport=TRANSPORT, resolver=RESOLVER,
     )
+
+
+async def open_stream(url):
+    """The track for a direct stream url after following and vetting every redirect, so a bad one is refused when it is asked for.
+    A private or unresolvable host, a playlist or a stream that does not answer raises `StreamRefused`; the configured Jellyfin host is exempt."""
+    service = stream_service()
     try:
         answer = await service.peek(url, size=STREAM_PEEK_BYTES)
     except ServiceBlocked as err:

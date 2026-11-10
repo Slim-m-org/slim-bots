@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
-import subprocess
 from collections import deque
 
 from slimbots import media, style
@@ -15,6 +13,7 @@ from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
 from slimbots.voice import publish_microphone, watch_empty
 
 import music_core
+import stream_feed
 
 AUDIO_MAX_BITRATE = 128_000
 AUDIO_QUEUE_MS = 100  # livekit buffers a second by default, which is how late a pause or skip would be heard
@@ -30,26 +29,16 @@ def ffmpeg_binary():
     return media.ffmpeg_binary(PlayerError)
 
 
-@functools.cache
-def ffmpeg_limits_redirects():
-    """Whether this ffmpeg has the http `max_redirects` option; older builds lack it and refuse to start when given it."""
-    try:
-        listing = subprocess.run([ffmpeg_binary(), "-hide_banner", "-h", "protocol=http"], capture_output=True, text=True, timeout=5, check=False)
-    except (OSError, subprocess.SubprocessError, PlayerError):
-        return False
-    return "max_redirects" in listing.stdout
-
-
 def build_ffmpeg_args(track):
-    """Decodes to raw s16le on stdout; the protocol whitelist keeps a URL from reaching `file:` or a socket.
-    A direct URL was already followed to where it answers, so a redirect from it is refused where this ffmpeg can."""
-    args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "http,https,tcp,tls,crypto"]
-    if track.is_direct and ffmpeg_limits_redirects():
-        args += ["-max_redirects", "0"]
-    args += ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
-    if track.headers:
-        args += ["-headers", track.headers]
-    args += ["-i", track.url, "-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
+    """Decodes to raw s16le on stdout.
+    A direct url reaches ffmpeg on stdin and ffmpeg may open nothing else; a Jellyfin track is fetched by ffmpeg, limited to the http protocols."""
+    args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error"]
+    if track.is_direct:
+        args += ["-protocol_whitelist", "pipe", "-i", "pipe:0"]
+    else:
+        args += ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+        args += ["-headers", track.headers, "-i", track.url]
+    args += ["-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
     return args
 
 
@@ -149,15 +138,23 @@ class MusicSession:
         self._chunks_sent = 0
         self._interrupted = False
         self._process = await asyncio.create_subprocess_exec(
-            *build_ffmpeg_args(track), stdin=asyncio.subprocess.DEVNULL,
+            *build_ffmpeg_args(track), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
+        feeder = stream_feed.start(track.url, self._process.stdin) if track.is_direct else None
         try:
             await self._pump(self._process.stdout)
         finally:
+            await self._stop_feeder(feeder)
             await self._kill_process()
             if self._interrupted:
                 self._source.clear_queue()
+
+    @staticmethod
+    async def _stop_feeder(feeder):
+        if feeder is not None:
+            feeder.cancel()
+            await asyncio.gather(feeder, return_exceptions=True)
 
     async def _pump(self, stream):
         rtc = self.voice_session.rtc
