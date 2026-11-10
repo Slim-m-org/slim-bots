@@ -1,6 +1,9 @@
 import httpx
+import pytest
 
-from slimbots.http import AsyncClient
+from slimbots.commands import BadArgument, _convert_member
+from slimbots.http import ApiError, AsyncClient
+from slimbots.space import Space
 
 
 async def test_raw_body_sends_bytes_as_is_not_json():
@@ -141,6 +144,27 @@ async def test_text_a_member_typed_stays_one_path_segment():
         await client.get_user(typed)
     await client.member_permissions("../me")
     assert seen == [b"/users/..%2Fme", b"/users/a%3Fb%3D1", b"/users/x%2F..%2F..%2Fme", b"/users/a%23b", b"/members/..%2Fme/permissions"]
+
+
+@pytest.mark.parametrize("typed", [".", ".."])
+async def test_a_bare_dot_segment_is_refused_as_not_found_and_sends_nothing(typed):
+    seen = []
+    client = _client(lambda request: seen.append(request.url.raw_path) or httpx.Response(200, json={}))
+    for call in (client.get_user, client.member_permissions, client.open_dm):
+        with pytest.raises(ApiError) as raised:
+            await call(typed)
+        assert raised.value.status == 404
+    assert seen == []
+
+
+async def test_a_member_argument_that_is_only_dots_reads_as_no_such_member():
+    seen = []
+    client = _client(lambda request: seen.append(request.url.raw_path) or httpx.Response(200, json={}))
+    ctx = type("Ctx", (), {"bot": type("B", (), {"space": Space(client)})()})()
+    for typed in ("..", ".", "@.."):
+        with pytest.raises(BadArgument, match="no member called"):
+            await _convert_member(ctx, typed)
+    assert seen == []
 
 
 async def test_an_id_that_is_already_safe_is_sent_unchanged():

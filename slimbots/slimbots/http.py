@@ -92,8 +92,12 @@ def _error_from_response(response: httpx.Response) -> ApiError:
 
 
 def _seg(value: str) -> str:
-    """One path segment, so text a member typed cannot add a slash, a dot segment or a query to the request."""
-    return urllib.parse.quote(str(value), safe="")
+    """One path segment, so text a member typed cannot add a slash, a dot segment or a query to the request.
+    A lone `.` or `..` is left unescaped by `quote` and collapsed by httpx, so it is refused as a 404, which no id or emoji ever is."""
+    text = str(value)
+    if text in (".", ".."):
+        raise ApiError(404, {"error": "not found"})
+    return urllib.parse.quote(text, safe="")
 
 
 def _backoff(attempt: int, base_delay: float, max_delay: float) -> float:
