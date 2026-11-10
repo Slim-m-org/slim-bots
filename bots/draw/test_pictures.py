@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import colorize  # noqa: E402
 import crop  # noqa: E402
+import face  # noqa: E402
 import paste  # noqa: E402
 import photo  # noqa: E402
 import pictures  # noqa: E402
@@ -74,6 +75,23 @@ def test_every_decode_step_refuses_a_huge_picture_even_in_a_process_that_never_l
     finally:
         Image.MAX_IMAGE_PIXELS = pictures.MAX_PIXELS
     assert not not_refused, f"decoded a picture past the pixel bound: {not_refused}"
+
+
+def test_opencv_is_never_handed_a_picture_past_the_bound_but_still_reads_one_inside_it():
+    import cv2
+
+    handed = []
+    real = cv2.imdecode
+    cv2.imdecode = lambda *args, **kwargs: handed.append(1) or real(*args, **kwargs)
+    try:
+        huge = png(int(pictures.MAX_PIXELS**0.5) + 100)
+        assert face.largest_face(huge) is None
+        assert crop.choose(huge) == (crop.WHOLE, None, "whole")
+        assert handed == [], "OpenCV was asked to decode a picture past the pixel bound"
+        face.largest_face(png(64))
+        assert handed == [1]
+    finally:
+        cv2.imdecode = real
 
 
 def test_a_huge_canvas_tile_is_left_as_a_grey_box_instead_of_decoded():
