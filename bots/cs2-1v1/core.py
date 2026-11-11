@@ -132,6 +132,7 @@ def container_spec(*, map_name, password, port, owner_id, owner_name, channel_id
         "CS2_SERVERNAME": "slim-m 1v1", "CS2_PORT": str(port), "CS2_MAXPLAYERS": "2", "CS2_PW": password,
         "CS2_GAMETYPE": "0", "CS2_GAMEMODE": "1", "CS2_CHEATS": "0", "CS2_RCONPW": new_password(),
         "CS2_ADDITIONAL_ARGS": CS2_RULES, "CS2_SERVER_HIBERNATE": "0",
+        "CS2_BOT_QUOTA": "0", "CS2_BOT_QUOTA_MODE": "normal",
     }
     workshop = _WORKSHOP.match(map_name)
     if workshop:

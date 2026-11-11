@@ -32,7 +32,7 @@ It does not read match results, so "match over" means "everyone left".
 
 ## First start
 
-The CS2 install is about 60 GB and lives on one shared Docker volume (`cs2-server`).
+The CS2 install is about 75 GB and lives on one shared Docker volume (`cs2-server`).
 The first server downloads it, which takes a long time; the bot says so when it starts, and posts the download percentage every five minutes.
 Later starts only start the container.
 Keep `CS2_MAX_SERVERS` at 1 unless you accept two servers sharing one install directory.

@@ -103,7 +103,7 @@ async def start_server(ctx, requested):
         servers[server.container_id] = server
     await ctx.reply(
         f"starting a 1v1 on `{map_name}`. I will post the connect line when it is up. "
-        "The first start downloads the game (about 60 GB) and can take a long time; I will post progress here."
+        "The first start downloads the game (about 75 GB) and can take a long time; I will post progress here."
     )
 
 

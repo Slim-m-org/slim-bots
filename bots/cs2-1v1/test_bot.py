@@ -70,11 +70,12 @@ class Rig:
 def test_start_creates_one_pinned_labelled_container_with_a_random_password_and_says_the_first_start_is_slow():
     rig = Rig()
     reply = rig.say("!1v1 mirage")
-    assert "starting a 1v1 on `de_mirage`" in reply and "60 GB" in reply
+    assert "starting a 1v1 on `de_mirage`" in reply and "75 GB" in reply
     (_, name, spec) = [c for c in rig.docker.calls if c[0] == "create"][0]
     assert name == "cs2-1v1-27015" and "@sha256:" in spec["Image"]
     env = dict(item.split("=", 1) for item in spec["Env"])
     assert env["CS2_MAXPLAYERS"] == "2" and env["CS2_STARTMAP"] == "de_mirage" and len(env["CS2_PW"]) == core.PASSWORD_LENGTH
+    assert env["CS2_BOT_QUOTA"] == "0", "a 1v1 has room for exactly two people, so no CS2 bots"
     assert spec["Labels"]["slimm.owner"] == "u-ann"
     host = spec["HostConfig"]
     assert host["PortBindings"] == {"27015/udp": [{"HostPort": "27015"}]} and host["AutoRemove"] and host["NetworkMode"] == "cs2net"
