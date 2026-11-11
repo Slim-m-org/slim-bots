@@ -25,6 +25,7 @@ services:
       CS2_HOST: ${CS2_PUBLIC_HOST}
       CS2_DOCKER_HOST: http://cs2-docker-proxy:2375
       CS2_DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME}_cs2net
+      # CS2_MAX_PLAYERS: 10
       # CS2_GSLT: ${CS2_GSLT}
       # CS2_CHANNEL: <channel id>
     depends_on: [cs2-docker-proxy]
@@ -37,5 +38,5 @@ networks:
 
 volumes:
   cs2-server:
-    # The shared CS2 install (about 60 GB); the bot mounts it into every server it starts.
+    # The shared CS2 install (about 75 GB) and the arena plugins; the bot mounts it into every server it starts.
     name: cs2-server

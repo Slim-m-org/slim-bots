@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bot-cs2-1v1: `!1v1 [map]` starts a throwaway CS2 server in Docker, `!1v1 stop` ends it; see README.md.
+"""bot-cs2-1v1: `!1v1 [map]` starts a throwaway CS2 1v1 arena server in Docker, `!1v1 stop` ends it; see README.md.
 Split per docs/framework.md: this is the entry point and the watcher, core.py, dockerapi.py and a2s.py hold the rest."""
 
 import asyncio
@@ -81,7 +81,7 @@ async def launch(spec, name):
 async def start_server(ctx, requested):
     map_name = core.choose_map(requested)
     if map_name is None:
-        await ctx.reply(f"I don't have `{requested[:40]}`. Maps: {', '.join(f'`{m}`' for m in core.CS2_MAPS)}.")
+        await ctx.reply(f"I don't have `{requested[:40]}`. Maps: {', '.join(f'`{m}`' for m in core.map_names())}.")
         return
     async with start_lock:
         try:
@@ -102,17 +102,17 @@ async def start_server(ctx, requested):
             return
         servers[server.container_id] = server
     await ctx.reply(
-        f"starting a 1v1 on `{map_name}`. I will post the connect line when it is up. "
-        "The first start downloads the game (about 75 GB) and can take a long time; I will post progress here."
+        f"starting a 1v1 arena server on `{map_name}`. Anyone can join, players are paired into arenas and the rest wait in the queue. "
+        "I will post the connect line when it is up. The first start downloads the game (about 75 GB) and can take a long time; I will post progress here."
     )
 
 
 def running_text():
-    lines = [f"a 1v1 server is already running on `{s.map_name}`, started by @{s.owner_name}." for s in servers.values()]
+    lines = [f"a 1v1 arena server is already running on `{s.map_name}`, started by @{s.owner_name}." for s in servers.values()]
     return "\n".join(lines) + f"\nuse `{bot.prefix}1v1 status` to see it, or `{bot.prefix}1v1 stop` if it is yours."
 
 
-@bot.group(name="1v1", help="Start a private CS2 1v1 server: `1v1 [map]`, `stop`, `status`", suggest={"rest": ("stop", "status", "help")})
+@bot.group(name="1v1", help="Start a CS2 1v1 arena server anyone can join: `1v1 [map]`, `stop`, `status`", suggest={"rest": ("stop", "status", "help")})
 async def one_v_one(ctx, rest: str = ""):
     if not where_allowed(ctx):
         await ctx.reply_ephemeral("that is not the channel for this; ask where 1v1 servers are started.", public_fallback=True)
@@ -125,17 +125,20 @@ async def one_v_one(ctx, rest: str = ""):
 
 def help_text():
     p = bot.prefix
-    maps = ", ".join(f"`{m}`" for m in core.CS2_MAPS)
+    maps = ", ".join(f"`{m}`" for m in core.map_names())
     return (
-        f"`{p}1v1 [map]` starts a CS2 1v1 server (maps: {maps}), `{p}1v1 status` shows it, `{p}1v1 stop` ends it (its starter or an admin).\n"
-        "It stops by itself after the match or when nobody connects for a while. "
+        f"`{p}1v1 [map]` starts a CS2 1v1 arena server on a random arena map, or the one you name (maps: {maps}). "
+        f"Anyone with the connect line can join, up to {core.CS2_MAX_PLAYERS} players; they are paired into 1v1 arenas and the rest queue. "
+        f"`{p}1v1 status` shows it, `{p}1v1 stop` ends it (its starter or an admin).\n"
+        "It stops by itself when everyone has left or nobody connects for a while. "
         "The first start downloads the game, which takes a long time."
     )
 
 
 def status_text(server):
     state = "up" if server.ready_at is not None else "starting"
-    line = f"1v1 on `{server.map_name}` ({state}), started by @{server.owner_name}"
+    seats = f", {server.players}/{server.max_players or core.CS2_MAX_PLAYERS} players" if server.ready_at is not None else ""
+    line = f"1v1 arena on `{server.map_name}` ({state}{seats}), started by @{server.owner_name}"
     if server.ready_at is not None and not core.CS2_PRIVATE:
         return f"{line}\n`{core.connect_line(server)}`"
     return line
@@ -194,9 +197,9 @@ async def finish(server, reason):
 
 async def announce_ready(server):
     if core.CS2_PRIVATE:
-        await say(server.channel_id, f"@{server.owner_name} your 1v1 on `{server.map_name}` is up; the connect line is in `{bot.prefix}1v1 status` for you to share.")
+        await say(server.channel_id, f"@{server.owner_name} your 1v1 arena on `{server.map_name}` is up; the connect line is in `{bot.prefix}1v1 status` for you to share.")
         return
-    await say(server.channel_id, f"@{server.owner_name} your 1v1 on `{server.map_name}` is up:\n`{core.connect_line(server)}`")
+    await say(server.channel_id, f"@{server.owner_name} your 1v1 arena on `{server.map_name}` is up, anyone can join:\n`{core.connect_line(server)}`")
 
 
 async def report_progress(server, now):
