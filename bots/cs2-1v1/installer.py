@@ -78,7 +78,6 @@ def extract(data, dest):
             for info in members:
                 safe_target(dest, info.filename)
             archive.extractall(dest)
-            names = [info.filename for info in members if not info.is_dir()]
     else:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
             members = archive.getmembers()
@@ -87,9 +86,9 @@ def extract(data, dest):
                 if not (member.isdir() or member.isfile()):
                     raise InstallError(f"archive member {member.name!r} is not a plain file")
             archive.extractall(dest, filter="data")
-            names = [member.name for member in members if member.isfile()]
-    for name in names:
-        os.chmod(os.path.join(dest, name), 0o755 if name.endswith(".so") else 0o644)
+    for folder, _, files in os.walk(dest):
+        for name in files:
+            os.chmod(os.path.join(folder, name), 0o755 if name.endswith(".so") else 0o644)
 
 
 def read_state(root):
