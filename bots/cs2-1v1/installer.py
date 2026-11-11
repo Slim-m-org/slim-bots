@@ -70,32 +70,26 @@ def safe_target(dest, member):
 
 
 def extract(data, dest):
-    """Unpacks a zip or tar.gz held in memory into `dest`, files only, with every path checked."""
+    """Unpacks a zip or tar.gz held in memory into `dest`, files only, with every path checked first."""
     os.makedirs(dest, exist_ok=True)
     if data[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            for info in archive.infolist():
-                target = safe_target(dest, info.filename)
-                if info.is_dir():
-                    os.makedirs(target, exist_ok=True)
-                    continue
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                with archive.open(info) as source, open(target, "wb") as out:
-                    out.write(source.read())
-                os.chmod(target, 0o755 if info.filename.endswith(".so") else 0o644)
-        return
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        for member in archive.getmembers():
-            target = safe_target(dest, member.name)
-            if member.isdir():
-                os.makedirs(target, exist_ok=True)
-            elif member.isfile():
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                with open(target, "wb") as out:
-                    out.write(archive.extractfile(member).read())
-                os.chmod(target, 0o755 if member.name.endswith(".so") else 0o644)
-            else:
-                raise InstallError(f"archive member {member.name!r} is not a plain file")
+            members = archive.infolist()
+            for info in members:
+                safe_target(dest, info.filename)
+            archive.extractall(dest)
+            names = [info.filename for info in members if not info.is_dir()]
+    else:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            members = archive.getmembers()
+            for member in members:
+                safe_target(dest, member.name)
+                if not (member.isdir() or member.isfile()):
+                    raise InstallError(f"archive member {member.name!r} is not a plain file")
+            archive.extractall(dest, filter="data")
+            names = [member.name for member in members if member.isfile()]
+    for name in names:
+        os.chmod(os.path.join(dest, name), 0o755 if name.endswith(".so") else 0o644)
 
 
 def read_state(root):
