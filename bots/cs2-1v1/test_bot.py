@@ -24,7 +24,7 @@ class Rig:
     def __init__(self, **config):
         defaults = {"CS2_HOST": "play.example", "CS2_PORT": 27015, "CS2_MAX_SERVERS": 1, "CS2_IDLE_SECONDS": 600, "CS2_EMPTY_SECONDS": 60,
                     "CS2_MAX_MATCH_SECONDS": 5400, "CS2_START_TIMEOUT_SECONDS": 14400, "CS2_CHANNEL": "", "CS2_PRIVATE": False, "CS2_GSLT": "",
-                    "CS2_MAPS": ["de_dust2", "de_mirage"], "CS2_IMAGE": core.IMAGE_DEFAULT}
+                    "CS2_MAX_PLAYERS": 10, "CS2_MAPS": ["am_jungle=workshop:111", "am_mirage=workshop:222"], "CS2_IMAGE": core.IMAGE_DEFAULT}
         for name, value in {**defaults, **config}.items():
             setattr(core, name, value)
         self.now = 1000.0
@@ -70,11 +70,14 @@ class Rig:
 def test_start_creates_one_pinned_labelled_container_with_a_random_password_and_says_the_first_start_is_slow():
     rig = Rig()
     reply = rig.say("!1v1 mirage")
-    assert "starting a 1v1 on `de_mirage`" in reply and "60 GB" in reply
+    assert "starting a 1v1 arena server on `am_mirage`" in reply and "anyone can join" in reply.lower() and "75 GB" in reply
     (_, name, spec) = [c for c in rig.docker.calls if c[0] == "create"][0]
     assert name == "cs2-1v1-27015" and "@sha256:" in spec["Image"]
     env = dict(item.split("=", 1) for item in spec["Env"])
-    assert env["CS2_MAXPLAYERS"] == "2" and env["CS2_STARTMAP"] == "de_mirage" and len(env["CS2_PW"]) == core.PASSWORD_LENGTH
+    assert env["CS2_MAXPLAYERS"] == "10", "an arena server is not capped at two players"
+    assert env["CS2_HOST_WORKSHOP_MAP"] == "222" and "CS2_STARTMAP" not in env and len(env["CS2_PW"]) == core.PASSWORD_LENGTH
+    assert (env["CS2_GAMETYPE"], env["CS2_GAMEMODE"]) == ("0", "0"), "casual base mode, never a competitive one"
+    assert env["CS2_BOT_QUOTA"] == "0", "a 1v1 has room for exactly two people, so no CS2 bots"
     assert spec["Labels"]["slimm.owner"] == "u-ann"
     host = spec["HostConfig"]
     assert host["PortBindings"] == {"27015/udp": [{"HostPort": "27015"}]} and host["AutoRemove"] and host["NetworkMode"] == "cs2net"
@@ -92,15 +95,15 @@ def test_a_missing_image_is_pulled_once_then_created():
 def test_an_unknown_map_lists_the_configured_ones_and_starts_nothing():
     rig = Rig()
     reply = rig.say("!1v1 ../../etc")
-    assert "`de_dust2`" in reply and "`de_mirage`" in reply
+    assert "`am_jungle`" in reply and "`am_mirage`" in reply
     assert not rig.docker.calls
 
 
 def test_a_workshop_map_sets_the_workshop_variable_instead_of_a_start_map():
     rig = Rig(CS2_MAPS=["workshop:3070284539"])
-    rig.say("!1v1")
+    reply = rig.say("!1v1")
     env = dict(item.split("=", 1) for item in rig.docker.calls[0][2]["Env"])
-    assert env["CS2_HOST_WORKSHOP_MAP"] == "3070284539" and "CS2_STARTMAP" not in env
+    assert env["CS2_HOST_WORKSHOP_MAP"] == "3070284539" and "CS2_STARTMAP" not in env and "workshop_3070284539" in reply
 
 
 def test_the_gslt_token_goes_into_the_server_env_only_when_set():
@@ -139,7 +142,7 @@ def test_private_mode_keeps_the_password_out_of_the_channel_posts():
 def test_a_second_start_while_one_runs_names_the_running_server_and_creates_nothing():
     rig = Rig()
     rig.say("!1v1")
-    reply = rig.say("!1v1 dust2", user=BOB)
+    reply = rig.say("!1v1 jungle", user=BOB)
     assert "already running" in reply and "@ann" in reply
     assert len([c for c in rig.docker.calls if c[0] == "create"]) == 1
 
@@ -308,7 +311,7 @@ def test_status_shows_the_connect_line_once_up():
     rig.say("!1v1")
     assert "(starting)" in rig.say("!1v1 status")
     rig.tick(answer=info())
-    assert "(up)" in rig.say("!1v1 status") and "connect play.example:27015" in rig.posts()[-1]
+    assert "(up, 0/10 players)" in rig.say("!1v1 status") and "connect play.example:27015" in rig.posts()[-1]
 
 
 def test_help_names_the_commands_and_the_slow_first_start():
@@ -322,8 +325,56 @@ def test_config_refuses_values_that_could_reach_the_entrypoint_shell():
     assert "CS2_GSLT" in core.check_config()
     rig = Rig(CS2_MAPS=["de_dust2 +rcon_password x"])
     assert "CS2_MAPS" in core.check_config()
+    rig = Rig(CS2_MAPS=["de_dust2"])
+    assert "CS2_MAPS" in core.check_config(), "stock competitive maps are not arena maps"
+    Rig(CS2_MAX_PLAYERS=1)
+    assert "CS2_MAX_PLAYERS" in core.check_config()
     Rig()
     assert core.check_config() is None
+
+
+def test_the_bootstrap_installs_the_arena_plugins_before_the_game_starts_and_ships_the_installer():
+    rig = Rig()
+    rig.say("!1v1")
+    spec = rig.docker.calls[0][2]
+    env = dict(item.split("=", 1) for item in spec["Env"])
+    assert spec["Cmd"][:2] == ["bash", "-c"] and spec["Cmd"][2].index("slimm-installer.py\" ensure") < spec["Cmd"][2].index("exec bash entry.sh")
+    assert "def ensure(" in env["SLIMM_INSTALLER"] and "metamod" in env["SLIMM_INSTALLER"]
+    assert spec["HostConfig"]["Binds"] == [f"{core.CS2_VOLUME}:{core.INSTALL_DIR}"], "still only the one shared volume"
+
+
+def test_a_random_arena_map_is_picked_per_start_and_a_named_one_wins():
+    rig = Rig(CS2_MAPS=["am_a=workshop:1", "am_b=workshop:2", "am_c=workshop:3"])
+    assert [core.choose_map("", pick=lambda names: names[i]) for i in range(3)] == ["am_a", "am_b", "am_c"]
+    assert core.choose_map("B") == "am_b" and core.choose_map("am_c") == "am_c" and core.choose_map("nope") is None
+    rig.say("!1v1 c")
+    env = dict(item.split("=", 1) for item in rig.docker.calls[0][2]["Env"])
+    assert env["CS2_HOST_WORKSHOP_MAP"] == "3"
+
+
+def test_the_default_map_list_is_all_workshop_arena_maps_and_no_competitive_map():
+    assert core.ARENA_MAPS and len(set(core.ARENA_MAPS.values())) == len(core.ARENA_MAPS)
+    for name, item in core.ARENA_MAPS.items():
+        assert name.startswith("am_") and item.isdigit(), name
+    assert not any(name.startswith("de_") for name in core.ARENA_MAPS)
+
+
+def test_max_players_comes_from_the_setting_and_status_shows_players_and_the_map():
+    rig = Rig(CS2_MAX_PLAYERS=8)
+    rig.say("!1v1")
+    env = dict(item.split("=", 1) for item in rig.docker.calls[0][2]["Env"])
+    assert env["CS2_MAXPLAYERS"] == "8"
+    rig.tick(answer=info(players=5, bots=1))
+    status = rig.say("!1v1 status")
+    assert f"`{next(iter(cs2.servers.values())).map_name}`" in status and "4/10 players" in status, "plugin bots are not counted as players"
+
+
+def test_more_than_two_people_do_not_end_or_block_the_server():
+    rig = Rig()
+    rig.say("!1v1")
+    rig.tick(answer=info(players=6))
+    rig.tick(seconds=3000)
+    assert rig.running() and not any("stopped" in p for p in rig.posts())
 
 
 if __name__ == "__main__":

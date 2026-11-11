@@ -67,4 +67,4 @@ class FakeDocker:
 
 
 def info(players=0, bots=0, game_map="de_dust2"):
-    return {"map": game_map, "players": players, "max_players": 2, "bots": bots}
+    return {"map": game_map, "players": players, "max_players": 10, "bots": bots}

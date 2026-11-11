@@ -1,6 +1,7 @@
 """bot-cs2-1v1's settings, the container spec, log progress parsing and the idle/match-over decision; see README.md.
 Never imports `bot` (the entry point) - see "Splitting a bot across files" in docs/framework.md."""
 
+import os
 import random
 import re
 import secrets
@@ -12,11 +13,29 @@ INSTALL_DIR = "/home/steam/cs2-dedicated"
 PASSWORD_LENGTH = 10
 PROGRESS_POST_SECONDS = 300
 LOST_AFTER_SECONDS = 120
+MAX_PLAYERS_LIMIT = 64
+INSTALLER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "installer.py")
+BOOTSTRAP = 'printf "%s" "$SLIMM_INSTALLER" > "$STEAMAPPDIR/slimm-installer.py" && python3 "$STEAMAPPDIR/slimm-installer.py" ensure && exec bash entry.sh'
 
 # The values reach the image's entrypoint through `eval`, so they must stay inside this alphabet.
 _SAFE = re.compile(r"^[A-Za-z0-9_]+$")
 _WORKSHOP = re.compile(r"^workshop:(\d{1,20})$")
+_NAMED = re.compile(r"^([A-Za-z0-9_]+)=workshop:(\d{1,20})$")
 _DOWNLOAD = re.compile(r"downloading, progress: (\d+(?:\.\d+)?)")
+
+# Workshop multi-arena maps (am_*) the alerena plugin pairs players on; checked against the Steam API 2026-11-10.
+ARENA_MAPS = {
+    "am_redline": "3139172262",
+    "am_must2": "3175903838",
+    "am_minecraft": "3197575080",
+    "am_mirage_mid": "3272916833",
+    "am_anubis": "3242420753",
+    "am_forgotten_yard": "3356301765",
+    "am_dust2": "3337701091",
+    "am_texture2": "3132214859",
+    "am_plain2": "3131339633",
+    "am_blackline": "3172439876",
+}
 
 CS2_HOST = ""
 CS2_PORT = 27015
@@ -26,7 +45,8 @@ CS2_IDLE_SECONDS = 600
 CS2_EMPTY_SECONDS = 60
 CS2_MAX_MATCH_SECONDS = 5400
 CS2_START_TIMEOUT_SECONDS = 14400
-CS2_MAPS = ["de_dust2", "de_mirage", "de_inferno", "de_nuke"]
+CS2_MAX_PLAYERS = 10
+CS2_MAPS = [f"{name}=workshop:{item}" for name, item in ARENA_MAPS.items()]
 CS2_CHANNEL = ""
 CS2_PRIVATE = False
 CS2_DOCKER_HOST = "http://dockerproxy:2375"
@@ -35,7 +55,7 @@ CS2_IMAGE = IMAGE_DEFAULT
 CS2_VOLUME = "cs2-server"
 CS2_CPUS = 2.0
 CS2_MEMORY_MB = 6144
-CS2_RULES = "+mp_maxrounds 6 +mp_warmuptime 30 +mp_autoteambalance 0 +mp_limitteams 0 +mp_halftime 0"
+CS2_RULES = ""
 
 
 @dataclass
@@ -57,12 +77,14 @@ class Server:
     silent_since: float | None = None
     last_progress_at: float = 0.0
     last_progress_pct: float = -1.0
+    players: int = 0
+    max_players: int = 0
 
 
 def configure(bot):
     """Reads every CS2_* variable through the framework's setting() so a bad value is reported at start."""
     global CS2_HOST, CS2_PORT, CS2_GSLT, CS2_MAX_SERVERS, CS2_IDLE_SECONDS, CS2_EMPTY_SECONDS, CS2_MAX_MATCH_SECONDS
-    global CS2_START_TIMEOUT_SECONDS, CS2_MAPS, CS2_CHANNEL, CS2_PRIVATE, CS2_DOCKER_HOST, CS2_DOCKER_NETWORK
+    global CS2_START_TIMEOUT_SECONDS, CS2_MAX_PLAYERS, CS2_MAPS, CS2_CHANNEL, CS2_PRIVATE, CS2_DOCKER_HOST, CS2_DOCKER_NETWORK
     global CS2_IMAGE, CS2_VOLUME, CS2_CPUS, CS2_MEMORY_MB, CS2_RULES
     CS2_HOST = bot.setting("CS2_HOST", "", required=True)
     CS2_PORT = bot.setting("CS2_PORT", 27015, type=int)
@@ -72,6 +94,7 @@ def configure(bot):
     CS2_EMPTY_SECONDS = max(10, bot.setting("CS2_EMPTY_SECONDS", 60, type=int))
     CS2_MAX_MATCH_SECONDS = 60 * max(5, bot.setting("CS2_MAX_MATCH_MINUTES", 90, type=int))
     CS2_START_TIMEOUT_SECONDS = 60 * max(5, bot.setting("CS2_START_TIMEOUT_MINUTES", 240, type=int))
+    CS2_MAX_PLAYERS = bot.setting("CS2_MAX_PLAYERS", 10, type=int)
     CS2_MAPS = [name.strip() for name in bot.setting("CS2_MAPS", CS2_MAPS, type=list) if name.strip()]
     CS2_CHANNEL = bot.setting("CS2_CHANNEL", "")
     CS2_PRIVATE = bot.setting("CS2_PRIVATE", False, type=bool)
@@ -84,8 +107,21 @@ def configure(bot):
     CS2_RULES = bot.setting("CS2_RULES", CS2_RULES)
 
 
-def map_problem(name):
-    return None if _SAFE.match(name) or _WORKSHOP.match(name) else f"CS2_MAPS entry {name!r} is not a map name or workshop:<id>"
+def parse_map(entry):
+    """(display name, workshop id) for a `name=workshop:<id>` entry, a bare `workshop:<id>`, or an ARENA_MAPS name; None when it is none of them."""
+    named = _NAMED.match(entry)
+    if named:
+        return named.group(1), named.group(2)
+    bare = _WORKSHOP.match(entry)
+    if bare:
+        return f"workshop_{bare.group(1)}", bare.group(1)
+    if entry in ARENA_MAPS:
+        return entry, ARENA_MAPS[entry]
+    return None
+
+
+def map_problem(entry):
+    return None if parse_map(entry) else f"CS2_MAPS entry {entry!r} is not an arena map name, name=workshop:<id> or workshop:<id>"
 
 
 def check_config():
@@ -98,18 +134,33 @@ def check_config():
         return "CS2_GSLT must be letters and digits only"
     if not CS2_MAPS:
         return "CS2_MAPS must name at least one map"
+    if not 2 <= CS2_MAX_PLAYERS <= MAX_PLAYERS_LIMIT:
+        return f"CS2_MAX_PLAYERS must be between 2 and {MAX_PLAYERS_LIMIT}"
     if not CS2_DOCKER_HOST.startswith(("http://", "https://")):
         return "CS2_DOCKER_HOST must be an http(s) URL of the socket proxy"
     return None
 
 
+def map_names():
+    return [parse_map(entry)[0] for entry in CS2_MAPS]
+
+
+def workshop_id(name):
+    for entry in CS2_MAPS:
+        found = parse_map(entry)
+        if found[0] == name:
+            return found[1]
+    return None
+
+
 def choose_map(requested, pick=random.choice):
-    """The configured map `requested` names (case-insensitive, `de_` optional), a random one when empty, else None."""
+    """The configured map `requested` names (case-insensitive, `am_` optional), a random one when empty, else None."""
+    names = map_names()
     if not requested:
-        return pick(CS2_MAPS)
+        return pick(names)
     wanted = requested.strip().lower()
-    for name in CS2_MAPS:
-        if wanted in (name.lower(), name.lower().removeprefix("de_")):
+    for name in names:
+        if wanted in (name.lower(), name.lower().removeprefix("am_")):
             return name
     return None
 
@@ -129,20 +180,20 @@ def free_port(taken):
 def container_spec(*, map_name, password, port, owner_id, owner_name, channel_id):
     """The create body: the pinned image, the shared install volume, one UDP port and the bot's own labels."""
     env = {
-        "CS2_SERVERNAME": "slim-m 1v1", "CS2_PORT": str(port), "CS2_MAXPLAYERS": "2", "CS2_PW": password,
-        "CS2_GAMETYPE": "0", "CS2_GAMEMODE": "1", "CS2_CHEATS": "0", "CS2_RCONPW": new_password(),
+        "CS2_SERVERNAME": "slim-m 1v1 arena", "CS2_PORT": str(port), "CS2_MAXPLAYERS": str(CS2_MAX_PLAYERS), "CS2_PW": password,
+        "CS2_GAMETYPE": "0", "CS2_GAMEMODE": "0", "CS2_CHEATS": "0", "CS2_RCONPW": new_password(),
         "CS2_ADDITIONAL_ARGS": CS2_RULES, "CS2_SERVER_HIBERNATE": "0",
+        "CS2_BOT_QUOTA": "0", "CS2_BOT_QUOTA_MODE": "normal",
+        "CS2_HOST_WORKSHOP_MAP": workshop_id(map_name) or "",
     }
-    workshop = _WORKSHOP.match(map_name)
-    if workshop:
-        env["CS2_HOST_WORKSHOP_MAP"] = workshop.group(1)
-    else:
-        env["CS2_STARTMAP"] = map_name
+    with open(INSTALLER_PATH, encoding="utf8") as handle:
+        env["SLIMM_INSTALLER"] = handle.read()
     if CS2_GSLT:
         env["SRCDS_TOKEN"] = CS2_GSLT
     key = f"{port}/udp"
     return {
         "Image": CS2_IMAGE,
+        "Cmd": ["bash", "-c", BOOTSTRAP],
         "Env": [f"{k}={v}" for k, v in env.items()],
         "ExposedPorts": {key: {}},
         "Labels": {"slimm.owner": owner_id, "slimm.owner_name": owner_name, "slimm.channel": channel_id, "slimm.map": map_name, "slimm.port": str(port)},
@@ -187,7 +238,8 @@ def decide(server, info, now):
     first = server.ready_at is None
     if first:
         server.ready_at = now
-    if info["players"] - info["bots"] > 0:
+    server.players, server.max_players = max(0, info["players"] - info["bots"]), info["max_players"]
+    if server.players > 0:
         server.ever_occupied = True
         server.empty_since = None
     elif server.empty_since is None:
