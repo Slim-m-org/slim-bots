@@ -12,7 +12,7 @@ from slimbots.testing import FakeAsyncClient, FakeVoice, human, run_module_tests
 from slimbots.voice import VoiceError
 
 RICK = "https://youtu.be/dQw4w9WgXcQ?t=30"
-ZOO = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
+ZOO = "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=4"
 MEMBERS = [human("u1", "nick", "Nick"), human("u2", "sam", "Sam"), human("u3", "mgr", "Mgr", role_ids=["role-mgr"])]
 ROLES = [{"id": "role-mgr", "name": "Manager", "permissions": Permissions.MANAGE_CHANNELS, "is_everyone": False}]
 
@@ -159,6 +159,7 @@ def test_a_second_link_queues_and_skip_plays_it():
         assert any("Me at the zoo" in r and "Sam" in r for r in rig.replies())
         await rig.say("!yt skip", msg_id="m4")
         assert rig.party().current.video_id == "jNQXAC9IVRw"
+        assert rig.party().position_seconds == 4, "a queued link starts where its t= asked"
         await asyncio.sleep(2.2)
         assert rig.session_writes()[-1]["item_id"] == "jNQXAC9IVRw"
         assert len(yt.bot.voice.sessions) == 1

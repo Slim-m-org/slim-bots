@@ -125,6 +125,7 @@ async def fetch(ctx, link, queued_by):
         video = youtube_core.Video(link.video_id, "YouTube video")
     return youtube_core.Video(
         video.video_id, video.title, video.channel, video.duration_seconds, queued_by.id, queued_by.display_name,
+        link.start_seconds,
     )
 
 
@@ -173,7 +174,7 @@ async def _start_or_queue_in(ctx, link, voice_channel_id):
         return
     party = parties.Party(bot, voice_channel_id, session, ctx.author.id, on_end=on_party_end, on_next=announce)
     session.on_disconnect(lambda: party.stop(reason="disconnected from the call"))
-    party.start(video, link.start_seconds)
+    party.start(video)
     await tell(ctx, f"watching {describe(video)} in {name}. everyone on the call watches together.")
     await announce(party, video)
 
