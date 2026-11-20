@@ -51,7 +51,7 @@ def clear():
 class Party:
     """The room's video, where it is, and what plays next; every change is stated to the server at once."""
 
-    def __init__(self, bot, voice_channel_id, voice_session, started_by_id, *, on_end=None, clock=time.monotonic):
+    def __init__(self, bot, voice_channel_id, voice_session, started_by_id, *, on_end=None, on_next=None, clock=time.monotonic):
         self.bot = bot
         self.voice_channel_id = voice_channel_id
         self.voice_session = voice_session
@@ -65,6 +65,7 @@ class Party:
         self._anchor_seconds = 0.0
         self._anchor_at = clock()
         self._on_end = on_end
+        self._on_next = on_next
         self._wake_sync = asyncio.Event()
         self._wake_monitor = asyncio.Event()
         self._dirty = True
@@ -169,8 +170,9 @@ class Party:
 
     async def _advance_if_ended(self):
         async with self.lock:
-            if not self.finished and self.ended:
-                await self.skip()
+            playing = await self.skip() if not self.finished and self.ended else None
+        if playing is not None and self._on_next is not None:
+            await self._on_next(self, playing)
 
     async def _monitor(self):
         """Moves to the next video when one ends, and ends the party once nobody else is on the call."""

@@ -236,6 +236,7 @@ def test_a_video_that_ends_plays_the_next_and_the_last_one_ends_the_party():
         rig.clock.now += 20
         await party._advance_if_ended()
         assert party.current.video_id == "dQw4w9WgXcQ"
+        assert "watch?v=dQw4w9WgXcQ" in rig.client.sent[-1]["content"], "the next video's link is posted for older apps"
         rig.clock.now += 215
         await party._advance_if_ended()
         assert party.finished and yt.bot.voice.sessions[0].left
