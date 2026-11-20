@@ -80,18 +80,19 @@ class Party:
         duration = self.current.duration_seconds if self.current else None
         return min(position, float(duration)) if duration else position
 
-    def start(self, video, start_seconds=0):
+    def start(self, video):
         _parties[self.voice_channel_id] = self
         self._tasks = [
             self.bot.background(self._sync_loop(), name=f"youtube-sync-{self.voice_channel_id}"),
             self.bot.background(self._monitor(), name=f"youtube-monitor-{self.voice_channel_id}"),
         ]
-        self.play(video, start_seconds)
+        self.play(video)
 
-    def play(self, video, start_seconds=0):
+    def play(self, video):
+        """Starts `video` where its link asked, or at the beginning."""
         self.current = video
         self.paused = False
-        self._move(start_seconds)
+        self._move(video.start_seconds)
 
     def _move(self, seconds):
         self._anchor_seconds = max(0.0, float(seconds))

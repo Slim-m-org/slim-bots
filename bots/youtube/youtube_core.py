@@ -36,6 +36,7 @@ class Video:
     duration_seconds: int | None = None
     queued_by_id: str | None = None
     queued_by_name: str | None = None
+    start_seconds: int = 0
 
     @property
     def url(self):
