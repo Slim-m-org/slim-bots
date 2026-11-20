@@ -186,6 +186,32 @@ def test_pause_seek_and_resume_move_the_room_clock():
     run(rig, scenario)
 
 
+def test_the_dock_toggle_shows_what_pressing_it_does():
+    assert yt.dock_look([True]) == ("play", "Play")
+    assert yt.dock_look([False]) == ("pause", "Pause")
+    assert yt.dock_look([True, False]) == ("pause", "Play/Pause")
+    assert yt.dock_look([]) == ("pause", "Pause")
+    rig = Rig()
+    looks = []
+
+    async def record(entry_id, *, icon=None, label=None):
+        looks.append((entry_id, icon, label))
+        return True
+
+    yt.bot.update_call_control = record
+
+    async def scenario():
+        await rig.say(f"!yt {RICK}")
+        await rig.say("!yt pause", msg_id="m2")
+        await rig.say("!yt resume", msg_id="m3")
+        assert looks[-2:] == [("yt-playpause", "play", "Play"), ("yt-playpause", "pause", "Pause")]
+
+    try:
+        run(rig, scenario)
+    finally:
+        del yt.bot.update_call_control
+
+
 def test_only_the_starter_the_queuer_or_a_manager_may_steer():
     rig = Rig()
 
