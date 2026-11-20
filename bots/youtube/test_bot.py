@@ -186,6 +186,32 @@ def test_pause_seek_and_resume_move_the_room_clock():
     run(rig, scenario)
 
 
+def test_the_dock_toggle_shows_what_pressing_it_does():
+    assert yt.dock_look([True]) == ("play", "Play")
+    assert yt.dock_look([False]) == ("pause", "Pause")
+    assert yt.dock_look([True, False]) == ("pause", "Play/Pause")
+    assert yt.dock_look([]) == ("pause", "Pause")
+    rig = Rig()
+    looks = []
+
+    async def record(entry_id, *, icon=None, label=None):
+        looks.append((entry_id, icon, label))
+        return True
+
+    yt.bot.update_call_control = record
+
+    async def scenario():
+        await rig.say(f"!yt {RICK}")
+        await rig.say("!yt pause", msg_id="m2")
+        await rig.say("!yt resume", msg_id="m3")
+        assert looks[-2:] == [("yt-playpause", "play", "Play"), ("yt-playpause", "pause", "Pause")]
+
+    try:
+        run(rig, scenario)
+    finally:
+        del yt.bot.update_call_control
+
+
 def test_only_the_starter_the_queuer_or_a_manager_may_steer():
     rig = Rig()
 
@@ -210,6 +236,7 @@ def test_a_video_that_ends_plays_the_next_and_the_last_one_ends_the_party():
         rig.clock.now += 20
         await party._advance_if_ended()
         assert party.current.video_id == "dQw4w9WgXcQ"
+        assert "watch?v=dQw4w9WgXcQ" in rig.client.sent[-1]["content"], "the next video's link is posted for older apps"
         rig.clock.now += 215
         await party._advance_if_ended()
         assert party.finished and yt.bot.voice.sessions[0].left

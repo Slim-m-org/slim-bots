@@ -5,9 +5,13 @@ Every viewer's app plays the video in YouTube's own embed and follows the room's
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 
 from slimbots import ApiError, Bot, Permissions
+from slimbots.http import is_token_revoked
 from slimbots.media import format_hms, parse_hms
+from slimbots.registration import RegistrationRejected
 from slimbots.text import clip, escape_mentions, one_line
 from slimbots.voice import VoiceError
 from slimbots.web import ServiceError
@@ -16,12 +20,14 @@ import party as parties
 import youtube_core
 
 bot = Bot(prefix="!", require_channels=True, listen_voice_chats=True)
+log = logging.getLogger("youtube")
 
 API_KEY = bot.setting("YOUTUBE_API_KEY", "")
 lookup = youtube_core.Lookup(user_agent="slimbots-youtube/1.0", api_key=API_KEY)
 
 LINK_HINT = "give a YouTube link, like `{p}yt https://youtu.be/dQw4w9WgXcQ`."
 NOT_PLAYING = "nothing is playing."
+PLAYPAUSE_ID = "yt-playpause"
 _start_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -59,8 +65,23 @@ async def announce(party, video):
     try:
         await bot.client.send(party.voice_channel_id, text)
     except ApiError as err:
-        if err.status not in (403, 404):
+        if is_token_revoked(err):
             raise
+        log.warning("could not post the link in %s: %s", party.voice_channel_id, err)
+
+
+def dock_look(paused_states):
+    """Play when every party is paused, Pause when none is, and a neutral label when calls disagree."""
+    if paused_states and all(paused_states):
+        return "play", "Play"
+    return ("pause", "Play/Pause") if any(paused_states) else ("pause", "Pause")
+
+
+async def refresh_dock():
+    """Best effort: the dock's toggle shows what pressing it will do; a failed update never stops playback."""
+    icon, label = dock_look([p.paused for p in parties.live_parties().values()])
+    with contextlib.suppress(ApiError, RegistrationRejected):
+        await bot.update_call_control(PLAYPAUSE_ID, icon=icon, label=label)
 
 
 async def resolve(ctx):
@@ -108,6 +129,7 @@ async def fetch(ctx, link, queued_by):
 
 
 async def on_party_end(party, reason):
+    await refresh_dock()
     if reason not in ("stopped", "disconnected from the call"):
         try:
             await bot.client.send(party.voice_channel_id, f"the watch party ended: {reason}.")
@@ -149,7 +171,7 @@ async def _start_or_queue_in(ctx, link, voice_channel_id):
     except VoiceError as err:
         await tell(ctx, f"I can't join {name}: {err}")
         return
-    party = parties.Party(bot, voice_channel_id, session, ctx.author.id, on_end=on_party_end)
+    party = parties.Party(bot, voice_channel_id, session, ctx.author.id, on_end=on_party_end, on_next=announce)
     session.on_disconnect(lambda: party.stop(reason="disconnected from the call"))
     party.start(video, link.start_seconds)
     await tell(ctx, f"watching {describe(video)} in {name}. everyone on the call watches together.")
@@ -180,6 +202,7 @@ async def pause_cmd(ctx):
     if party is not None:
         async with party.lock:
             changed = party.pause()
+        await refresh_dock()
         await tell(ctx, "paused." if changed else "already paused.")
 
 
@@ -189,6 +212,7 @@ async def resume_cmd(ctx):
     if party is not None:
         async with party.lock:
             changed = party.resume()
+        await refresh_dock()
         await tell(ctx, "resumed." if changed else "already playing.")
 
 
@@ -268,7 +292,7 @@ async def _party_for_press(interaction):
     return party
 
 
-@bot.call_control("yt-playpause", "Pause", icon="pause")
+@bot.call_control(PLAYPAUSE_ID, "Pause", icon="pause")
 async def on_playpause(interaction):
     party = await _party_for_press(interaction)
     if party is not None:
@@ -277,6 +301,7 @@ async def on_playpause(interaction):
                 party.resume()
             else:
                 party.pause()
+        await refresh_dock()
 
 
 @bot.call_control("yt-skip", "Next video", icon="skip_next")
