@@ -25,6 +25,8 @@ class Permissions:
     RUN_CODE = 1 << 17
     VIEW_MODERATION_HISTORY = 1 << 18
     MOVE_MEMBERS = 1 << 19
+    VIEW_TRANSCRIPTS = 1 << 20
+    USE_SOUNDBOARD = 1 << 21
 
     @classmethod
     def contains(cls, bits: int, permission: int) -> bool:

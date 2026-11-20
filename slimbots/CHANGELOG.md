@@ -8,6 +8,7 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 ## 0.22.0
 
 - `AsyncClient.set_watch_session` takes `provider="youtube"`, for a watch party of a YouTube video id that each viewer plays in YouTube's own embed. Needs a slim-m server with the watch session `provider` field; an older server ignores it and treats the session as Jellyfin's.
+- `Permissions` names the server's two newer bits, `VIEW_TRANSCRIPTS` and `USE_SOUNDBOARD`.
 
 ## 0.19.0
 
