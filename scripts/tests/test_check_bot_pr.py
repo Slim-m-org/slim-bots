@@ -178,8 +178,9 @@ def test_the_0_8_features_need_a_0_8_pin(tmp_path, code):
     ("0.21.0", "panel = JsonService('pve', url, ssl_context=context)\n"),
     ("0.21.0", "source = await publish_microphone(session, max_bitrate=1, audio_queue_ms=100)\n"),
     ("0.21.0", "service = JsonService('pic', timeout=15, total_timeout=30)\n"),
+    ("0.22.0", "await client.set_watch_session(ch, item_id=i, provider='youtube')\n"),
 ])
-def test_the_0_11_to_0_21_features_need_their_release(tmp_path, needed, code):
+def test_the_0_11_to_0_22_features_need_their_release(tmp_path, needed, code):
     below = ".".join(map(str, (c.parse_version(needed)[0], c.parse_version(needed)[1] - 1, 0)))
     (problem,) = c.check_bot(make_bot(tmp_path, "b", req=f"slim-m>={below}\n", code=code))
     assert f"needs >={needed}" in problem

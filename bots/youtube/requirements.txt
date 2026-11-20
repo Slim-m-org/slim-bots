@@ -1,0 +1,6 @@
+# Uses slimbots' Bot, voice and web helpers, and set_watch_session's provider (0.22.0).
+websockets>=12
+httpx>=0.27
+slim-m>=0.22.0
+# bot.voice joins the call through this; the bot publishes no track.
+livekit>=1.0

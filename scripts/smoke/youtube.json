@@ -1,0 +1,82 @@
+{
+  "ready_seconds": 8,
+  "steps": [
+    {
+      "say": "!yt help",
+      "expect_contains": [
+        "starts a watch party"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt never gonna give you up",
+      "expect_contains": [
+        "give a YouTube link"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt https://youtu.be/dQw4w9WgXcQ",
+      "expect_contains": [
+        "join a voice channel first"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt pause",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt resume",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt seek 1:23",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt seek soon",
+      "expect_contains": [
+        "give a time like"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt skip",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt queue",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt np",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    },
+    {
+      "say": "!yt stop",
+      "expect_contains": [
+        "nothing is playing"
+      ],
+      "timeout": 15
+    }
+  ]
+}

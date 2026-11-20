@@ -5,6 +5,11 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.22.0
+
+- `AsyncClient.set_watch_session` takes `provider="youtube"`, for a watch party of a YouTube video id that each viewer plays in YouTube's own embed. Needs a slim-m server with the watch session `provider` field; an older server ignores it and treats the session as Jellyfin's.
+- `Permissions` names the server's two newer bits, `VIEW_TRANSCRIPTS` and `USE_SOUNDBOARD`.
+
 ## 0.19.0
 
 - A command typed while the bot was offline is no longer run when it reconnects. A replayed command older than `max_replay_age` (default 300 seconds) is skipped with one log line and the cursor still moves past it; plain messages still reach `on_message`. Pass `Bot(max_replay_age=None)` to replay every command.

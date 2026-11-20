@@ -36,6 +36,12 @@ async def test_optional_fields_are_left_out_of_the_body_when_unset():
     assert seen[0][2] == {"item_id": "i1", "title": "Film", "playing": False, "position_ms": 0}
 
 
+async def test_a_youtube_session_names_its_provider():
+    seen = []
+    await client_seeing(seen).set_watch_session("c1", item_id="dQw4w9WgXcQ", title="Clip", playing=True, position_ms=0, provider="youtube")
+    assert seen[0][2]["provider"] == "youtube"
+
+
 async def test_a_tick_posts_playing_and_position():
     seen = []
     await client_seeing(seen).tick_watch_session("c1", playing=False, position_ms=42)

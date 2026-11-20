@@ -381,11 +381,13 @@ class AsyncClient:
     async def set_watch_session(
         self, channel_id: str, *, item_id: str, title: str, playing: bool, position_ms: int,
         duration_ms: int | None = None, seeked: bool = False, controller_user_id: str | None = None,
-        direct_play: dict[str, Any] | None = None,
+        direct_play: dict[str, Any] | None = None, provider: str | None = None,
     ) -> None:
         """States the call's watch session (decision 0050); a bot-only write that needs this bot on the call's heartbeat.
-        `seeked` moves the epoch, a 409 (another bot holds the channel) is not retried, and no `direct_play` withdraws the offer."""
+        `seeked` moves the epoch, a 409 is not retried, no `direct_play` withdraws the offer, and `provider="youtube"` names a video id."""
         body: dict[str, Any] = {"item_id": item_id, "title": title, "playing": playing, "position_ms": position_ms}
+        if provider is not None:
+            body["provider"] = provider
         if duration_ms is not None:
             body["duration_ms"] = duration_ms
         if seeked:
