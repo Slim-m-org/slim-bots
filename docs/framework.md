@@ -159,6 +159,11 @@ A member is in at most one call; if roster data somehow shows otherwise (no time
 A missing `required=True` value is never raised at the `setting()` call itself (which usually runs at import time, before `Bot.start()`); it is collected and reported together with a missing `SLIMM_URL`/token/channels in the same one-line error when `start()` runs.
 `start()` also refuses a `SLIMM_URL` that is plaintext http to anything but loopback before any request, since every call carries the bot token.
 
+A bot installed from the Dock as a connector (slim-m decision 0090; its manifest is the bot's `connector.json`) has its settings filled in the app, not the environment.
+`Bot(connector=True)`, or `SLIMM_CONNECTOR=1`, makes `bot.setting("PELICAN_URL")` read the host's `pelican_url` first, from `GET /connectors/me` with the bot's own token, once, at the first `setting()` call.
+A setting the host leaves unset falls back to the environment, and a refused read (not a connector token, the connector turned off) is reported at `start()` like a missing setting.
+The values are read once, so a changed setting applies on the next restart.
+
 ## Where a bot listens, and how it is addressed
 
 `channels=`/`SLIMM_CHANNELS` scopes which channels a bot reads.

@@ -16,7 +16,7 @@ import time
 from types import ModuleType
 from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, Mapping, NoReturn, Sequence
 
-from . import catchup, cursor
+from . import catchup, connector, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
@@ -126,6 +126,7 @@ class Bot:
         require_channels: bool = False, cursor_path: str | None = None, default_data_path: str | None = None,
         store_migrate: Callable[[Any], None] | None = None, listen_voice_chats: bool = False,
         mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE, ordered_events: bool = False,
+        connector: bool | None = None,
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
@@ -147,6 +148,10 @@ class Bot:
         self.data_path = os.environ.get("SLIMM_DB_PATH") or default_data_path
         self._store_migrate = store_migrate
         self._setting_errors: list[str] = []
+        # A connector reads its settings from the host it is installed in; see slimbots/connector.py.
+        self.connector = os.environ.get("SLIMM_CONNECTOR") == "1" if connector is None else connector
+        self._host_settings: dict[str, Any] | None = None
+        self._connector_transport: Any = None
         self.commands: dict[str, Command] = {}
         self._unique_commands: list[Command] = []
         self._listeners: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
@@ -264,7 +269,17 @@ class Bot:
             self._main_task.cancel()
 
     def setting(self, name: str, default: Any = None, *, type: type = str, required: bool = False) -> Any:
-        """One config value from the environment, converted by `type`; a missing `required` one is reported at `start()`."""
+        """One config value, converted by `type`: a connector's host value first, then the environment.
+        A missing `required` one is reported at `start()`."""
+        hosted = self._host_setting(name)
+        if hosted is not None:
+            if type is dict:
+                return self._pairs_setting(name, str(hosted))
+            try:
+                return connector.from_host(hosted, type)
+            except (TypeError, ValueError):
+                self._setting_errors.append(f"{name} (the Dock's value is not a {type.__name__})")
+                return default
         raw = os.environ.get(name)
         if not raw:
             if required:
@@ -281,6 +296,20 @@ class Bot:
         if type is dict:
             return self._pairs_setting(name, raw)
         return raw
+
+    def _host_setting(self, name: str) -> Any:
+        """The host's value for `name`, or None; the settings are read once, with this bot's own token."""
+        if not self.connector:
+            return None
+        if self._host_settings is None:
+            base = self._url or os.environ.get("SLIMM_URL", "")
+            token = self._token or os.environ.get("SLIMM_BOT_TOKEN", "")
+            try:
+                self._host_settings = connector.fetch_settings(base, token, transport=self._connector_transport)
+            except connector.ConnectorError as err:
+                self._setting_errors.append(f"connector settings ({err})")
+                self._host_settings = {}
+        return self._host_settings.get(connector.setting_key(name))
 
     def _pairs_setting(self, name: str, raw: str) -> dict[str, str]:
         """`"a:1,b:2"` -> `{"a": "1", "b": "2"}` in order; a malformed entry is reported at `start()` like a missing one."""

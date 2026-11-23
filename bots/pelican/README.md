@@ -45,6 +45,19 @@ It is not logged, and error replies never contain it.
 Redirects from the panel are not followed, so the header cannot be replayed elsewhere.
 Use an API key whose account owns or is a subuser of just the servers you want controlled, and keep `PELICAN_SERVERS` as a second fence.
 
+## As a connector
+
+`connector.json` is this bot's slim-m connector manifest: installed from the Dock, it asks only to view channels and send messages, and the Dock shows its settings as a form.
+The admin copies the token the install shows once, and runs the bot with it:
+
+```bash
+SLIMM_URL=https://your.space SLIMM_BOT_TOKEN=slimbot_... SLIMM_CONNECTOR=1 python3 bot.py
+```
+
+Each `PELICAN_*` setting is then read from the Dock (`pelican_url` for `PELICAN_URL`), and the environment only fills what the Dock leaves empty.
+`PELICAN_CONTROL_PERMISSION` stays an environment setting.
+Settings are read at start, so restart the bot after changing one.
+
 ## The status message
 
 The message id is derived from the channel id, so a restart finds and edits the same message instead of posting a new one.
