@@ -16,7 +16,7 @@ import time
 from types import ModuleType
 from typing import Any, Awaitable, Callable, Coroutine, Iterable, Literal, Mapping, NoReturn, Sequence
 
-from . import catchup, cursor
+from . import catchup, connector, cursor
 from . import events as ev
 from .authors import AuthorFilter
 from .canvas import Canvas
@@ -31,6 +31,7 @@ from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_
 from .models import Member
 from .reconnect import Backoff
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
+from .runs import RunHandler, RunRoutes, dispatch_run
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
 from .store import Store
@@ -126,6 +127,7 @@ class Bot:
         require_channels: bool = False, cursor_path: str | None = None, default_data_path: str | None = None,
         store_migrate: Callable[[Any], None] | None = None, listen_voice_chats: bool = False,
         mention_commands: bool = True, max_replay_age: float | None = DEFAULT_MAX_REPLAY_AGE, ordered_events: bool = False,
+        connector: bool | None = None,
     ) -> None:
         self.prefix = os.environ.get("SLIMM_PREFIX") or prefix
         self.username: str | None = None
@@ -147,11 +149,16 @@ class Bot:
         self.data_path = os.environ.get("SLIMM_DB_PATH") or default_data_path
         self._store_migrate = store_migrate
         self._setting_errors: list[str] = []
+        # A connector reads its settings from the host it is installed in; see slimbots/connector.py.
+        self.connector = os.environ.get("SLIMM_CONNECTOR") == "1" if connector is None else connector
+        self._host_settings: dict[str, Any] | None = None
+        self._connector_transport: Any = None
         self.commands: dict[str, Command] = {}
         self._unique_commands: list[Command] = []
         self._listeners: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
         self._buttons = ButtonRoutes()
         self._ui = UiRoutes()
+        self._runs = RunRoutes()
         self._ui_registered = False
         self._ui_lock = asyncio.Lock()
         self._global_checks: list[Callable[[Context], Awaitable[str | None]]] = []
@@ -264,7 +271,17 @@ class Bot:
             self._main_task.cancel()
 
     def setting(self, name: str, default: Any = None, *, type: type = str, required: bool = False) -> Any:
-        """One config value from the environment, converted by `type`; a missing `required` one is reported at `start()`."""
+        """One config value, converted by `type`: a connector's host value first, then the environment.
+        A missing `required` one is reported at `start()`."""
+        hosted = self._host_setting(name)
+        if hosted is not None:
+            if type is dict:
+                return self._pairs_setting(name, str(hosted))
+            try:
+                return connector.from_host(hosted, type)
+            except (TypeError, ValueError):
+                self._setting_errors.append(f"{name} (the Dock's value is not a {type.__name__})")
+                return default
         raw = os.environ.get(name)
         if not raw:
             if required:
@@ -281,6 +298,20 @@ class Bot:
         if type is dict:
             return self._pairs_setting(name, raw)
         return raw
+
+    def _host_setting(self, name: str) -> Any:
+        """The host's value for `name`, or None; the settings are read once, with this bot's own token."""
+        if not self.connector:
+            return None
+        if self._host_settings is None:
+            base = self._url or os.environ.get("SLIMM_URL", "")
+            token = self._token or os.environ.get("SLIMM_BOT_TOKEN", "")
+            try:
+                self._host_settings = connector.fetch_settings(base, token, transport=self._connector_transport)
+            except connector.ConnectorError as err:
+                self._setting_errors.append(f"connector settings ({err})")
+                self._host_settings = {}
+        return self._host_settings.get(connector.setting_key(name))
 
     def _pairs_setting(self, name: str, raw: str) -> dict[str, str]:
         """`"a:1,b:2"` -> `{"a": "1", "b": "2"}` in order; a malformed entry is reported at `start()` like a missing one."""
@@ -353,6 +384,13 @@ class Bot:
         """`@bot.button("hit")` runs for a press of that custom_id; `prefix=` matches a family. See docs/framework.md."""
         def decorator(func: ButtonHandler) -> ButtonHandler:
             self._buttons.add(custom_id, prefix, func)
+            return func
+        return decorator
+
+    def manifest_command(self, name: str) -> Callable[[RunHandler], RunHandler]:
+        """`@bot.manifest_command("servers")` answers a connector's manifest command or panel with text or a scene."""
+        def decorator(func: RunHandler) -> RunHandler:
+            self._runs.add(name, func)
             return func
         return decorator
 
@@ -442,6 +480,9 @@ class Bot:
 
     async def _register_commands(self) -> None:
         assert self.client is not None
+        # A connector's commands are declared in its manifest, so it publishes none of its own.
+        if self.connector:
+            return
         try:
             await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
         except RegistrationConflict as err:
@@ -661,6 +702,8 @@ class Bot:
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
+        elif kind == "connector.run":
+            self.background(dispatch_run(self, self._runs, frame), name=f"run-{frame.get('run_id', '?')}")
         elif kind == "voice.participant_joined":
             # Never gated on self.channels - find_member() tracks every voice channel the bot can see.
             self.voice._note_joined(frame["channel_id"], frame["user_id"])
@@ -888,6 +931,8 @@ class Bot:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
+                if self.connector and isinstance(err, ApiError) and is_forbidden(err):
+                    print(f"the host refused this connector: {err.reason or err}; check what the Dock approved", file=sys.stderr)
                 failure = err
             wait = backoff.next_wait()
             if failure is not None:

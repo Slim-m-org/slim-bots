@@ -5,6 +5,14 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.23.0
+
+- A bot can run as a slim-m connector (add-on API level 7): `Bot(connector=True)`, or `SLIMM_CONNECTOR=1`. Its settings are read once from the Dock (`GET /connectors/me`, `PELICAN_URL` reads `pelican_url`) before the environment, and it publishes no `PUT /bots/commands` since its manifest declares the commands. Needs a slim-m server at add-on level 7.
+- `@bot.manifest_command("name")` answers a manifest command or panel the host forwards as `connector.run`: the handler gets a `Run` and returns text, a `scene(...)` or `None`, and `RunError("why")` answers the member with that text. Each run is answered once with `POST /connectors/me/runs/{run_id}`, a handler still running half a second before the host's 6 second deadline is answered as too slow, and an answer past the host's 1 MiB cap is answered as too large. New exports: `Run`, `Caller`, `RunError`, `scene`.
+- A host-run connector, started by the operator's connector supervisor, works as is: the library reads `SLIMM_URL` and `SLIMM_BOT_TOKEN`, accepts plain http to the host's own `SLIMM_API_URL` when `SLIMM_CONNECTOR=1` and an `HTTP_PROXY` or `HTTPS_PROXY` is set (it is refused everywhere else, as before), and sends REST and the websocket through that proxy. A refusal that names the connector's approval is printed with its reason.
+- Requires `websockets` 15 or later, the first release that connects through an HTTP proxy.
+- A connector's token is held to its own route table (decision 0090): a connector reads directories, which need `view_channel`, and the bot routes `/bots/{id}/token`, `/revoke` and `/permissions` answer 404 for it. The library calls none of them in connector mode.
+
 ## 0.22.0
 
 - `AsyncClient.set_watch_session` takes `provider="youtube"`, for a watch party of a YouTube video id that each viewer plays in YouTube's own embed. Needs a slim-m server with the watch session `provider` field; an older server ignores it and treats the session as Jellyfin's.

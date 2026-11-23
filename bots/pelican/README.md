@@ -45,6 +45,25 @@ It is not logged, and error replies never contain it.
 Redirects from the panel are not followed, so the header cannot be replayed elsewhere.
 Use an API key whose account owns or is a subuser of just the servers you want controlled, and keep `PELICAN_SERVERS` as a second fence.
 
+## As a connector
+
+`connector.json` is this bot's slim-m connector manifest: installed from the Dock, it asks only to view channels and send messages, and the Dock shows its settings as a form.
+The admin copies the token the install shows once, and runs the bot with it:
+
+```bash
+SLIMM_URL=https://your.space SLIMM_BOT_TOKEN=slimbot_... SLIMM_CONNECTOR=1 python3 bot.py
+```
+
+Each `PELICAN_*` setting is then read from the Dock (`pelican_url` for `PELICAN_URL`), and the environment only fills what the Dock leaves empty.
+`PELICAN_CONTROL_PERMISSION` stays an environment setting.
+Settings are read at start, so restart the bot after changing one.
+This file is the source of truth for the manifest: the Dock installs a copy published as `modules/pelican/manifest.json` in [slim-addons](https://github.com/Slim-m-org/slim-addons), and its CI fails when the copy drifts.
+After changing `connector.json`, copy it there and bump `version` in both it and slim-addons' `index.json`.
+
+It also declares a `/servers` command and a Game servers panel, gated on its "See game servers" permission, which an admin gives to roles in the Dock.
+`/servers` answers the same list as `!servers`, and the panel draws one row per server with its state, CPU and RAM, refreshing every 30 seconds while it is open.
+In connector mode the `!` commands are not published to the composer's list, though typing them still works.
+
 ## The status message
 
 The message id is derived from the channel id, so a restart finds and edits the same message instead of posting a new one.
