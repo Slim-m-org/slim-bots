@@ -31,6 +31,7 @@ from .lifecycle import Periodic, guard_dispatch, log_failure, run_periodic, run_
 from .models import Member
 from .reconnect import Backoff
 from .registration import RegistrationConflict, RegistrationRejected, register_commands
+from .runs import RunHandler, RunRoutes, dispatch_run
 from .ui import UiEntry, UiHandler, UiOption, UiRoutes, register_ui
 from .space import Space
 from .store import Store
@@ -157,6 +158,7 @@ class Bot:
         self._listeners: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
         self._buttons = ButtonRoutes()
         self._ui = UiRoutes()
+        self._runs = RunRoutes()
         self._ui_registered = False
         self._ui_lock = asyncio.Lock()
         self._global_checks: list[Callable[[Context], Awaitable[str | None]]] = []
@@ -385,6 +387,13 @@ class Bot:
             return func
         return decorator
 
+    def manifest_command(self, name: str) -> Callable[[RunHandler], RunHandler]:
+        """`@bot.manifest_command("servers")` answers a connector's manifest command or panel with text or a scene."""
+        def decorator(func: RunHandler) -> RunHandler:
+            self._runs.add(name, func)
+            return func
+        return decorator
+
     def message_menu(
         self, entry_id: str, label: str, *, permission: int | None = None,
     ) -> Callable[[UiHandler], UiHandler]:
@@ -471,6 +480,9 @@ class Bot:
 
     async def _register_commands(self) -> None:
         assert self.client is not None
+        # A connector's commands are declared in its manifest, so it publishes none of its own.
+        if self.connector:
+            return
         try:
             await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
         except RegistrationConflict as err:
@@ -690,6 +702,8 @@ class Bot:
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
+        elif kind == "connector.run":
+            self.background(dispatch_run(self, self._runs, frame), name=f"run-{frame.get('run_id', '?')}")
         elif kind == "voice.participant_joined":
             # Never gated on self.channels - find_member() tracks every voice channel the bot can see.
             self.voice._note_joined(frame["channel_id"], frame["user_id"])

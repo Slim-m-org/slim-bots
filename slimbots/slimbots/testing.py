@@ -121,6 +121,8 @@ class FakeAsyncClient(AsyncClient):
             if method == "PUT":
                 until = int((time.time() + (body or {})["duration_seconds"]) * 1000)
                 return True, {"user_id": path.split("/")[2], "until": until}
+        if method == "POST" and path.startswith("/connectors/me/runs/"):
+            return True, None
         if method == "DELETE" and path.startswith("/channels/") and "/messages/" in path:
             return True, None
         if path.startswith("/channels/") and "/watch-session" in path and method != "GET":

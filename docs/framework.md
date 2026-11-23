@@ -164,6 +164,13 @@ A bot installed from the Dock as a connector (slim-m decision 0090; its manifest
 A setting the host leaves unset falls back to the environment, and a refused read (not a connector token, the connector turned off) is reported at `start()` like a missing setting.
 The values are read once, so a changed setting applies on the next restart.
 
+A connector's manifest may declare `command` and `panel` extension points (and `slash-command`s that run them), which members find where they find any module's.
+The host forwards each run as a `connector.run` frame, and `@bot.manifest_command("servers")` answers it: the handler gets a `Run` (`command`, `input`, `caller.id` and `caller.name`, `channel_id`, and for a scene press `action` and `state`) and returns text, a `scene(width, height, ops, ...)` or `None`.
+Raising `RunError("why")` answers the member with that text as the error, a crash answers a generic error, and a handler still running half a second before the host's deadline (6 seconds) is answered as too slow.
+Each run is answered once with `POST /connectors/me/runs/{run_id}`; an answer the host stopped waiting for is dropped.
+`caller.id` is the module's opaque id for that member, never their account id.
+In connector mode the bot publishes no `PUT /bots/commands` registration, since the manifest declares its commands; prefix commands still work when typed.
+
 ## Where a bot listens, and how it is addressed
 
 `channels=`/`SLIMM_CHANNELS` scopes which channels a bot reads.
