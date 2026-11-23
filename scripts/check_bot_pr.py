@@ -16,6 +16,7 @@ EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+    (r"\bmanifest_command\b|\bSLIMM_CONNECTOR\b|\bBot\([^)]*\bconnector\s*=", "connector mode and manifest_command", (0, 23, 0)),
     (r"(?s)\bpublish_microphone\(.{0,400}?\baudio_queue_ms\s*=", "publish_microphone audio_queue_ms", (0, 21, 0)),
     (r"(?s)\bset_watch_session\(.{0,400}?\bprovider\s*=", "set_watch_session provider", (0, 22, 0)),
     (r"\bordered_events\b", "Bot ordered_events", (0, 21, 0)),

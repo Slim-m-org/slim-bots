@@ -1,6 +1,6 @@
 [project]
 name = "slim-m"
-version = "0.22.0"
+version = "0.23.0"
 description = "A discord.py-shaped bot framework for slim-m: Bot, commands, ctx, a live Space model"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ classifiers = [
     "Framework :: AsyncIO",
 ]
 
-dependencies = ["websockets>=12", "httpx>=0.27"]
+dependencies = ["websockets>=15", "httpx>=0.27"]
 
 [project.urls]
 Homepage = "https://github.com/Slim-m-org/slim-m"

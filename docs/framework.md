@@ -170,6 +170,16 @@ Raising `RunError("why")` answers the member with that text as the error, a cras
 Each run is answered once with `POST /connectors/me/runs/{run_id}`; an answer the host stopped waiting for is dropped.
 `caller.id` is the module's opaque id for that member, never their account id.
 In connector mode the bot publishes no `PUT /bots/commands` registration, since the manifest declares its commands; prefix commands still work when typed.
+An answer is at most 1 MiB, and a bigger one is answered as too large instead of being refused by the host.
+
+The host holds a connector's token to its own route table, so the bot needs the permissions its manifest asked for and the admin approved: reading the channel and member directories at start needs `view_channel`, and a connector that was approved less is refused with a reason that the bot prints.
+The generic bot routes (`/bots/{id}/token`, `/revoke`, `/permissions`) answer 404 for a connector, and a connector's posted output reaches `@everyone` or `@here` only when both the member who ran the command and the connector hold `mention_everyone`.
+The `{{mention:<caller id>}}` token is a WASM module's `message.post` feature; a connector's `caller.id` names no account, so a connector cannot mention a member that way.
+
+A connector the host runs for you (a host-run connector) gets `SLIMM_API_URL`, `SLIMM_URL`, `SLIMM_TOKEN`, `SLIMM_BOT_TOKEN` and `SLIMM_CONNECTOR=1`, and `HTTP_PROXY` and `HTTPS_PROXY` (both cases) pointing at its egress gateway, which is its only route out.
+The server's address is plain http there, so with `SLIMM_CONNECTOR=1` and a proxy set, `base_url_problem` accepts exactly `SLIMM_API_URL` and nothing else.
+REST goes through httpx and the websocket through `websockets` 15 or later, and both honour those variables, so a connector's own outbound calls (httpx, `JsonService`) take the same route and only reach the hosts the admin approved.
+The root filesystem is read-only: keep the cursor and any store on `/data` or `/tmp` (`SLIMM_CURSOR_DB`, `SLIMM_DB_PATH`).
 
 ## Where a bot listens, and how it is addressed
 

@@ -21,6 +21,8 @@ SCENE_TAG = "scene/1"
 # Answers sent a little before the host's deadline, so a slow handler fails visibly instead of silently.
 DEADLINE_MARGIN_SECONDS = 0.5
 DEFAULT_DEADLINE_MS = 6000
+# The host refuses a longer answer with a 400, which the member would read as a failed run with no reason.
+MAX_ANSWER_BYTES = 1024 * 1024
 
 
 class RunError(Exception):
@@ -134,7 +136,7 @@ async def dispatch_run(bot: Bot, routes: RunRoutes, frame: dict[str, Any]) -> No
 
 async def _answer(handler: RunHandler, run: Run, deadline: float) -> dict[str, Any]:
     try:
-        return answer_of(await asyncio.wait_for(handler(run), timeout=deadline))
+        answer = answer_of(await asyncio.wait_for(handler(run), timeout=deadline))
     except RunError as err:
         return {"ok": False, "error": str(err) or "the connector refused this run"}
     except asyncio.TimeoutError:
@@ -142,6 +144,10 @@ async def _answer(handler: RunHandler, run: Run, deadline: float) -> dict[str, A
     except Exception:
         log.exception("manifest command %r failed", run.command)
         return {"ok": False, "error": "the connector failed to answer"}
+    if len(answer["output"].encode()) > MAX_ANSWER_BYTES:
+        log.warning("manifest command %r answered more than %d bytes", run.command, MAX_ANSWER_BYTES)
+        return {"ok": False, "error": "the connector's answer was too large"}
+    return answer
 
 
 async def post_answer(bot: Bot, run_id: str, answer: dict[str, Any]) -> None:

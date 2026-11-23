@@ -931,6 +931,8 @@ class Bot:
                 if is_token_revoked(err):
                     print("token rejected - revoked?", file=sys.stderr)
                     return 1
+                if self.connector and isinstance(err, ApiError) and is_forbidden(err):
+                    print(f"the host refused this connector: {err.reason or err}; check what the Dock approved", file=sys.stderr)
                 failure = err
             wait = backoff.next_wait()
             if failure is not None:

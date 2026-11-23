@@ -141,3 +141,25 @@ def test_plain_input_is_not_mistaken_for_a_press():
     for text in ["", "hello", "{not json", json.dumps({"state": "x"}), json.dumps([1])]:
         run = RunType.from_request({"command": "servers", "input": text})
         assert run.action is None, text
+
+
+async def test_an_answer_past_the_hosts_one_mebibyte_cap_is_a_clear_error_not_a_refused_post():
+    bot = make_bot()
+
+    @bot.manifest_command("servers")
+    async def servers(run: Run):
+        return "x" * (1024 * 1024 + 1)
+
+    await deliver(bot, run_frame())
+    assert answers(bot) == [("/connectors/me/runs/r1", {"ok": False, "error": "the connector's answer was too large"})]
+
+
+async def test_an_answer_of_exactly_one_mebibyte_is_sent():
+    bot = make_bot()
+
+    @bot.manifest_command("servers")
+    async def servers(run: Run):
+        return "x" * (1024 * 1024)
+
+    await deliver(bot, run_frame())
+    assert answers(bot)[0][1]["ok"] is True
