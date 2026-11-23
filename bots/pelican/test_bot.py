@@ -335,6 +335,44 @@ def test_status_message_is_created_then_edited_in_place_without_spam():
     assert len([m for m in client.sent if m["channel_id"] == "status1"]) == 1
 
 
+def run_answer(client, command):
+    """Feeds one connector.run frame for `command` and returns the answer the bot posted for it."""
+    frame = {"type": "connector.run", "run_id": f"run-{command}", "deadline_ms": 6000,
+             "request": {"command": command, "input": "", "caller": {"id": "c" * 64, "name": "Ada"}}}
+
+    async def deliver():
+        await pelican.bot._handle_frame(frame)
+        await asyncio.gather(*list(pelican.bot._background_tasks))
+
+    asyncio.run(deliver())
+    return [c[2] for c in client.calls if c[1] == f"/connectors/me/runs/run-{command}"][-1]
+
+
+def test_the_servers_manifest_command_answers_the_list_as_text():
+    client = setup()
+    answer = run_answer(client, "servers")
+    assert answer["ok"] is True
+    assert "[up] **Minecraft** - running - cpu " in answer["output"]
+    assert "[down] **Minecraft Modded** - offline" in answer["output"]
+
+
+def test_the_panel_draws_a_row_per_server_and_counts_the_running_ones():
+    client = setup()
+    answer = run_answer(client, "server-panel")
+    drawn = json.loads(answer["output"])
+    assert drawn["$slim"] == "scene/1" and drawn["status"] == "2 of 3 running"
+    names = [op["s"] for op in drawn["ops"] if op["op"] == "text" and op["fill"] == "text"]
+    assert names == ["Minecraft", "Minecraft Modded", "Valheim"]
+    assert drawn["refresh_ms"] == 30_000 and drawn["controls"] == ["Refresh"]
+
+
+def test_an_unreachable_panel_is_an_error_the_member_reads():
+    client = setup()
+    core.PELICAN_URL = "http://127.0.0.1:1"
+    answer = run_answer(client, "server-panel")
+    assert answer["ok"] is False and answer["error"].startswith("can't reach the panel")
+
+
 def test_status_interval_has_a_floor():
     assert core.PELICAN_STATUS_INTERVAL >= core.MIN_STATUS_INTERVAL_SECONDS
 

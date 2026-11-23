@@ -8,6 +8,15 @@
   "provider": "connector",
   "addon_api": 7,
   "connector": {"permissions": ["view_channel", "send_messages"]},
+  "permissions": [
+    {"key": "view", "name": "See game servers", "description": "Lists the game servers and their state."}
+  ],
+  "extension_points": [
+    {"kind": "command", "name": "servers", "permission": "view", "description": "Lists game servers with state, CPU and RAM."},
+    {"kind": "slash-command", "name": "servers", "permission": "view", "command": "servers", "description": "List game servers"},
+    {"kind": "command", "name": "server-panel", "permission": "view", "description": "Draws the Game servers panel."},
+    {"kind": "panel", "name": "Game servers", "permission": "view", "command": "server-panel", "description": "Game servers and their state, beside the chat."}
+  ],
   "settings": [
     {"key": "pelican_url", "type": "string", "label": "Panel address", "help": "The panel's https address."},
     {"key": "pelican_api_key", "type": "secret", "label": "API key", "help": "A Client API key (ptlc_...)."},

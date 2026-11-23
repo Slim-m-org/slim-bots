@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""bot-pelican: `!servers`, `!server <name>`, role-gated `!start|!stop|!restart <name>`, and a self-editing status message; see README.md.
-Split per docs/framework.md: this is the entry point and the status loop, pelican_core.py holds the rest."""
+"""bot-pelican: `!servers`, `!server <name>`, role-gated power commands, a status message and, as a connector, `/servers` and a panel.
+See README.md; this is the entry point and the status loop, pelican_core.py and pelican_panel.py hold the rest."""
 
 import asyncio
 import uuid
 
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, Run, RunError
 from slimbots.http import is_not_found, is_token_revoked
 
 import pelican_core as core
+import pelican_panel as panel
 
 STATUS_NAMESPACE = uuid.UUID("70656c69-6361-6e2d-7374-617475732d31")
 LIST_COOLDOWN_SECONDS = 10
@@ -63,6 +64,27 @@ async def servers_cmd(ctx):
         await ctx.reply("the panel has no servers I may show.")
         return
     await ctx.reply("\n".join(core.summary_line(server, stats) for server, stats in rows))
+
+
+async def panel_rows():
+    """Every allowed server with its stats, or a RunError the member reads when the panel cannot answer."""
+    try:
+        return await snapshot(await core.list_servers())
+    except core.PelicanError as err:
+        raise RunError(f"can't reach the panel: {err}") from None
+
+
+@bot.manifest_command("servers")
+async def servers_run(run: Run):
+    rows = await panel_rows()
+    if not rows:
+        return "the panel has no servers I may show."
+    return "\n".join(core.summary_line(server, stats) for server, stats in rows)
+
+
+@bot.manifest_command("server-panel")
+async def server_panel_run(run: Run):
+    return panel.servers_scene(await panel_rows())
 
 
 @bot.command(name="server", help="Show one game server in detail", usage="<name>", cooldown=LIST_COOLDOWN_SECONDS)

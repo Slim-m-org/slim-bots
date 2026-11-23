@@ -58,6 +58,10 @@ Each `PELICAN_*` setting is then read from the Dock (`pelican_url` for `PELICAN_
 `PELICAN_CONTROL_PERMISSION` stays an environment setting.
 Settings are read at start, so restart the bot after changing one.
 
+It also declares a `/servers` command and a Game servers panel, gated on its "See game servers" permission, which an admin gives to roles in the Dock.
+`/servers` answers the same list as `!servers`, and the panel draws one row per server with its state, CPU and RAM, refreshing every 30 seconds while it is open.
+In connector mode the `!` commands are not published to the composer's list, though typing them still works.
+
 ## The status message
 
 The message id is derived from the channel id, so a restart finds and edits the same message instead of posting a new one.
