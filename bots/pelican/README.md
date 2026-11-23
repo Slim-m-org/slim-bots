@@ -57,6 +57,8 @@ SLIMM_URL=https://your.space SLIMM_BOT_TOKEN=slimbot_... SLIMM_CONNECTOR=1 pytho
 Each `PELICAN_*` setting is then read from the Dock (`pelican_url` for `PELICAN_URL`), and the environment only fills what the Dock leaves empty.
 `PELICAN_CONTROL_PERMISSION` stays an environment setting.
 Settings are read at start, so restart the bot after changing one.
+This file is the source of truth for the manifest: the Dock installs a copy published as `modules/pelican/manifest.json` in [slim-addons](https://github.com/Slim-m-org/slim-addons), and its CI fails when the copy drifts.
+After changing `connector.json`, copy it there and bump `version` in both it and slim-addons' `index.json`.
 
 It also declares a `/servers` command and a Game servers panel, gated on its "See game servers" permission, which an admin gives to roles in the Dock.
 `/servers` answers the same list as `!servers`, and the panel draws one row per server with its state, CPU and RAM, refreshing every 30 seconds while it is open.
