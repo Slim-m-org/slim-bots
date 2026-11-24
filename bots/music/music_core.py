@@ -102,19 +102,35 @@ def _is_playlist(answer):
     return any(t in kind for t in PLAYLIST_TYPES) or path.endswith(PLAYLIST_SUFFIXES) or head.startswith(PLAYLIST_HEADS)
 
 
-def stream_service():
-    """The client for a member-supplied stream url: public hosts only, each redirect hop vetted, and the configured Jellyfin host exempt."""
-    allowed = [host_of(JELLYFIN_URL)] if JELLYFIN_URL else []
+def _origin(url):
+    parts = urllib.parse.urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    return parts.scheme, (parts.hostname or "").lower(), port or {"http": 80, "https": 443}.get(parts.scheme)
+
+
+def is_jellyfin_origin(url):
+    """True only when `url` has the configured Jellyfin server's scheme, host and port, so no other port on that host is exempt."""
+    return bool(JELLYFIN_URL) and _origin(url) is not None and _origin(url) == _origin(JELLYFIN_URL)
+
+
+def stream_service(url):
+    """The client for a member-supplied stream url: public hosts only with each redirect hop vetted.
+    A url on the configured Jellyfin origin is exempt from the public-only rule, and its redirects must stay on that origin."""
+    jellyfin = is_jellyfin_origin(url)
     return JsonService(
         "stream", user_agent=USER_AGENT, timeout=STREAM_TIMEOUT_SECONDS, total_timeout=STREAM_DEADLINE_SECONDS,
-        public_only=True, allow_hosts=allowed, cross_origin_redirects=True, transport=TRANSPORT, resolver=RESOLVER,
+        public_only=True, allow_hosts=[host_of(JELLYFIN_URL)] if jellyfin else [], cross_origin_redirects=not jellyfin,
+        transport=TRANSPORT, resolver=RESOLVER,
     )
 
 
 async def open_stream(url):
     """The track for a direct stream url after following and vetting every redirect, so a bad one is refused when it is asked for.
-    A private or unresolvable host, a playlist or a stream that does not answer raises `StreamRefused`; the configured Jellyfin host is exempt."""
-    service = stream_service()
+    A private or unresolvable host, a playlist or a stream that does not answer raises `StreamRefused`; the configured Jellyfin origin is exempt."""
+    service = stream_service(url)
     try:
         answer = await service.peek(url, size=STREAM_PEEK_BYTES)
     except ServiceBlocked as err:

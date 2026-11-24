@@ -45,7 +45,7 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
   There is no YouTube or Spotify playback: that means scraping a third party against its terms, so it is not built here.
 - **Direct URLs to private addresses are refused.**
   ffmpeg runs on the bot host, so `~play http://192.168.x.x/...` would otherwise let a chat member probe the host's network.
-  The configured Jellyfin host is exempt.
+  Only the configured Jellyfin origin (its scheme, host and port) is exempt, and a redirect from it must stay on that origin; any other port on that host is refused.
   The bot opens a direct URL itself, follows every redirect, checks each hop against that rule and connects to the address it checked.
   It hands the bytes to ffmpeg on stdin, and ffmpeg is limited to `pipe` and never given the URL.
   A server that answers ffmpeg differently from the bot, or a name that resolves differently the second time, cannot make it fetch anything.
