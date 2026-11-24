@@ -140,6 +140,17 @@ def test_a_removed_event_forgets_the_tile():
     assert len(rig.client.placed) == 2 and not rig.client.ops
 
 
+def test_clearing_another_canvas_keeps_the_tiles():
+    rig = Rig()
+    rig.tick()
+    asyncio.run(homelab.on_canvas_cleared({"channel_id": "other"}))
+    rig.tick()
+    assert len(rig.client.placed) == 1 and not rig.client.ops
+    asyncio.run(homelab.on_canvas_cleared({"channel_id": "c1"}))
+    rig.tick()
+    assert len(rig.client.placed) == 2
+
+
 def test_containers_and_jellyfin_tiles_sit_side_by_side():
     sock_body = json.dumps([
         {"Names": ["/web"], "State": "running", "Status": "Up 2 hours (unhealthy)"},

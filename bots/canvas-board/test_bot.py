@@ -345,5 +345,15 @@ def test_a_restricted_canvas_is_shown_to_an_administrator_elsewhere():
     assert client.sent[-1]["content"].startswith("drawing on #voice-room:")
 
 
+def test_a_long_board_is_listed_in_messages_under_the_server_cap():
+    client = setup()
+    for slot in range(board.MAX_SLOTS):
+        asyncio.run(board.bot.store.run(board._insert_item, f"o{slot}", slot, "n" * board.MAX_TEXT_LENGTH, slot + 1, None))
+    process(client, message("!board"))
+    replies = [m["content"] for m in client.sent]
+    assert len(replies) > 1 and all(len(r) <= 4000 for r in replies), [len(r) for r in replies]
+    assert "#1:" in replies[0] and f"#{board.MAX_SLOTS}:" in replies[-1]
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

@@ -13,6 +13,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS menu_roles (message_id TEXT NOT NULL REFERENCES menus(message_id) ON DELETE CASCADE, "
         "role_id TEXT NOT NULL, label TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (message_id, role_id))"
     )
+    conn.execute("CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     conn.commit()
 
 

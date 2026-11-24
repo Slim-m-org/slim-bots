@@ -33,7 +33,7 @@ def setup(*, my_permissions=32):  # MANAGE_ROLES
     client.respond("GET", "/me", {"id": "bot-1", "permissions": my_permissions})
     roles.bot.channels = {"c1"}
     client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", None)
-    wire_bot(roles.bot, client, me_id="bot-1")
+    wire_bot(roles.bot, client, me_id="bot-1", db_name="roles.db")
     asyncio.run(roles.bot.space.refresh_members())
     return client
 
@@ -228,13 +228,27 @@ def test_the_listing_is_posted_when_the_old_one_is_gone_and_other_errors_propaga
     client.respond("POST", "/channels/c1/messages", {"id": roles.listing_message_id()})
     asyncio.run(roles.post_listing())
     assert "Self-service roles" in client.sent[-1]["content"]
-    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(500, {"error": "boom"}))
+    client.respond("PATCH", f"/channels/c1/messages/{client.sent[-1]['id']}", ApiError(500, {"error": "boom"}))
     try:
         asyncio.run(roles.post_listing())
     except ApiError as err:
         assert err.status == 500
     else:
         raise AssertionError("a non-404 edit failure must propagate")
+
+
+def test_a_deleted_listing_is_posted_again_under_a_fresh_id_that_a_restart_finds():
+    client = setup()
+    client.respond("PATCH", f"/channels/c1/messages/{roles.listing_message_id()}", ApiError(404, {"error": "not found"}))
+    asyncio.run(roles.post_listing())
+    first_id = client.sent[-1]["id"]
+    client.respond("PATCH", f"/channels/c1/messages/{first_id}", ApiError(404, {"error": "not found"}))
+    asyncio.run(roles.post_listing())
+    second_id = client.sent[-1]["id"]
+    assert len(client.sent) == 2 and second_id not in (first_id, roles.listing_message_id())
+    client.respond("PATCH", f"/channels/c1/messages/{second_id}", None)
+    asyncio.run(roles.post_listing())
+    assert len(client.sent) == 2 and client.calls[-1][1].endswith(second_id)
 
 
 def test_another_bot_is_ignored_by_default():

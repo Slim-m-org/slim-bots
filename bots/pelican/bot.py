@@ -3,9 +3,11 @@
 See README.md; this is the entry point and the status loop, pelican_core.py and pelican_panel.py hold the rest."""
 
 import asyncio
+import os
 import uuid
 
-from slimbots import ApiError, Bot, Run, RunError
+from slimbots import ApiError, Bot, KeyValueTable, Run, RunError
+from slimbots.bot import DEFAULT_CURSOR_DB
 from slimbots.http import is_not_found, is_token_revoked
 
 import pelican_core as core
@@ -15,7 +17,18 @@ STATUS_NAMESPACE = uuid.UUID("70656c69-6361-6e2d-7374-617475732d31")
 LIST_COOLDOWN_SECONDS = 10
 POWER_COOLDOWN_SECONDS = 15
 
-bot = Bot(prefix="!")
+STATE = KeyValueTable("state")
+
+
+def init_db(conn):
+    STATE.create(conn)
+    conn.commit()
+
+
+bot = Bot(
+    prefix="!", default_data_path="pelican.db", store_migrate=init_db,
+    cursor_path=os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB,
+)
 core.configure(bot)
 _last_status_text = None
 
@@ -162,23 +175,36 @@ def status_text(rows):
 
 
 def status_message_id():
-    """Derived from the channel id, so the same message is found again after a restart with nothing persisted."""
+    """The id a status message gets before one is stored, so an existing deployment keeps editing its message."""
     return str(uuid.uuid5(STATUS_NAMESPACE, core.PELICAN_STATUS_CHANNEL))
 
 
+def _status_key():
+    return f"status-message:{core.PELICAN_STATUS_CHANNEL}"
+
+
 async def publish_status(text):
-    """Edits the one status message in place, creating it the first time; unchanged text is not re-sent."""
+    """Edits the one status message in place; when it is gone, posts a new one under a fresh stored id.
+    A deleted message keeps its id on the server, so reposting under that id would replay the tombstone."""
     global _last_status_text
     if text == _last_status_text:
         return
-    message_id = status_message_id()
+    store = await bot.open_store(migrate=init_db)
+    message_id = await store.run(STATE.get, _status_key()) or status_message_id()
     try:
         await bot.client.edit_message(core.PELICAN_STATUS_CHANNEL, message_id, text)
     except ApiError as err:
         if not is_not_found(err):
             raise
+        message_id = str(uuid.uuid4())
+        await store.run(_remember, _status_key(), message_id)
         await bot.client.send(core.PELICAN_STATUS_CHANNEL, text, message_id=message_id)
     _last_status_text = text
+
+
+def _remember(conn, key, value):
+    STATE.set(conn, key, value)
+    conn.commit()
 
 
 @bot.every(lambda: core.PELICAN_STATUS_INTERVAL, name="pelican-status", fatal=(core.PelicanAuthError,), enabled=lambda: bool(core.PELICAN_STATUS_CHANNEL))
