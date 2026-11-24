@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bot as warns  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot  # noqa: E402
 
 MOD = human("u-mod", "mod", "Mod")
 ANN = human("u-ann", "ann", "Ann")
@@ -241,6 +241,50 @@ def test_a_timed_out_member_cannot_be_ranked_without_the_role_table():
     serve_permissions(client, "u-ann", 0)
     say("!warn @ann bad")
     assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def without_role_read_and_peer_bits(client):
+    warns.bot.space.roles_readable = False
+    warns.bot.permissions_readable = True
+    serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS | Permissions.SEND_MESSAGES)
+    serve_permissions(client, "u-ann", Permissions.KICK_MEMBERS)
+
+
+def test_a_peer_timed_out_after_the_bot_connected_is_refused_from_the_timeout_frame():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 timeout 1h")
+    without_role_read_and_peer_bits(client)
+    handle_frame(warns.bot, {"type": "member.timeout", "user_id": "u-ann", "until": 4_000_000_000_000})
+    say("!warn @ann bad")
+    assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_lifted_or_lapsed_timeout_no_longer_blocks_the_rank_check():
+    client = setup()
+    seed_member(client).timed_out_until = 4_000_000_000_000
+    say("!warnrule add 1 timeout 1h")
+    say("!warnrule add 2 timeout 1h")
+    without_role_read_and_peer_bits(client)
+    handle_frame(warns.bot, {"type": "member.timeout", "user_id": "u-ann", "until": None})
+    say("!warn @ann bad")
+    assert calls(client, "PUT", "/members/u-ann/timeout"), "a lifted timeout still refused"
+    seed_member(client).timed_out_until = 1_000
+    serve_permissions(client, "u-ann", Permissions.KICK_MEMBERS)
+    say("!warn @ann again")
+    assert len(calls(client, "PUT", "/members/u-ann/timeout")) == 2, "a lapsed timeout still refused"
+
+
+def test_the_space_owner_cannot_be_warned():
+    client = setup()
+    client.respond("GET", "/users/u-ann", {**ANN, "role_ids": [], "is_owner": True})
+    asyncio.run(warns.bot.space.fetch_member("u-ann"))
+    say("!warnrule add 1 timeout 1h")
+    say("!warn @ann bad", permissions=Permissions.ADMINISTRATOR)
+    assert "owner" in refused_reply(client)
+    assert not calls(client, "PUT", "/members/u-ann/timeout")
+    say("!warns @ann")
+    assert "has no active warns" in client.ephemerals[-1]["content"]
 
 
 def test_the_log_channel_gets_a_line():

@@ -149,12 +149,17 @@ def _held(member):
     return {bit for bit in ALL_BITS if member.has_permission(bit)}
 
 
+def _timed_out(member):
+    until = member.timed_out_until
+    return isinstance(until, int) and until > time.time() * 1000
+
+
 async def _rank_is_known(target):
     """Whether the target's granted permissions are readable; without the role table the route's timeout-reduced bits would understate them."""
     space = bot.space
     if space.roles_readable is not False:
         return True
-    if target.timed_out_until or not bot.permissions_readable:
+    if _timed_out(target) or not bot.permissions_readable:
         return False
     try:
         return await space.refresh_permissions(target)
@@ -183,6 +188,9 @@ async def refusal_for(invoker, target, rule):
 async def warn(ctx, member: Member, reason: str = ""):
     if member.id == ctx.author.id or member.is_bot:
         await ctx.reply_ephemeral("you can warn another person, not yourself or a bot.", public_fallback=True)
+        return
+    if getattr(member, "is_owner", False):
+        await ctx.reply_ephemeral("nobody can warn the space owner.", public_fallback=True)
         return
     reason = escape_mentions(reason.strip()[:MAX_REASON]) or "no reason given"
     store = bot.store
