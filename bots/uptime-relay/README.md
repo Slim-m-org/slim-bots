@@ -27,6 +27,7 @@ The bot needs `VIEW_CHANNEL` and `SEND_MESSAGES` in the one channel `SLIMM_CHANN
 | `UPTIME_RELAY_HOST` | `0.0.0.0` | address the listener binds |
 | `UPTIME_RELAY_PORT` | `8790` | port the listener binds |
 | `UPTIME_RELAY_SILENCE_MINUTES` | `60` | how long Silence holds, at least 1 |
+| `UPTIME_RELAY_OPERATOR_ROLE` | empty | the role, by name or id, whose members may press Acknowledge and Silence; members with Manage Server always may |
 
 ## Pointing a monitor at it
 
@@ -40,7 +41,10 @@ Keep the listener on your LAN or behind your reverse proxy; it is not meant to f
 | Healthchecks.io | Integration "Webhook", `http://<bot host>:8790/hook/healthchecks?token=<secret>`, POST with a JSON body like `{"name": "$NAME", "status": "$STATUS"}` for both down and up |
 | Anything else | POST `http://<bot host>:8790/hook/generic?token=<secret>` with `{"name": "...", "status": "down" or "up", "message": "...", "url": "..."}` |
 
-The listener answers 204 when it took the alert, 401 for a missing or wrong secret, 400 for a body it cannot read, 404 for an unknown path and 413 above 64 KB.
+The listener answers 204 when it posted the alert, 401 for a missing or wrong secret, 400 for a body it cannot read, 404 for an unknown path and 413 above 64 KB.
+It answers 503 when slim-m could not take the post, for example while it restarts.
+The alert is kept in the bot's sqlite file and retried every 30 seconds, so it still posts once slim-m is back, even for a sender like Uptime Kuma that never resends.
+Alerts for one service stay in order, so a recovery never overtakes the outage it ends, and one that still fails after a day is given up.
 
 ## What it posts
 
@@ -49,8 +53,12 @@ The listener answers 204 when it took the alert, 401 for a missing or wrong secr
 - Recovery edits it to `RESOLVED - <service> was down for 25 min.` and clears the buttons.
 - If someone deleted the message, or the channel's retention removed it, the next down alert posts a fresh one, and a recovery posts the resolved line as a new message.
 - An at-sign in a service name or a monitor message is escaped, so a webhook cannot ping anyone.
+- Only an operator may press Acknowledge or Silence: a member with Manage Server, or with the role `UPTIME_RELAY_OPERATOR_ROLE` names.
+  Anyone else is told so privately, and nothing changes.
 - Acknowledge records the display name of whoever pressed it on the message and drops its own button.
 - Silence holds new posts for that service for `UPTIME_RELAY_SILENCE_MINUTES`, and says who silenced it until when.
   An alert that is already open keeps updating while silenced, so the channel never shows a stale state.
 - A service is identified by its source and name, so a Kuma monitor and a Grafana alert with the same name stay separate.
+- A Grafana alert is identified by its fingerprint, so each instance of one rule is its own alert and recovers on its own.
+  Its name carries the first of the `instance`, `host`, `hostname`, `pod`, `job` or `service` labels it has, as in `HostDown on 10.0.0.5:9100`.
 - Webhooks are handled one at a time, so two arriving together for one service count as a repeat rather than two posts.
