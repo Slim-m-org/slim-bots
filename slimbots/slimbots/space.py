@@ -108,16 +108,22 @@ class Space:
                 return None
             raise
 
-    async def get_member(self, id_or_name: str) -> Member | None:
-        """A cached member by id or by username/display name (case-insensitive)."""
+    async def get_member(self, id_or_name: str, *, usernames_only: bool = False) -> Member | None:
+        """A cached member by exact id, else by username, else by a display name only one member has (names case-insensitive)."""
         member = self.members.get(id_or_name)
         if member:
             return member
         needle = id_or_name.lower()
-        for member in self.members.values():
-            if member.username.lower() == needle or member.display_name.lower() == needle:
-                return member
-        return None
+        by_username = next((m for m in self.members.values() if m.username.lower() == needle), None)
+        if by_username is not None or usernames_only:
+            return by_username
+        named = self.members_named(id_or_name)
+        return named[0] if len(named) == 1 else None
+
+    def members_named(self, display_name: str) -> list[Member]:
+        """Every cached member whose display name is `display_name` (case-insensitive); more than one means ask for the username."""
+        needle = display_name.lower()
+        return [m for m in self.members.values() if m.display_name.lower() == needle]
 
     def channel_label(self, channel_id: str | None, fallback: str | None = None) -> str:
         """`#name` for a channel the space knows, else `fallback`, else the id itself."""
@@ -176,7 +182,7 @@ class Space:
 
     async def resolve_member(self, storage_key: str) -> Member:
         """The reverse of `Member.storage_key`: a live `Member` for a stored id."""
-        member = await self.get_member(storage_key)
+        member = self.members.get(storage_key)
         if member:
             return member
         return await self.fetch_member(storage_key)
