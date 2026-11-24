@@ -59,6 +59,18 @@ jobs:
         working-directory: slimbots
         run: pyright
 
+  python-floor:
+    # slimbots declares requires-python >=3.11, so every bot must at least parse there; the other jobs run 3.12.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+      - name: Compile slimbots, every bot and the scripts under Python 3.11
+        run: python -m compileall -q bots slimbots scripts
+
   bot-templates:
     runs-on: ubuntu-latest
     timeout-minutes: 15

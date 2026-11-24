@@ -83,7 +83,7 @@ def format_until(until_ms):
     remaining = until_s - time.time()
     if remaining <= 0:
         return f"until {when} (already past)"
-    return f"until {when} ({format_duration(remaining, "compact")} from now)"
+    return f"until {when} ({format_duration(remaining, 'compact')} from now)"
 
 
 def record_event(conn, kind, text):
@@ -214,7 +214,7 @@ async def check_moderation_cursor():
 
 def gap_notice_text(count, downtime):
     total = "" if count == 1 else " in total"
-    return f"Mod log was offline for about {format_duration(downtime, "compact")}{total}; events in that time were not recorded."
+    return f"Mod log was offline for about {format_duration(downtime, 'compact')}{total}; events in that time were not recorded."
 
 
 async def report_reconnect_gap():
@@ -358,7 +358,7 @@ async def show_gaps(ctx):
     lines = [f"last {len(rows)} known gap(s), most recent first:"] if rows else []
     for reconnected_at, downtime in rows:
         when = datetime.fromtimestamp(reconnected_at, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        lines.append(f"- reconnected {when} after ~{format_duration(downtime, "compact")} offline")
+        lines.append(f"- reconnected {when} after ~{format_duration(downtime, 'compact')} offline")
     if plain_gaps:
         lines.append(f"the moderation cursor was ahead of this log {plain_gaps} time(s) on an unchanged server build, so events were missed then.")
     if restart_gaps:
