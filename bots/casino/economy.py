@@ -20,7 +20,7 @@ def _txn_daily(conn, request_id, user_id):
     remaining = casino_core.DAILY_COOLDOWN_SECONDS - (now - last_daily)
     if remaining > 0:
         conn.execute("ROLLBACK")
-        return {"error": f"already claimed - try again in {format_duration(remaining, "spaced")}"}
+        return {"error": f"already claimed - try again in {format_duration(remaining, 'spaced')}"}
     conn.execute(
         "UPDATE accounts SET balance = balance + ?, last_daily = ? WHERE user_id = ?",
         (casino_core.DAILY_AMOUNT, now, user_id),

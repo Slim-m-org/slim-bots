@@ -147,7 +147,7 @@ async def feed_add(ctx, url: str, keywords: str = ""):
     feed = await bot.store.run(db.get_feed, feed_id)
     problem = await finish_add(feed, result)
     tail = f" Posting the latest item failed ({problem}); it retries on the next poll." if problem else ""
-    await ctx.reply(f"following **{escape_mentions(name)}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, "interval")}. Only the latest item is posted now, then new ones as they appear.{tail}")
+    await ctx.reply(f"following **{escape_mentions(name)}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, 'interval')}. Only the latest item is posted now, then new ones as they appear.{tail}")
 
 
 async def finish_add(feed, result):
@@ -161,7 +161,7 @@ async def finish_add(feed, result):
 
 
 def describe(feed):
-    bits = [f"`{feed['id']}` {escape_mentions(feed['name'])}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], "interval")}"]
+    bits = [f"`{feed['id']}` {escape_mentions(feed['name'])}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], 'interval')}"]
     if feed["keywords"]:
         bits.append(f"filter: {feed['keywords']}")
     if feed["failures"] >= db.FAILING_AFTER:
@@ -207,12 +207,12 @@ async def feed_filter(ctx, feed_id: int, keywords: str):
 async def feed_interval(ctx, feed_id: int, duration: Duration):
     seconds = int(duration)
     if not MIN_INTERVAL <= seconds <= MAX_INTERVAL:
-        await ctx.reply(f"pick between {format_duration(MIN_INTERVAL, "interval")} and {format_duration(MAX_INTERVAL, "interval")}.")
+        await ctx.reply(f"pick between {format_duration(MIN_INTERVAL, 'interval')} and {format_duration(MAX_INTERVAL, 'interval')}.")
         return
     if not await bot.store.run(db.set_field, feed_id, "interval", seconds):
         await ctx.reply(f"no feed `{feed_id}`.")
         return
-    await ctx.reply(f"feed `{feed_id}` is checked every {format_duration(seconds, "interval")}.")
+    await ctx.reply(f"feed `{feed_id}` is checked every {format_duration(seconds, 'interval')}.")
 
 
 if __name__ == "__main__":

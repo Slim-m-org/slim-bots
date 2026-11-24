@@ -200,7 +200,7 @@ def delivery_id(reminder_id, due_at):
 
 def format_recurrence(recur_kind, interval_seconds, weekday, hour, minute):
     if recur_kind == "interval":
-        return f" (every {format_duration(interval_seconds, "exact")})"
+        return f" (every {format_duration(interval_seconds, 'exact')})"
     if recur_kind == "weekly":
         name = [k for k, v in recurrence.WEEKDAY_NAMES.items() if v == weekday][0]
         return f" (every {name} at {hour:02d}:{minute:02d})"
