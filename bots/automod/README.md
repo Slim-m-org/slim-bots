@@ -29,7 +29,8 @@ Every rule is off by default.
 - **flood**: `AUTOMOD_FLOOD_MESSAGES` (0 = off), `AUTOMOD_FLOOD_SECONDS` (default 10), `AUTOMOD_FLOOD_TIMEOUT` (default 300 seconds).
   More than N messages in M seconds deletes the message that tripped it and times the member out.
 - **mention spam**: `AUTOMOD_MENTION_LIMIT` (0 = off), `AUTOMOD_MENTION_TIMEOUT` (default 300).
-  More than N `@name` tokens in one message deletes it and times the member out.
+  More than N mentions in one message deletes it and times the member out.
+  Mentions are counted the way the server reads them: every unescaped `@name`, even glued together like `@ann@bob`, and every `@[Role]`; code blocks and inline code are skipped.
 - **links**: `AUTOMOD_LINK_POLICY` is `off` (default), `deny` (block listed domains) or `allow` (block every domain not listed), with `AUTOMOD_LINK_DOMAINS` as a comma-separated list.
   A link is found the way the app finds one, so `[x](https://host)`, `a,https://host` and `https://host.` count; an invisible character in a link or a listed word is ignored.
   A listed domain also covers its subdomains.
@@ -41,6 +42,8 @@ Every rule is off by default.
 
 `AUTOMOD_LOG_CHANNEL` is a `category/channel` path or a bare channel name.
 With it unset, nothing is logged beyond the bot's own local counts.
+
+An edited message is checked again against every rule except flood, so posting clean text and editing it afterwards does not get past a rule.
 
 Commands: `!automod rules` (what is on), `!automod stats` (how often each rule fired), `!automod lift @member` (needs Kick Members).
 
@@ -55,8 +58,7 @@ Anyone holding `MANAGE_MESSAGES` is exempt from every rule, as are other bots.
 
 - **Remember across a restart.** Flood counters live in memory, so a restart forgives everyone.
   New-member status comes from the server's join time and survives restarts.
-- **Catch what it was offline for.** It acts on live `message.created` frames only.
+- **Catch what it was offline for.** It acts on live `message.created` and `message.edited` frames only.
   A message posted while it was disconnected is never checked; slim-m does not yet give moderation events a `seq` to catch up from.
-- **Edit-evasion.** An edited message is not rechecked.
 - **Look at attachments or embeds**, only the message text.
 - **Ban or kick.** The strongest action is a timeout, which a human can lift.
