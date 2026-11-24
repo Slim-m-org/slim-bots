@@ -87,7 +87,7 @@ def test_missing_base_rights_are_named():
 
 def test_a_channel_setting_that_blocks_the_canvas_is_explained():
     rig = rig_with(FakePlanner())
-    rig.client.viewport_error = ApiError(403, "forbidden")
+    rig.client.respond("GET", "/channels/c-voice/permissions", {"permissions": 0})
     assert "a setting on that channel" in rig.say("!draw a cat")
 
 

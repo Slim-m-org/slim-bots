@@ -624,11 +624,14 @@ async def draw_undo(ctx):
     await ctx.reply_ephemeral(f"removed your drawing of \"{defuse(row[1])}\".", public_fallback=True)
 
 
-@draw.command(name="clear", help="Remove every drawing this bot made in your call", requires=Permissions.MANAGE_CANVAS, requires_message="only someone with Manage Canvas can clear the drawings.")
+@draw.command(name="clear", help="Remove every drawing this bot made in your call")
 async def draw_clear(ctx):
     found = await where.find_call(ctx)
     if isinstance(found, str):
         await ctx.reply_ephemeral(found, public_fallback=True)
+        return
+    if not await ctx.author_can(Permissions.MANAGE_CANVAS, found[0]):
+        await ctx.reply_ephemeral(f"only someone with Manage Canvas in {found[1]} can clear the drawings.", public_fallback=True)
         return
     if found[0] in busy:
         await ctx.reply_ephemeral(STILL_DRAWING, public_fallback=True)

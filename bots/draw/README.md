@@ -19,6 +19,8 @@ python3 bot.py
 
 The bot acts where you are: it finds the voice call you are in and draws on that call's canvas, wherever you typed the command (a voice call's own chat works).
 It needs `VIEW_CHANNEL` and `USE_CANVAS` there, and says exactly which one is missing when it lacks one.
+It also draws only for someone who may draw on that canvas themselves: a member without `USE_CANVAS` in the call (a spectator, by role or by a channel setting) is told so, and `!draw clear` needs Manage Canvas in that call.
+These checks need slim-m with the channel-scoped member permissions read; an older server only checks deployment-wide rights.
 If you are in no call it asks you to join one.
 
 ## Commands
