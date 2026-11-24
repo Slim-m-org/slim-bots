@@ -253,7 +253,7 @@ async def test_a_call_control_reaches_a_channel_scoped_bot_without_listening_to_
     assert heard == ["voice-1"]
 
 
-async def test_a_message_menu_use_in_an_unscoped_channel_is_still_dropped(monkeypatch):
+async def test_a_message_menu_use_outside_the_bots_channels_is_still_dispatched(monkeypatch):
     monkeypatch.delenv("SLIMM_LISTEN_VOICE_CHATS", raising=False)
     bot = make_bot()
     bot.channels = {"text"}
@@ -264,7 +264,7 @@ async def test_a_message_menu_use_in_an_unscoped_channel_is_still_dropped(monkey
         heard.append(interaction.channel_id)
 
     await deliver(bot, frame("message_menu", "translate", channel_id="elsewhere"))
-    assert heard == []
+    assert heard == ["elsewhere"]
 
 
 async def test_updating_a_call_control_resends_the_whole_set_and_skips_an_unchanged_one():
