@@ -29,6 +29,7 @@ Each server is a 2-player, competitive-rules, short match (`CS2_RULES`) with a r
 
 The bot reads the player count with the A2S query over UDP; bots on the server do not count as players.
 It does not read match results, so "match over" means "everyone left".
+If Docker refuses a stop, the bot says so once and keeps retrying quietly, backing off up to every 10 minutes.
 
 ## First start
 
@@ -61,7 +62,7 @@ The bot always creates the same shape: the pinned image, one UDP port, one named
 | `CS2_MAX_MATCH_MINUTES` | `90` | |
 | `CS2_START_TIMEOUT_MINUTES` | `240` | covers the first download |
 | `CS2_MAPS` | `de_dust2,de_mirage,de_inferno,de_nuke` | stock map names, or `workshop:<id>` for a workshop map (aim and 1v1 maps) |
-| `CS2_CHANNEL` | any | the one channel `!1v1` works in |
+| `CS2_CHANNEL` | any | the one channel `!1v1` and all its subcommands work in |
 | `CS2_PRIVATE` | `false` | keep the password out of the channel: the ready post only pings the starter, and only the starter sees the connect line, privately, from `!1v1 status` |
 | `CS2_IMAGE` | pinned `joedwards32/cs2@sha256:...` | the server image |
 | `CS2_VOLUME` | `cs2-server` | the shared install volume |
