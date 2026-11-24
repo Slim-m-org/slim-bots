@@ -24,7 +24,7 @@ import store_db
 import tracer
 import where
 from slimbots import ApiError, BatchUnavailable, Bot, Permissions
-from slimbots.http import is_rate_limited
+from slimbots.http import ResponseTooLarge, is_not_found, is_rate_limited
 from store_db import SLOTS, add_stroke, add_strokes, latest_live, live_drawings, new_drawing, retire, stroke_ids, take_ai_call
 
 REMOVE_BATCH = 64  # the server's most object ids in one remove op
@@ -35,6 +35,7 @@ STROKE_WIDTH = 3.0
 MAX_QUERY = 60
 MAX_PROMPT = 200
 TILE_BYTES = 2 * 1024 * 1024
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 TILE_SECONDS = 10
 ATTEMPTS = 3
 PICTURE_TRIES = 8
@@ -81,6 +82,7 @@ last_draw = {}
 batch_state = {"available": None}
 # Channels with a drawing in progress: one at a time per canvas.
 busy = set()
+STILL_DRAWING = "I am still drawing in this call; try again in a moment."
 
 
 def corner(slot):
@@ -193,10 +195,29 @@ async def remove_batch(canvas, ids, gate):
                 await asyncio.sleep(RATE_BACKOFF * (attempt + 1))
 
 
+async def remove_each(canvas, ids, gate):
+    """Removes `ids` one op at a time, skipping the ones the server no longer has."""
+    for object_id in ids:
+        try:
+            await remove_batch(canvas, [object_id], gate)
+        except ApiError as err:
+            if not is_not_found(err):
+                raise
+
+
+async def remove_chunk(canvas, ids, gate):
+    try:
+        await remove_batch(canvas, ids, gate)
+    except ApiError as err:
+        if not is_not_found(err):
+            raise
+        await remove_each(canvas, ids, gate)
+
+
 async def remove_strokes(canvas, object_ids):
-    """Removes the ids in ops of REMOVE_BATCH, a few at a time, backing off when the server says slow down."""
+    """Removes the ids in ops of REMOVE_BATCH, a few at a time, backing off when the server says slow down; ids already gone are skipped."""
     gate = asyncio.Semaphore(REMOVE_PARALLEL)
-    await asyncio.gather(*(remove_batch(canvas, object_ids[start : start + REMOVE_BATCH], gate) for start in range(0, len(object_ids), REMOVE_BATCH)))
+    await asyncio.gather(*(remove_chunk(canvas, object_ids[start : start + REMOVE_BATCH], gate) for start in range(0, len(object_ids), REMOVE_BATCH)))
 
 
 def defuse(text):
@@ -458,7 +479,9 @@ async def dots_source(ctx, subject, log):
         if str(attached.get("content_type") or "").startswith("image/"):
             try:
                 with log.stage("download"):
-                    data = await bot.client.download(f"/attachments/{attached['id']}", max_bytes=sources.MAX_PICTURE_BYTES)
+                    data = await bot.client.download(f"/attachments/{attached['id']}", max_bytes=MAX_ATTACHMENT_BYTES)
+            except ResponseTooLarge:
+                return f"that image is over the {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB limit; attach a smaller one."
             except ApiError:
                 return "I could not read the image you attached."
             log.source = "attachment"
@@ -589,6 +612,9 @@ async def draw_undo(ctx):
     if isinstance(found, str):
         await ctx.reply_ephemeral(found, public_fallback=True)
         return
+    if found[0] in busy:
+        await ctx.reply_ephemeral(STILL_DRAWING, public_fallback=True)
+        return
     row = await bot.store.run(latest_live, ctx.author.id, found[0])
     if row is None:
         await ctx.reply_ephemeral(f"you have no drawing to undo in {found[1]}.", public_fallback=True)
@@ -604,12 +630,22 @@ async def draw_clear(ctx):
     if isinstance(found, str):
         await ctx.reply_ephemeral(found, public_fallback=True)
         return
+    if found[0] in busy:
+        await ctx.reply_ephemeral(STILL_DRAWING, public_fallback=True)
+        return
     canvas = bot.canvas(found[0])
     drawings = await bot.store.run(live_drawings, found[0])
+    failed = 0
     for drawing_id in drawings:
-        await remove_strokes(canvas, await bot.store.run(stroke_ids, drawing_id))
+        try:
+            await remove_strokes(canvas, await bot.store.run(stroke_ids, drawing_id))
+        except ApiError:
+            failed += 1
+            continue
         await bot.store.run(retire, drawing_id)
-    await ctx.reply_ephemeral(f"removed {len(drawings)} drawing{'s' if len(drawings) != 1 else ''}.", public_fallback=True)
+    removed = len(drawings) - failed
+    note = f" {failed} could not be removed; run clear again." if failed else ""
+    await ctx.reply_ephemeral(f"removed {removed} drawing{'s' if removed != 1 else ''}.{note}", public_fallback=True)
 
 
 if __name__ == "__main__":

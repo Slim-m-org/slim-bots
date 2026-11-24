@@ -10,7 +10,7 @@ CELL = 50  # canvas units per occupancy cell
 MIN_FREE = (400, 300)
 MAX_FREE = (1000, 800)
 PAGE = 500
-PAGES = 2
+PAGES = 8
 MAX_TILE_FETCHES = 12
 PEN = {"annotation": (214, 94, 94), "amber": (214, 160, 40), "green": (70, 160, 90), "blue": (70, 120, 210), "purple": (140, 100, 200), "pink": (210, 100, 160)}
 PAPER = (250, 250, 247)
@@ -34,14 +34,15 @@ def _require_pillow():
 
 
 async def read_objects(canvas, window):
-    """The live objects intersecting `window`, newest pages first up to PAGES reads."""
-    found = []
+    """Every live object intersecting `window`, paged oldest first from cursor_seq 0; ScreenshotError when it takes more than PAGES pages."""
+    found, cursor = [], 0
     for _ in range(PAGES):
-        page = await canvas.viewport(min_x=window.x, min_y=window.y, max_x=window.x + window.w, max_y=window.y + window.h, limit=PAGE)
+        page = await canvas.viewport(min_x=window.x, min_y=window.y, max_x=window.x + window.w, max_y=window.y + window.h, limit=PAGE, cursor_seq=cursor)
         found.extend(page.get("objects", []))
-        if not page.get("has_more"):
-            break
-    return found
+        cursor = page.get("next_cursor")
+        if not page.get("has_more") or cursor is None:
+            return found
+    raise ScreenshotError("that part of the canvas is too crowded for me to see all of it; clear some room and ask again")
 
 
 def occupancy(objects, window):
