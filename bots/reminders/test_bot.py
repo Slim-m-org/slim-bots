@@ -348,6 +348,51 @@ def test_due_checker_keeps_a_reminder_that_was_rate_limited():
     assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["busy"]
 
 
+def test_a_reminder_due_during_a_proxys_bodiless_404_is_delivered_after_recovery():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "r", "c1", "u1", "m0", int(time.time()) - 1, "later")
+    client.respond("POST", "/channels/c1/messages", ApiError(404, "404 page not found"))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None
+    assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["r"], "a proxy's 404 closed the reminder"
+
+
+def test_a_reminder_due_during_a_bodiless_502_is_kept():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "r", "c1", "u1", "m0", int(time.time()) - 1, "later")
+    client.respond("POST", "/channels/c1/messages", ApiError(502, "bad gateway"))
+    run_due_checker_briefly()
+    assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["r"]
+
+
+def test_a_network_failure_leaves_the_rest_of_the_due_reminders_to_be_delivered():
+    client = setup()
+    conn = reminders.bot.store.connection
+    reminders.add_reminder(conn, "a", "c-down", "u1", "m0", int(time.time()) - 2, "first")
+    reminders.add_reminder(conn, "b", "c1", "u1", "m0", int(time.time()) - 1, "second")
+    client.respond("POST", "/channels/c-down/messages", ApiError(None, "connection refused"))
+    died = run_due_checker_briefly()
+    assert not died and reminders.bot._fatal_error is None
+    assert any("second" in s["content"] for s in client.sent), "one network failure stopped the pass"
+    assert [row[0] for row in reminders.due_reminders(conn, int(time.time()))] == ["a"]
+
+
+def test_a_refused_recurring_reminder_skips_that_firing_and_stays_open():
+    client = setup()
+    conn = reminders.bot.store.connection
+    due = int(time.time()) - 5
+    reminders.add_reminder(
+        conn, "iv", "c1", "u1", "m0", due, "standup", recur={"kind": "interval", "interval_seconds": 3600},
+    )
+    client.respond("POST", "/channels/c1/messages", ApiError(403, {"error": "missing permission"}))
+    run_due_checker_briefly()
+    row = conn.execute("SELECT sent, due_at FROM reminders WHERE id = 'iv'").fetchone()
+    assert row[0] == 0, "a refusal closed the recurring row for good"
+    assert row[1] > int(time.time()), "the refused firing was not skipped"
+
+
 def test_due_checker_still_stops_on_a_revoked_token():
     client = setup()
     conn = reminders.bot.store.connection

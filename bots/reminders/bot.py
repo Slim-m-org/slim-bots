@@ -385,6 +385,12 @@ async def deliver_reminder(row):
         channel_id, f"reminder: {render_reminder_text(text)}", message_id=delivery_id(reminder_id, due_at),
         reply_to_id=request_message_id, **style.send_kwargs(embed, f"reminder: {render_reminder_text(text)}"),
     )
+    await finish_firing(row)
+
+
+async def finish_firing(row):
+    """Closes a one-off reminder, or moves a recurring one on to its next firing."""
+    (reminder_id, _channel, _request, _text, due_at, recur_kind, interval_seconds, weekday, hour, minute, tz_name) = row
     now = int(time.time())
     if recur_kind == "interval":
         await bot.store.run(reschedule, reminder_id, recurrence.next_interval(due_at, interval_seconds, now))
@@ -395,17 +401,17 @@ async def deliver_reminder(row):
 
 
 async def park_undeliverable(row, err):
-    """A refusal (a gone channel, lost permission, content the server rejects) never heals on a retry every few seconds, so the row is closed; a 429, a 5xx or a network error retries."""
-    reminder_id = row[0]
-    print(f"reminder {reminder_id} not delivered: {type(err).__name__}: {err}", file=sys.stderr)
+    """A refusal never heals on a retry every few seconds, so a one-off row is closed and a recurring one skips just this firing; a 429, a 5xx, a network error or a proxy's bodiless 4xx retries."""
+    print(f"reminder {row[0]} not delivered: {type(err).__name__}: {err}", file=sys.stderr)
     if is_refusal(err):
-        await bot.store.run(mark_sent, reminder_id)
+        await finish_firing(row)
 
 
 def is_refusal(err):
+    """A 4xx counts only with the server's own `{"error"}` body; a proxy's plain 404 during a restart says nothing about the reminder."""
     if not isinstance(err, ApiError) or is_rate_limited(err) or is_token_revoked(err):
         return False
-    return 400 <= err.status < 500
+    return err.status is not None and 400 <= err.status < 500 and err.reason is not None
 
 
 @bot.every(lambda: DUE_CHECK_SECONDS, name="reminders-due-checker", delay_first=True, on="ready")
