@@ -33,10 +33,9 @@ async def _refuse_if_busy(ctx, voice_channel_id):
     return True
 
 
-async def _find_item(ctx, query):
-    """The item to play for `query`; None after a reply or once a button chooser has taken over."""
+async def _find_item(ctx, query, user_id):
+    """The item to play for `query`, searched as `user_id`; None after a reply or once a button chooser has taken over."""
     if not query.strip():
-        user_id = await accounts.user_for(ctx.bot, ctx.author.id)
         last = await playback_progress.fetch_last_watched(user_id)
         if last is None:
             await answers.tell(ctx, f"nothing to resume - `{ctx.bot.prefix}watch <title>` to pick something.")
@@ -46,7 +45,7 @@ async def _find_item(ctx, query):
     except ValidationError as err:
         await answers.tell(ctx, str(err))
         return None
-    results = await jellyfin_core.watch_search(query, jellyfin_core.MAX_SEARCH_RESULTS)
+    results = await jellyfin_core.watch_search(query, jellyfin_core.MAX_SEARCH_RESULTS, user_id)
     if not results:
         await answers.tell(ctx, f'nothing playable found for "{query}".')
         return None
@@ -136,7 +135,12 @@ async def run_watch(ctx, query):
     if await _refuse_if_busy(ctx, voice_channel_id):
         return
     try:
-        item = await _find_item(ctx, query)
+        user_id = await accounts.user_for(ctx.bot, ctx.author.id)
+        if user_id is None:
+            p = ctx.bot.prefix
+            await answers.tell(ctx, f"`{p}watch` needs your own jellyfin account here - `{p}jellyfin link` links it.")
+            return
+        item = await _find_item(ctx, query, user_id)
     except jellyfin_core.JellyfinAuthError:
         await answers.tell(ctx, "jellyfin is unavailable right now.")
         return

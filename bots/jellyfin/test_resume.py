@@ -98,7 +98,7 @@ def test_watch_offers_resume_from_jellyfins_own_position_and_starts_there():
         return with_position(movie_for_watch(), 600)
 
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         started = run_watch_pressing("!watch inception", "jfp:resume")
@@ -111,7 +111,7 @@ def test_watch_offers_resume_from_jellyfins_own_position_and_starts_there():
 def test_watch_start_over_ignores_the_saved_position():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: with_position(movie_for_watch(), 600))),
     ):
         started = run_watch_pressing("!watch inception", "jfp:restart")
@@ -122,7 +122,7 @@ def test_watch_start_over_ignores_the_saved_position():
 def test_watch_without_an_answer_starts_nothing():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: with_position(movie_for_watch(), 600))),
     ):
         started = run_watch_pressing("!watch inception")
@@ -156,7 +156,7 @@ def test_watch_with_no_title_and_nothing_to_resume_says_so():
 def test_an_item_with_no_saved_position_starts_without_a_prompt():
     client = voice_client()
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
     ):
         started = run_watch_pressing("!watch inception")
@@ -200,21 +200,6 @@ def test_report_position_posts_ticks_and_the_finished_flag():
     assert posted[0][0] == "/UserItems/abc/UserData" and posted[0][1] == {"userId": "jf-user"}
     assert posted[0][2]["PlaybackPositionTicks"] == 125_000_000 and "Played" not in posted[0][2]
     assert posted[1][2]["PlaybackPositionTicks"] == 0 and posted[1][2]["Played"] is True
-
-
-def test_the_first_enabled_user_is_used_when_none_is_configured():
-    calls = []
-
-    async def users(path, params=None):
-        calls.append(path)
-        return [{"Id": "off", "Policy": {"IsDisabled": True}}, {"Id": "on", "Policy": {}}]
-
-    with Patched(
-        (jellyfin_core, "jf_get", users), (playback_progress, "JELLYFIN_USER_ID", ""), (playback_progress, "_resolved_user_id", None),
-    ):
-        assert asyncio.run(playback_progress.resolve_user_id()) == "on"
-        assert asyncio.run(playback_progress.resolve_user_id()) == "on"
-    assert calls == ["/Users"]
 
 
 if __name__ == "__main__":

@@ -73,5 +73,57 @@ def test_the_cursor_still_reaches_the_newest_item_once_every_post_landed():
     assert core.get_cursor(feed.conn) == "2024-01-05T00:00:00Z"
 
 
+def test_a_post_slim_m_refuses_for_good_is_skipped_and_the_rest_still_go_out():
+    d.with_settings()
+    feed = d.Feed()
+    feed.items = [
+        d.movie("m1", created="2024-01-01T00:00:00Z"),
+        d.movie("m2", created="2024-01-05T00:00:00Z", name="Heat", year=1995),
+    ]
+    refusals = []
+
+    async def send_post(entry):
+        if entry["item_ids"] == ["m1"]:
+            refusals.append(entry["item_ids"])
+            raise ApiError(403, {"error": "missing_permission"})
+        feed.sent.append(entry["item_ids"])
+
+    saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
+    core.items_since = asynced(lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor])
+    jellyfin.send_post = send_post
+    jellyfin.bot.store = d.FakeStore(feed.conn)
+    try:
+        asyncio.run(jellyfin.poll_once())
+        asyncio.run(jellyfin.poll_once())
+    finally:
+        core.items_since, jellyfin.send_post, jellyfin.bot.store = saved
+    assert feed.sent == [["m2"]] and refusals == [["m1"]]
+    assert core.get_cursor(feed.conn) == "2024-01-05T00:00:00Z"
+
+
+def test_a_refusal_without_slim_ms_error_body_is_retried_next_cycle():
+    d.with_settings()
+    feed = d.Feed()
+    feed.items = [d.movie("m1", created="2024-01-01T00:00:00Z")]
+    state = {"failing": True}
+
+    async def send_post(entry):
+        if state["failing"]:
+            raise ApiError(404, "404 page not found")
+        feed.sent.append(entry["item_ids"])
+
+    saved = (core.items_since, jellyfin.send_post, jellyfin.bot.store)
+    core.items_since = asynced(lambda cursor: [i for i in feed.items if i["DateCreated"] >= cursor])
+    jellyfin.send_post = send_post
+    jellyfin.bot.store = d.FakeStore(feed.conn)
+    try:
+        asyncio.run(jellyfin.poll_once())
+        state["failing"] = False
+        asyncio.run(jellyfin.poll_once())
+    finally:
+        core.items_since, jellyfin.send_post, jellyfin.bot.store = saved
+    assert feed.sent == [["m1"]]
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

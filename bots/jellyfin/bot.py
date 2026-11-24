@@ -2,6 +2,7 @@
 """bot-jellyfin: posts new Jellyfin library items, and answers `!jellyfin search|recent|help`; see README.md.
 Split per docs/framework.md: this is the entry point and the poll loop, jellyfin_core.py holds the rest."""
 
+import asyncio
 import sys
 
 from slimbots import ApiError, Bot, style
@@ -61,6 +62,11 @@ async def bootstrap():
     await bot.store.run(jellyfin_core.apply_bootstrap, plan)
 
 
+def refused_for_good(err):
+    """slim-m's own JSON refusal of a post, such as a channel the bot cannot post in: sending it again fails the same way."""
+    return err.status is not None and 400 <= err.status < 500 and err.status not in (408, 429) and err.reason is not None
+
+
 @bot.every(lambda: jellyfin_core.JELLYFIN_POLL_SECONDS, name="jellyfin-poll", fatal=(jellyfin_core.JellyfinAuthError,), before=bootstrap)
 async def poll_once():
     cursor = await bot.store.run(jellyfin_core.get_cursor) or ""
@@ -82,12 +88,21 @@ async def poll_once():
         except ApiError as err:
             if is_token_revoked(err):
                 raise
-            print(f"send failed, will retry next cycle: {err}", file=sys.stderr)
-            break
-        await bot.store.run(jellyfin_core.mark_posted, entry["item_ids"], items=[by_id[i] for i in entry["item_ids"] if i in by_id])
+            if not refused_for_good(err):
+                print(f"send failed, will retry next cycle: {err}", file=sys.stderr)
+                break
+            print(f"slim-m refused the post {entry['title']!r}, skipping it: {err}", file=sys.stderr)
+            await bot.store.run(jellyfin_core.mark_posted, entry["item_ids"], quiet=True)
+        else:
+            await bot.store.run(jellyfin_core.mark_posted, entry["item_ids"], items=[by_id[i] for i in entry["item_ids"] if i in by_id])
         still_unsent = [by_id[i] for later in posts[index + 1:] for i in later["item_ids"] if i in by_id]
         await bot.store.run(jellyfin_core.advance_cursor, jellyfin_core.cursor_below_unsent(entry["max_created"], still_unsent))
 
 
+def check_shared_account():
+    """Pre-flight: a shared account that would lend members an administrator's access stops startup, naming the setting."""
+    return asyncio.run(playback_progress.startup_problem())
+
+
 if __name__ == "__main__":
-    bot.run_cli(check=jellyfin_core.check_jellyfin_config)
+    bot.run_cli(check=(jellyfin_core.check_jellyfin_config, check_shared_account))
