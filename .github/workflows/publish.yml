@@ -4,6 +4,9 @@ name: publish
 # no API token to store or rotate. The environment below must match the one
 # named on the PyPI publisher, or the token exchange is refused.
 # A manual run only does anything from a release tag.
+# The two Refuse steps below are accident guards: they run from this file at the
+# published ref, so whoever pushes a ref can edit them away. The real gate is the
+# pypi environment's required reviewers plus a ruleset limiting who may create v* tags.
 on:
   release:
     types: [published]
