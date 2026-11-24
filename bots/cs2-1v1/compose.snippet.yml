@@ -1,5 +1,6 @@
 # Add under `services:` and `volumes:` in the fleet compose on the prod host; this file is not read by anything.
 # The bot reaches Docker only through the socket proxy, which allows container calls and image pulls and nothing else.
+# The proxy listens only on cs2-docker, an internal network the game servers never join, so a game server cannot drive Docker.
 # Forward UDP CS2_PORT (27015 by default) on the router to this host; add 27016 and up when CS2_MAX_SERVERS is above 1.
 
 services:
@@ -14,7 +15,7 @@ services:
       # Everything else stays at the proxy's default of 0: no exec, volumes, networks, swarm, build, info or system calls.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks: [cs2net]
+    networks: [cs2-docker]
 
   cs2-1v1:
     <<: *bot
@@ -28,9 +29,12 @@ services:
       # CS2_GSLT: ${CS2_GSLT}
       # CS2_CHANNEL: <channel id>
     depends_on: [cs2-docker-proxy]
-    networks: [default, cs2net]
+    networks: [default, cs2net, cs2-docker]
 
 networks:
+  cs2-docker:
+    # Only the proxy and the bot join it; internal, so it has no route out of the host.
+    internal: true
   cs2net:
     # The game containers join this network, so the bot can query them by name.
     name: ${COMPOSE_PROJECT_NAME}_cs2net
