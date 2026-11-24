@@ -37,7 +37,14 @@ def setup():
     board.canvas = Canvas(client, "c1")
     asyncio.run(board.bot.space.refresh_members())
     board.bot.space.channels = {c.id: c for c in (Channel(VOICE_ROOM), Channel(BOARD_TEXT))}
+    grant_on_canvas(client, Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS | Permissions.MANAGE_CANVAS)
     return client
+
+
+def grant_on_canvas(client, bits, user_id="u1"):
+    """What the server answers for `user_id`'s bits in the canvas channel c1."""
+    body = {"user_id": user_id, "permissions": bits, "channel_id": "c1"}
+    client.respond("GET", f"/members/{user_id}/permissions?channel_id=c1", body)
 
 
 def process(client, *messages):
@@ -317,6 +324,8 @@ def with_restricted_canvas(client, *, restricted):
     board.bot.space.channels["c1"].restricted = restricted
     client.respond("POST", "/channels/c1/canvas/objects", {"id": "o1", "seq": 5})
     process(client, message("!board add secret plan"))
+    if restricted:
+        grant_on_canvas(client, 0)
 
 
 def test_a_public_canvas_is_listed_from_another_channel():
@@ -340,7 +349,7 @@ def test_a_restricted_canvas_is_neither_named_nor_shown_to_a_member_elsewhere():
 def test_a_restricted_canvas_is_shown_to_an_administrator_elsewhere():
     client = setup()
     with_restricted_canvas(client, restricted=True)
-    board.bot.space.members["u1"]._base_permissions = Permissions.ADMINISTRATOR
+    grant_on_canvas(client, Permissions.ADMINISTRATOR | Permissions.VIEW_CHANNEL)
     process(client, from_board_text("!board"))
     assert client.sent[-1]["content"].startswith("drawing on #voice-room:")
 

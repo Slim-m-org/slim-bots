@@ -41,9 +41,13 @@ either the channel id or its name. The bot refuses to start if it does not
 name a real, visible, voice channel, or if that channel is missing from
 `SLIMM_CHANNELS`.
 
-A private canvas channel is kept private: `!board` typed outside it only works for
-someone who can see it (it is public, or they are an administrator), and anyone
-else is told the board is on a channel they cannot see.
+The board follows each member's own rights on the canvas channel, read from
+the server: `!board` lists only for someone who can see that channel (anyone
+else is told the board is on a channel they cannot see), `add`, `move`,
+`done` and `clear` need `USE_CANVAS` there, and removing a note someone else
+added (`done` on it, or `clear` while the board holds one) needs
+`MANAGE_CANVAS` there. These checks need slim-m with the channel-scoped member
+permissions read; an older server answers deployment-wide rights instead.
 
 **Backward compatible:** if `CANVAS_CHANNEL` is not set and `SLIMM_CHANNELS`
 names exactly one channel, this bot behaves exactly like before 0.3.1 -
