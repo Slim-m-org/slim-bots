@@ -204,7 +204,7 @@ async def test_a_button_press_without_a_kind_still_reaches_button_handlers():
     assert seen == ["button"]
 
 
-@pytest.mark.parametrize("hidden", ["\u200b", "‮", "ㅤ", "⠀", "­", "﻿", "\x00", "⁠", "\U000e0041"])
+@pytest.mark.parametrize("hidden", ["\u200b", "\u202e", "\u3164", "\u2800", "\u00ad", "\ufeff", "\x00", "\u2060", "\U000e0041"])
 def test_a_label_holding_an_invisible_character_is_refused_before_it_is_sent(hidden):
     with pytest.raises(ValueError, match="invisible"):
         UiEntry("pause", f"Pa{hidden}use")
@@ -212,7 +212,7 @@ def test_a_label_holding_an_invisible_character_is_refused_before_it_is_sent(hid
 
 def test_a_label_made_only_of_invisible_characters_is_refused():
     with pytest.raises(ValueError):
-        UiEntry("pause", "ㅤ")
+        UiEntry("pause", "\u3164")
 
 
 def test_a_variation_selector_stays_legal_because_it_makes_a_heart_an_emoji():

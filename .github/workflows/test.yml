@@ -118,20 +118,34 @@ jobs:
 
   voice-real-livekit:
     # Runs the jellyfin publish path against the real livekit package (the version the prod image
-    # installs) and a real livekit-server (the version prod runs), since the fast suite only sees a fake.
+    # installs) and a real livekit-server, pinned to the image slim-m's docker-compose.voice.yml ships
+    # (the parity step below fails when they drift), since the fast suite only sees a fake.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
       livekit:
-        image: livekit/livekit-server:v1.10.1@sha256:698a13999b4b2285866a32903724884b1e10c03259526391d9b3a72d9b73bbb4
+        image: livekit/livekit-server:v1.13.11@sha256:25cd902de7cacbd5f1f779f6a6ac1eae20ba8f56b0935934ce6b0ab80d1e3d20
         env:
-          LIVEKIT_KEYS: "devkey: secret"
+          LIVEKIT_KEYS: "devkey: ci-only-livekit-secret-at-least-32-chars"
         ports:
           - 7880:7880
     env:
       LIVEKIT_URL: ws://127.0.0.1:7880
+      LIVEKIT_API_SECRET: ci-only-livekit-secret-at-least-32-chars
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the livekit-server image matches slim-m's voice compose
+        run: |
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --output "$RUNNER_TEMP/docker-compose.voice.yml" \
+            https://raw.githubusercontent.com/Slim-m-org/slim-m/main/docker-compose.voice.yml
+          image_of() { sed -nE 's/^[[:space:]]+image:[[:space:]]+"?(livekit\/livekit-server:[^"[:space:]]+)"?[[:space:]]*$/\1/p' "$1" | sort -u; }
+          expected="$(image_of "$RUNNER_TEMP/docker-compose.voice.yml")"
+          pinned="$(image_of .github/workflows/test.yml)"
+          if [ -z "$expected" ] || [ "$expected" != "$pinned" ]; then
+            echo "::error::voice-real-livekit runs '$pinned' but slim-m's docker-compose.voice.yml ships '$expected'"
+            exit 1
+          fi
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"

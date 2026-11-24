@@ -17,7 +17,8 @@ from slimbots import Bot
 from slimbots.voice import VoiceSession, load_rtc
 
 URL = os.environ.get("LIVEKIT_URL")
-API_KEY, API_SECRET = "devkey", "secret"
+API_KEY = "devkey"
+API_SECRET = os.environ.get("LIVEKIT_API_SECRET", "secret")
 
 pytestmark = pytest.mark.skipif(not URL, reason="LIVEKIT_URL is not set; the voice-real-livekit CI job provides a server")
 
