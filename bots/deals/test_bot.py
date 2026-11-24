@@ -18,7 +18,7 @@ from slimbots.bot import UNEXPECTED_ERROR_REPLY  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.space import Space  # noqa: E402
-from slimbots.testing import FakeAsyncClient  # noqa: E402
+from slimbots.testing import FakeAsyncClient, feed_frame  # noqa: E402
 
 PEOPLE = {
     "u-admin": {"id": "u-admin", "username": "admin", "display_name": "Admin", "is_bot": False, "is_webhook": False},
@@ -400,6 +400,26 @@ def test_a_removed_app_is_noticed_after_three_missed_days_once():
     rig.price(620, cents=400)
     rig.watches()
     assert len(rig.pings()) == 1 and rig.sql(db.list_watches)[0]["misses"] == 0
+
+def test_a_removed_member_loses_their_watches():
+    rig = Rig()
+    rig.setup()
+    rig.price(620, cents=999)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
+    rig.say("!pricewatch 620 5", user="u-bob", permissions=0)
+    asyncio.run(feed_frame(deals.bot, {"type": "member.removed", "user_id": "u-ann"}))
+    assert [w["user_id"] for w in rig.sql(db.list_watches)] == ["u-bob"]
+
+def test_a_deleted_account_found_at_check_time_loses_its_watches_unpinged():
+    rig = Rig()
+    rig.setup()
+    rig.price(620, cents=999)
+    rig.say("!pricewatch 620 5", user="u-ann", permissions=0)
+    deals.bot.space.members.pop("u-ann", None)
+    rig.client.respond("GET", "/users/u-ann", ApiError(404, {"error": "not found"}))
+    rig.price(620, cents=400)
+    assert rig.watches() == 0
+    assert rig.pings() == [] and rig.sql(db.list_watches) == []
 
 def test_a_price_in_another_currency_than_the_watch_is_skipped_not_compared():
     rig = Rig()

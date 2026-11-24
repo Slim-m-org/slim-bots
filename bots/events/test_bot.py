@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bot as events  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot  # noqa: E402
 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
@@ -207,6 +207,18 @@ def test_list_shows_only_the_events_planned_in_this_channel():
     assert "no events" in client.ephemerals[-1]["content"]
     say('!event list', user=BOB, channel="c-private")
     assert "#1 movie night" in client.ephemerals[-1]["content"]
+
+
+
+def test_an_account_deletion_drops_its_rsvps():
+    setup()
+    event_id = asyncio.run(events.bot.store.run(events.add_event, "c1", "game night", int(time.time()) + 3600, "u-x"))
+    for user_id in ("u-gone", "u-stay"):
+        asyncio.run(events.bot.store.run(events.record_rsvp, event_id, user_id, 1))
+    handle_frame(events.bot, {"type": "member.removed", "user_id": "u-gone"})
+    assert len(asyncio.run(events.bot.store.run(events.going_users, event_id))) == 2
+    handle_frame(events.bot, {"type": "member.removed", "user_id": "u-gone", "deleted": True})
+    assert asyncio.run(events.bot.store.run(events.going_users, event_id)) == ["u-stay"]
 
 
 if __name__ == "__main__":

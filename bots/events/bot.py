@@ -100,6 +100,16 @@ def going_users(conn, event_id):
     return [r[0] for r in conn.execute("SELECT user_id FROM rsvps WHERE event_id = ? AND going = 1 ORDER BY rowid", (event_id,))]
 
 
+def forget_rsvps(conn, user_id):
+    conn.execute("DELETE FROM rsvps WHERE user_id = ?", (user_id,))
+    conn.commit()
+
+
+@bot.event
+async def on_member_deleted(frame):
+    await bot.store.run(forget_rsvps, frame["user_id"])
+
+
 def due_events(conn, now):
     return conn.execute("SELECT id, channel_id, title, start_ts, state FROM events WHERE state < ? AND start_ts - ? <= ?", (STARTED, REMIND_MINUTES * 60, now)).fetchall()
 

@@ -98,6 +98,16 @@ def finish_close(conn, number, closer_id, body, truncated):
     conn.commit()
 
 
+def forget_member(conn, user_id):
+    """A deleted account's closed tickets and transcripts go; a live one keeps its channel's row under no name."""
+    conn.execute("DELETE FROM transcripts WHERE ticket_number IN (SELECT number FROM tickets WHERE opener_id = ?)", (user_id,))
+    conn.execute("DELETE FROM tickets WHERE opener_id = ? AND status = 'closed'", (user_id,))
+    conn.execute("UPDATE tickets SET opener_name = 'deleted user' WHERE opener_id = ?", (user_id,))
+    conn.execute("UPDATE tickets SET claimed_by = NULL, claimed_name = NULL WHERE claimed_by = ?", (user_id,))
+    conn.execute("UPDATE tickets SET closed_by = NULL WHERE closed_by = ?", (user_id,))
+    conn.commit()
+
+
 def get_transcript(conn, number):
     return conn.execute(
         "SELECT t.opener_name, x.body, x.truncated FROM transcripts x JOIN tickets t ON t.number = x.ticket_number "

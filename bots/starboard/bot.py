@@ -199,6 +199,13 @@ def forget_message(conn, message_id):
     conn.commit()
 
 
+def forget_author(conn, author_id):
+    """Drops a deleted account's unstarred text; returns the starred ids whose highlights must come down too."""
+    conn.execute("DELETE FROM seen WHERE author_id = ?", (author_id,))
+    conn.commit()
+    return [row[0] for row in conn.execute("SELECT message_id FROM starred WHERE author_id = ? AND pending_delete = 0", (author_id,))]
+
+
 def prune_seen(conn, cutoff):
     """Only the `seen` cache ages out; a starred row is the digest's record and stays."""
     conn.execute("DELETE FROM seen WHERE seen_at < ?", (cutoff,))
@@ -380,6 +387,14 @@ async def apply_delete(message_id):
         return
     await bot.store.run(mark_deleted, message_id)
     await remove_highlight(message_id, existing[6])
+
+
+@bot.event
+async def on_member_deleted(frame):
+    """A deleted account's quoted text goes, highlights included, as if each starred original were deleted."""
+    for message_id in await bot.store.run(forget_author, frame["user_id"]):
+        async with _lock_for(message_id):
+            await guard_dispatch(apply_delete, message_id)
 
 
 async def remove_highlight(message_id, hl_id):

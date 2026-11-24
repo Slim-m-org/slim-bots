@@ -110,6 +110,10 @@ The snapshot is taken after the gateway is open, so a change made while the bot 
 It is the one handler in this list that does not take a raw frame or an `events.py` payload: the frame carries only a `user_id`, so `Bot._handle_frame` resolves it to a live `Member` (`bot.space.resolve_member`, the same cache-then-fetch `_resolve_author` already does for a message's own author) before dispatching, which is why it lives as its own special case above `_GLOBAL_EVENT_FRAMES` rather than another entry in it.
 `bot-greeter` is the worked example: a configured welcome message posted to a configured channel.
 
+`on_member_removed(frame)` fires for every member who leaves, removed or deleted; a removal can be undone with `on_member_restored`, so stop acting for them there but keep what you store.
+`on_member_deleted(frame)` fires after it only when the account itself was deleted (`frame["deleted"]` is true), which cannot be undone: delete every row your bot keeps for `frame["user_id"]` there.
+An older server never sends `deleted`, so on one `on_member_deleted` never fires.
+
 ## Typed events
 
 Every frame kind `frames.rs` defines gets an `@bot.event` handler now, not just the eight the framework already dispatched - `on_message_edited`, `on_message_deleted`, `on_reactions_changed`, `on_thread_updated`, `on_message_pinned`/`on_message_unpinned`, `on_poll_voted`, `on_presence_changed`, `on_profile_changed`, `on_typing_started`/`on_typing_stopped`, `on_channel_created`/`on_channel_updated`/`on_channel_deleted`, `on_category_changed`, `on_overwrite_changed`, `on_voice_activity`, `on_call_ringing`/`on_call_ring_ended`, the remaining canvas events (`on_canvas_objects_restored`, `on_canvas_cursor_moved`, `on_canvas_stroke_preview_updated`, `on_canvas_object_moved`, `on_canvas_object_reordered`, `on_canvas_media_slot_changed`), and `on_reports_changed`.

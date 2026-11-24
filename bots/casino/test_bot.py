@@ -8,7 +8,7 @@ os.environ.setdefault("SLIMM_CHANNELS", "c1")
 
 import bot as casino
 from slimbots import Store
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, handle_frame, human, run_module_tests, wire_bot
 
 MEMBERS = [
     human("u1", "nick", "Nick", role_ids=[]),
@@ -328,6 +328,24 @@ def test_an_absurdly_long_amount_is_refused_and_later_commands_still_work():
     assert not casino.bot.store.connection.in_transaction
     process(client, message("u1", "!daily", "m2"))
     assert "claimed 500 chips" in client.sent[-1]["content"], client.sent[-1]
+
+
+
+def rows_for(user_id):
+    conn = casino.bot.store.connection
+    return [conn.execute(f"SELECT COUNT(*) FROM {table} WHERE user_id = ?", (user_id,)).fetchone()[0] for table in ("accounts", "hands")]
+
+
+def test_an_account_deletion_drops_its_balance_and_hands():
+    setup()
+    conn = casino.bot.store.connection
+    casino.credit(conn, "u-gone", 50)
+    conn.execute("INSERT INTO hands (channel_id, user_id, hand_index, stake, player_cards, dealer_cards, started_at) VALUES ('c1', 'u-gone', 0, 5, '', '', 0)")
+    conn.commit()
+    handle_frame(casino.bot, {"type": "member.removed", "user_id": "u-gone"})
+    assert rows_for("u-gone") == [1, 1], "a removal can be undone, so it keeps the rows"
+    handle_frame(casino.bot, {"type": "member.removed", "user_id": "u-gone", "deleted": True})
+    assert rows_for("u-gone") == [0, 0]
 
 
 if __name__ == "__main__":
