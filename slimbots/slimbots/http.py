@@ -61,13 +61,24 @@ def is_rate_limited(err: BaseException) -> bool:
     return isinstance(err, ApiError) and err.status == 429
 
 
+RETRYABLE_STATUSES = frozenset({500, 502, 503, 504})
+
+
+def is_unexplained_refusal(err: BaseException) -> bool:
+    """A 4xx that carries no slim-m `{"error"}` body, such as a reverse proxy's plain 404 while the server restarts; the server did not say it."""
+    return isinstance(err, ApiError) and err.status is not None and 400 <= err.status < 500 and err.reason is None
+
+
 def is_retryable(err: BaseException) -> bool:
-    """A 429 is worth retrying only when it names a wait; one without is a quota that waiting does not lift."""
+    """A 429 is worth retrying only when it names a wait; one without is a quota that waiting does not lift.
+    A 501 or 507 is the server's final answer, so only 500, 502, 503, 504, a network error and a proxy's bodiless 404 retry."""
     if not isinstance(err, ApiError):
         return False
     if err.status == 429:
         return err.retry_after is not None
-    return err.status is None or err.status >= 500
+    if err.status == 404:
+        return is_unexplained_refusal(err)
+    return err.status is None or err.status in RETRYABLE_STATUSES
 
 
 def _retry_after(response: httpx.Response, detail: Any) -> float | None:
