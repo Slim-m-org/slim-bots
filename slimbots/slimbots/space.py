@@ -28,8 +28,40 @@ class Space:
                 bits |= role.permissions
         return bits
 
+    def _top_role_position(self, role_ids: list[str]) -> tuple[bool, int | None]:
+        """`(known, position)` of the highest held role in `.roles`; unknown when a held role or its position is missing."""
+        held = [r for r in role_ids if not (r in self.roles and self.roles[r].is_everyone)]
+        positions = [self.roles[r].position if r in self.roles else None for r in held]
+        if not self.roles_readable or None in positions:
+            return False, None
+        return True, max((p for p in positions if p is not None), default=None)
+
+    def _rerank(self, member: Member) -> None:
+        known, position = self._top_role_position(member.role_ids)
+        if known:
+            member._set_top_role_position(position)
+
     def _make_member(self, data: dict[str, Any]) -> Member:
-        return Member(data, base_permissions=self._base_permissions(data.get("role_ids") or []))
+        member = Member(data, base_permissions=self._base_permissions(data.get("role_ids") or []))
+        if not member.rank_known:
+            self._rerank(member)
+        return member
+
+    async def refresh_rank(self, member: Member) -> bool:
+        """Rereads `member`'s place on the role ladder, leaving permissions alone; False when the server does not say."""
+        member._read_rank(await self._client.get_user(member.id))
+        if not member.rank_known:
+            self._rerank(member)
+        return member.rank_known
+
+    async def ladder_reach(self, invoker: Member, target: Member) -> bool | None:
+        """Whether the role ladder puts `target` strictly below `invoker`, both reread now; None when either rank is unreadable."""
+        try:
+            if await self.refresh_rank(invoker) and await self.refresh_rank(target):
+                return invoker.outranks(target)
+        except ApiError:
+            pass
+        return None
 
     async def refresh_roles(self) -> dict[str, Role]:
         """Reloads every role; needs the bot's own token to hold MANAGE_ROLES, else `roles_readable` goes False and the 403 is raised."""
@@ -95,6 +127,7 @@ class Space:
         """Recomputes every cached member's permissions from the current `.roles`, after a role's bits changed."""
         for member in self.members.values():
             member._apply_roles(member.role_ids, self._base_permissions(member.role_ids))
+            self._rerank(member)
 
     async def find_member(self, user_id: str) -> Member | None:
         """The cached member for `user_id`, else one fetched directly; None only when the server answers 404 for that user."""
@@ -164,6 +197,7 @@ class Space:
         if role_id not in member.role_ids:
             new_role_ids = member.role_ids + [role_id]
             member._apply_roles(new_role_ids, self._base_permissions(new_role_ids))
+            self._rerank(member)
         return member
 
     async def revoke_role(self, member: Member, role: Role | str) -> Member:
@@ -172,6 +206,7 @@ class Space:
         await self._client.unassign_role(member.id, role_id)
         remaining = [r for r in member.role_ids if r != role_id]
         member._apply_roles(remaining, self._base_permissions(remaining))
+        self._rerank(member)
         return member
 
     async def resolve_member(self, storage_key: str) -> Member:
