@@ -303,7 +303,7 @@ It returns a sentence, or `None`, and refuses a scheme other than http and https
 `await destination_problem(url, allow_private=False, allow_hosts=())` is the check for a URL a member supplied.
 It returns `urlpolicy.PRIVATE` or `urlpolicy.UNRESOLVABLE`, or `None` when every address the name resolves to is public.
 Private, loopback, link-local, carrier-grade NAT, multicast, reserved and unspecified addresses all fail, in IPv4, IPv6 and IPv4-mapped IPv6 form, and so does a name with even one such answer.
-`allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` exempts its Jellyfin host).
+`allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` passes its Jellyfin host only for a URL on the exact configured Jellyfin origin, with same-origin redirects, since `allow_hosts` matches the host and not the port).
 `JsonService(public_only=True)` runs the same check before the request and again for every redirect hop.
 It then connects to the addresses it checked, with the Host header and the TLS server name still the original host's, so a name that answers differently the second time cannot reach the LAN.
 It also caps the body at 10 MiB unless `max_bytes` says otherwise.

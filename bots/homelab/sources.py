@@ -57,9 +57,15 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock.connect(self._path)
 
 
-def docker_get(path, route="/containers/json?all=1"):
-    """The Docker engine's answer to one read-only GET over its unix socket."""
-    conn = _UnixConnection(path)
+def is_docker_proxy_url(target):
+    return target.startswith(("http://", "https://"))
+
+
+def docker_get(target, route="/containers/json?all=1"):
+    """The Docker engine's answer to one read-only GET, over a unix socket path or through an http(s) socket proxy; blocking."""
+    if is_docker_proxy_url(target):
+        return http_get(target.rstrip("/") + route, {})
+    conn = _UnixConnection(target)
     try:
         conn.request("GET", route)
         response = conn.getresponse()

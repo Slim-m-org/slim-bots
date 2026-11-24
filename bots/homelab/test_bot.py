@@ -249,6 +249,26 @@ def test_an_oversized_answer_and_a_dead_host_are_sentences_that_name_no_url():
 DNS = {"pve.lan": ["192.168.1.10"], "jellyfin": ["172.18.0.5"], "pve.example.com": ["1.1.1.1"]}
 
 
+def test_the_docker_reader_can_go_through_a_filtering_proxy_over_http():
+    seen = scripted_transport(lambda request: httpx.Response(200, content=b"[]"))
+    try:
+        assert sources.docker_get("http://homelab-docker-proxy:2375/") == (200, b"[]")
+    finally:
+        sources.TRANSPORT = None
+    assert [(r.method, r.url.host, r.url.port, r.url.path, r.url.query) for r in seen] == [
+        ("GET", "homelab-docker-proxy", 2375, "/containers/json", b"all=1"),
+    ]
+
+
+def test_a_docker_setting_that_is_neither_a_socket_path_nor_an_http_url_stops_the_bot():
+    Rig(DOCKER_SOCKET="tcp://homelab-docker-proxy:2375")
+    homelab.ALLOW_HTTP = False
+    assert "HOMELAB_DOCKER_SOCKET" in homelab.check_config()
+    for good in ("/var/run/docker.sock", "run/docker.sock", "http://homelab-docker-proxy:2375", "https://docker.lan:2376"):
+        Rig(DOCKER_SOCKET=good)
+        assert homelab.check_config() is None, good
+
+
 def test_a_plaintext_lan_url_stops_the_bot_unless_the_operator_allows_it():
     with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
         Rig(PROXMOX_URL="http://pve.lan:8006")

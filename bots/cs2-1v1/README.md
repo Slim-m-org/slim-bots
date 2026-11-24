@@ -43,6 +43,7 @@ The bot never mounts `/var/run/docker.sock`.
 It talks to a [docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) over http (`CS2_DOCKER_HOST`) that allows `CONTAINERS`, `IMAGES` and `POST` only.
 Inside that, the bot acts only on containers carrying its own label: it lists with a label filter and re-checks the label, and it inspects a container's labels before every start, stop or log read.
 The proxy cannot filter by label, and a client that may create containers could ask for a privileged one, so the proxy is a guard against a bug in the bot, not against someone who controls the bot's token.
+The proxy listens only on its own `internal: true` network, which only the proxy and the bot join; the game servers sit on `CS2_DOCKER_NETWORK` with the bot and cannot reach the proxy, since an internet-facing game server is the likeliest thing here to be compromised.
 The bot always creates the same shape: the pinned image, one UDP port, one named volume, no privileges, memory and CPU limits, `AutoRemove`.
 
 ## Settings
@@ -51,7 +52,7 @@ The bot always creates the same shape: the pinned image, one UDP port, one named
 | --- | --- | --- |
 | `SLIMM_URL`, `SLIMM_BOT_TOKEN` | | as every bot |
 | `CS2_HOST` | required | the public host or IP in the connect line |
-| `CS2_DOCKER_NETWORK` | required | the Docker network both the bot and the game servers join; the bot queries servers by container name on it |
+| `CS2_DOCKER_NETWORK` | required | the Docker network both the bot and the game servers join; the bot queries servers by container name on it; never the network the socket proxy is on |
 | `CS2_DOCKER_HOST` | `http://dockerproxy:2375` | the socket proxy |
 | `CS2_PORT` | `27015` | first UDP port; the next server takes the next free one |
 | `CS2_GSLT` | none | a Steam game server login token, passed to the image as `SRCDS_TOKEN` |
@@ -83,6 +84,7 @@ pip install -r requirements.txt
 PYTHONPATH=../../slimbots python3 test_bot.py
 python3 test_dockerapi.py
 python3 test_a2s.py
+python3 test_compose_snippet.py
 ```
 
 `compose.snippet.yml` holds the service, socket proxy, network and volume for the fleet compose, which lives outside this repo.

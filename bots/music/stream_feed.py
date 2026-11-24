@@ -24,7 +24,7 @@ class _Dropped(Exception):
 async def _copy(url, stdin):
     """Streams the body at `url` into `stdin`; a live stream (no Content-Length) that is cut raises `_Dropped` so the caller can open it again."""
     carried = False
-    async with music_core.stream_service().stream(url, headers=RAW_AUDIO) as answer:
+    async with music_core.stream_service(url).stream(url, headers=RAW_AUDIO) as answer:
         if not 200 <= answer.status < 300:
             raise ServiceError(f"the stream answered HTTP {answer.status}")
         try:

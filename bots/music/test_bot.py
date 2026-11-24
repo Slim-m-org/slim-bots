@@ -100,6 +100,8 @@ def stream_answer(request):
         return httpx.Response(302, headers={"location": "https://93.184.216.35/final.mp3"})
     if path == "/to-the-lan":
         return httpx.Response(302, headers={"location": "http://10.0.0.5:8123/reboot"})
+    if path == "/to-another-port":
+        return httpx.Response(302, headers={"location": "http://10.0.0.5:2375/version"})
     if path == "/gone":
         return httpx.Response(404)
     if path == "/refused":
@@ -207,6 +209,16 @@ def test_private_addresses_are_refused_but_the_jellyfin_host_is_not():
         assert open_stream("http://10.0.0.5:8096/Audio/1/stream").url == "http://10.0.0.5:8096/Audio/1/stream"
     finally:
         music_core.JELLYFIN_URL = original
+
+
+def test_only_the_configured_jellyfin_origin_is_exempt_not_its_whole_host():
+    setup(jellyfin=True)
+    music_core.JELLYFIN_URL = "http://10.0.0.5:8096"
+    assert open_stream("http://10.0.0.5:8096/Audio/1/stream").url == "http://10.0.0.5:8096/Audio/1/stream"
+    assert "private" in refusal("http://10.0.0.5:2375/version")
+    assert "private" in refusal("https://10.0.0.5:8096/Audio/1/stream")
+    assert "could not open" in refusal("http://10.0.0.5:8096/to-another-port")
+    assert "private" in refusal("https://93.184.216.34/to-another-port")
 
 
 def test_a_redirect_into_the_lan_is_refused_before_ffmpeg_is_handed_the_url():
