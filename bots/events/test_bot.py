@@ -15,6 +15,23 @@ from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot 
 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
+PEOPLE = [ANN, BOB] + [human(f"u-p{n}", f"p{n}", f"P{n}") for n in range(6)]
+
+
+class Clock:
+    """Stands in for the plan cooldown's clock so a test can step past it."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def step(self):
+        self.now += events.PLAN_COOLDOWN_SECONDS + 1
+
+
+CLOCK = Clock()
 
 
 class EditingClient(FakeAsyncClient):
@@ -30,18 +47,19 @@ class EditingClient(FakeAsyncClient):
 def setup():
     events.TZ_NAME, events.REMIND_MINUTES = "UTC", 15
     client = EditingClient(me_id="bot-1")
-    for person in (ANN, BOB):
+    events.plan_cooldown = events.Cooldown(events.PLAN_COOLDOWN_SECONDS, clock=CLOCK, format_remaining=events.cooldown_text)
+    for person in PEOPLE:
         client.respond("GET", f"/users/{person['id']}", {**person, "role_ids": []})
     wire_bot(events.bot, client, db_name="events.db")
     asyncio.run(events.bot.open_store(migrate=events.init_db))
     return client
 
 
-def say(text, user=ANN, permissions=0):
+def say(text, user=ANN, permissions=0, channel="c1"):
     member = events.bot.space._make_member({**user, "role_ids": []})
     member._base_permissions = permissions
     events.bot.space.members[user["id"]] = member
-    asyncio.run(events.bot.process_message({"id": "m-cmd", "channel_id": "c1", "author_id": user["id"], "content": text, "seq": 1}))
+    asyncio.run(events.bot.process_message({"id": "m-cmd", "channel_id": channel, "author_id": user["id"], "content": text, "seq": 1}))
 
 
 def press(custom_id, user_id):
@@ -54,8 +72,9 @@ def press(custom_id, user_id):
     asyncio.run(run())
 
 
-def plan(client):
-    say('!event "movie night" fri 8pm')
+def plan(client, user=ANN, channel="c1"):
+    CLOCK.step()
+    say('!event "movie night" fri 8pm', user=user, channel=channel)
     return client.sent[-1]
 
 
@@ -142,12 +161,52 @@ def test_attendees_the_server_cannot_look_up_are_left_out_of_the_names():
     assert asyncio.run(events.names_for(["u-zed", ANN["id"]])) == "@ann"
 
 
-def test_the_open_event_cap_holds():
+def test_one_member_cannot_hold_more_than_their_share_of_open_events():
     client = setup()
-    for _ in range(events.MAX_OPEN_EVENTS):
-        plan(client)
-    say('!event "one more" fri 9pm')
-    assert "already" in client.ephemerals[-1]["content"]
+    for n in range(events.MAX_OPEN_PER_MEMBER):
+        plan(client, channel=f"c{n}")
+    before = len(client.sent)
+    CLOCK.step()
+    say('!event "one more" fri 9pm', channel="c-other")
+    assert "you already have" in client.ephemerals[-1]["content"] and len(client.sent) == before
+    say("!event cancel 1", channel="c0")
+    say('!event "one more" fri 9pm', channel="c-other")
+    assert len(client.sent) == before + 1
+    plan(client, user=BOB)
+    assert len(client.sent) == before + 2
+
+
+def test_a_channel_holds_a_bounded_number_of_open_events_and_another_channel_is_unaffected():
+    client = setup()
+    people = iter(PEOPLE * events.MAX_OPEN_PER_MEMBER)
+    for _ in range(events.MAX_OPEN_PER_CHANNEL):
+        plan(client, user=next(people))
+    before = len(client.sent)
+    CLOCK.step()
+    say('!event "one more" fri 9pm', user=next(people))
+    assert "this channel already has" in client.ephemerals[-1]["content"] and len(client.sent) == before
+    plan(client, user=next(people), channel="c2")
+    assert len(client.sent) == before + 1
+
+
+def test_a_member_waits_between_plans_and_a_refused_plan_costs_no_wait():
+    client = setup()
+    plan(client)
+    say('!event "again" fri 9pm')
+    assert "try again in" in client.ephemerals[-1]["content"] and len(client.sent) == 1
+    CLOCK.step()
+    say("!event soon")
+    say('!event "again" fri 9pm')
+    assert len(client.sent) == 2
+
+
+def test_list_shows_only_the_events_planned_in_this_channel():
+    client = setup()
+    plan(client, channel="c-private")
+    say('!event list', user=BOB)
+    assert "no events" in client.ephemerals[-1]["content"]
+    say('!event list', user=BOB, channel="c-private")
+    assert "#1 movie night" in client.ephemerals[-1]["content"]
 
 
 if __name__ == "__main__":
