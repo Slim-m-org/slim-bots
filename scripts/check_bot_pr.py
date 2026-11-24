@@ -105,6 +105,38 @@ def bot_code(bot_dir: Path) -> str:
     return "\n".join(strip_comments_and_strings(p.read_text()) for p in files)
 
 
+IMPORT = re.compile(r"^[ \t]*(?:from|import)[ \t]+(\w+)", re.MULTILINE)
+
+
+def sibling_packages(bot_dir: Path, code: str) -> list[Path]:
+    """Directories under bots/ that this bot's code imports by name, such as the shared arrkit."""
+    names = {m for m in IMPORT.findall(code) if m != bot_dir.name}
+    return sorted(d for d in (bot_dir.parent / n for n in names) if d.is_dir())
+
+
+def code_with_siblings(bot_dir: Path) -> str:
+    """The bot's own code plus, transitively, the code of every sibling package it imports."""
+    seen, queue, parts = {bot_dir}, [bot_dir], []
+    while queue:
+        current = queue.pop()
+        code = bot_code(current)
+        parts.append(code)
+        for sibling in sibling_packages(current, code):
+            if sibling not in seen:
+                seen.add(sibling)
+                queue.append(sibling)
+    return "\n".join(parts)
+
+
+def dependents(bots_dir: Path, changed: set[str]) -> list[str]:
+    """`changed` plus every bot that imports one of them, so a shared package change re-checks its users."""
+    out = set(changed)
+    for bot_dir in (p for p in bots_dir.iterdir() if p.is_dir()):
+        if {d.name for d in sibling_packages(bot_dir, code_with_siblings(bot_dir))} & changed:
+            out.add(bot_dir.name)
+    return sorted(out)
+
+
 def check_bot(bot_dir: Path) -> list[str]:
     name = bot_dir.name
     problems = [
@@ -116,7 +148,7 @@ def check_bot(bot_dir: Path) -> list[str]:
     if not req.is_file():
         return problems
     floor = pinned_floor(req.read_text())
-    code = bot_code(bot_dir)
+    code = code_with_siblings(bot_dir)
     for pattern, label, needed in FEATURES:
         if not re.search(pattern, code):
             continue
@@ -160,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--base", help="git ref; check only bots changed since it (default: every bot)")
     args = ap.parse_args(argv)
     try:
-        names = changed_bots(args.base) if args.base else sorted(p.name for p in (ROOT / "bots").iterdir() if p.is_dir())
+        names = dependents(ROOT / "bots", set(changed_bots(args.base))) if args.base else sorted(p.name for p in (ROOT / "bots").iterdir() if p.is_dir())
     except ValueError as err:
         ap.error(str(err))
     problems: list[str] = []

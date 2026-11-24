@@ -98,6 +98,23 @@ def test_commented_pin_line_is_skipped():
     assert c.pinned_floor("# slim-m>=9.0\nslim-m>=0.5.2\n") == (0, 5, 2)
 
 
+def test_a_bot_importing_a_sibling_package_needs_the_siblings_floor(tmp_path):
+    shared = tmp_path / "bots" / "shared"
+    shared.mkdir(parents=True)
+    (shared / "mod.py").write_text("from slimbots import ApiError, style\n")
+    low = make_bot(tmp_path, "low", req="slim-m>=0.13.0\n", code="from shared import mod\n")
+    ok = make_bot(tmp_path, "ok", req="slim-m>=0.15.0\n", code="from shared import mod\n")
+    alone = make_bot(tmp_path, "alone", req="slim-m>=0.13.0\n", code="import json\n")
+    assert any("slimbots.style" in p for p in c.check_bot(low))
+    assert c.check_bot(ok) == [] and c.check_bot(alone) == []
+
+
+def test_changed_bots_includes_dependents_of_a_changed_sibling(tmp_path):
+    for name, code in (("shared", "x = 1\n"), ("user", "from shared import mod\n"), ("other", "import json\n")):
+        make_bot(tmp_path, name, code=code)
+    assert c.dependents(tmp_path / "bots", {"shared"}) == ["shared", "user"]
+
+
 def test_changed_bots_lists_only_touched_dirs(tmp_path):
     def git(*a):
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=tmp_path, check=True, capture_output=True)
