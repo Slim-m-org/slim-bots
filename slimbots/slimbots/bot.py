@@ -886,7 +886,7 @@ class Bot:
             except ApiError as err:
                 if err.status not in (400, 403, 404):
                     raise
-                log.error("skipping channel %s: the server answered HTTP %s (is it viewable by this bot?)", channel_id, err.status)
+                log.exception("skipping channel %s: the server answered HTTP %s (is it viewable by this bot?)", channel_id, err.status)
                 continue
             usable.append(channel_id)
         return usable

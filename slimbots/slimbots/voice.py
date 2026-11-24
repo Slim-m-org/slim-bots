@@ -362,6 +362,17 @@ async def _roster_or_none(bot: "Bot", channel_id: str) -> tuple[list[dict[str, A
     return roster.get("participants", []), False
 
 
+async def _run_tick(on_tick: Callable[[], Awaitable[Any]] | None, channel_id: str) -> None:
+    if on_tick is None:
+        return
+    try:
+        await on_tick()
+    except Exception as err:
+        if is_token_revoked(err):
+            raise
+        log_failure(log, err, "voice watch tick for %s failed", channel_id)
+
+
 async def watch_empty(
     bot: "Bot", channel_id: str, wake: asyncio.Event, on_empty: Callable[[], Awaitable[Any]], *, poll: float = 20.0,
     is_done: Callable[[], bool] = lambda: False, on_tick: Callable[[], Awaitable[Any]] | None = None,
@@ -376,13 +387,7 @@ async def watch_empty(
         wake.clear()
         if is_done():
             return
-        if on_tick is not None:
-            try:
-                await on_tick()
-            except Exception as err:
-                if is_token_revoked(err):
-                    raise
-                log_failure(log, err, "voice watch tick for %s failed", channel_id)
+        await _run_tick(on_tick, channel_id)
         participants, refused = await _roster_or_none(bot, channel_id)
         refusals = refusals + 1 if refused else 0
         if participants is None:

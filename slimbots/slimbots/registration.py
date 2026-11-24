@@ -39,6 +39,7 @@ class RegistrationConflict(ApiError):
 
 MAX_REGISTERED_COMMANDS = 50
 MAX_DESCRIPTION_LEN = 100
+COMMANDS_PATH = "/bots/commands"
 MAX_USAGE_LEN = 80
 
 
@@ -107,13 +108,13 @@ async def register_commands(
             on_dropped(dropped)
 
     try:
-        await client.call("PUT", "/bots/commands", registration_body(prefix, commands), on_headers=note_headers)
+        await client.call("PUT", COMMANDS_PATH, registration_body(prefix, commands), on_headers=note_headers)
         return True
     except ApiError as err:
         if err.status in (404, 405):
             return False
         if err.status == 400:
-            raise RegistrationRejected("/bots/commands", err) from err
+            raise RegistrationRejected(COMMANDS_PATH, err) from err
         if err.status == 409:
-            raise RegistrationConflict("/bots/commands", err) from err
+            raise RegistrationConflict(COMMANDS_PATH, err) from err
         raise

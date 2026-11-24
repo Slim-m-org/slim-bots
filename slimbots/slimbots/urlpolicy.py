@@ -13,7 +13,7 @@ PRIVATE = "private"
 
 Resolver = Callable[[str], Awaitable[Iterable[str]]]
 SyncResolver = Callable[[str], Iterable[str]]
-DOCKER_BRIDGE = ipaddress.IPv4Network("172.16.0.0/12")
+DOCKER_BRIDGE = ipaddress.IPv4Network("172.16.0.0/12")  # NOSONAR: the Docker bridge range, matched on purpose, not a host to contact
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
@@ -99,6 +99,12 @@ def service_url_problem(
         if _resolves_only_to(host, _is_lan, resolve):
             return None
         return f"refusing a plaintext {setting}: {opt_in or 'the http opt-in'} covers only a host on your own network, and {host} is not one; use https"
+    return _plaintext_problem(setting, host, bare_hostnames, loopback_http, opt_in, resolve)
+
+
+def _plaintext_problem(
+    setting: str, host: str, bare_hostnames: bool, loopback_http: bool, opt_in: str | None, resolve: SyncResolver | None,
+) -> str | None:
     bare = bare_hostnames and "." not in host and _address(host) is None
     if bare and _resolves_only_to(host, _is_docker_bridge, resolve):
         return None

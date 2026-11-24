@@ -152,7 +152,7 @@ class Space:
                 return None
             raise
 
-    async def get_member(self, id_or_name: str, *, usernames_only: bool = False) -> Member | None:
+    async def get_member(self, id_or_name: str, *, usernames_only: bool = False) -> Member | None:  # NOSONAR: public awaitable API, bots await it
         """A cached member by exact id, else by username, else by a display name only one member has (names case-insensitive)."""
         member = self.members.get(id_or_name)
         if member:
