@@ -3,7 +3,6 @@
 
 import asyncio
 import os
-import tempfile
 
 os.environ.setdefault("UPTIME_RELAY_SECRET", "test-secret")
 
