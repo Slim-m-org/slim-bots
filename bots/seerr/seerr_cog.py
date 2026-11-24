@@ -60,6 +60,8 @@ def _skipped_note(count):
 
 async def _file_request(bot, slimm_user_id, item):
     user_id = await seerr_user_for(bot, slimm_user_id)
+    if user_id is None:
+        return "you are not linked to a seerr user any more - ask a member who can approve requests to link you."
     try:
         await core.create_request(item, user_id)
     except core.AuthError:

@@ -271,8 +271,19 @@ def test_the_approver_permission_must_be_a_real_slim_m_permission_name():
         assert core.permission_problem(Permissions) is None
         core.SEERR_APPROVER_PERMISSION = "MANAGE_NOTHING"
         assert "MANAGE_NOTHING" in core.permission_problem(Permissions)
+        core.SEERR_APPROVER_PERMISSION = "NONE"
+        assert "NONE" in core.permission_problem(Permissions)
     finally:
         core.SEERR_APPROVER_PERMISSION = saved
+
+
+def test_a_member_unlinked_while_choosing_is_refused_rather_than_filed_as_the_api_key_user():
+    setup()
+    fake = seerr_api()
+    item = {"mediaType": "movie", "id": 7, "title": "Dune"}
+    with Patched(core, "api", fake):
+        reply = asyncio.run(seerr_cog._file_request(seerr.bot, "u1", item))
+    assert "not linked" in reply and fake.posts() == []
 
 
 if __name__ == "__main__":

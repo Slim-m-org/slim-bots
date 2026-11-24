@@ -50,8 +50,9 @@ def configure(bot):
 
 
 def permission_problem(permissions):
-    """The approver permission must be a real slim-m permission name, or nobody could ever approve."""
-    if not isinstance(getattr(permissions, SEERR_APPROVER_PERMISSION, None), int):
+    """The approver permission must name one real slim-m permission bit: NONE would let every member approve."""
+    name = SEERR_APPROVER_PERMISSION
+    if not name.isupper() or not isinstance(getattr(permissions, name, None), int) or name == "NONE":
         return f"SEERR_APPROVER_PERMISSION {SEERR_APPROVER_PERMISSION!r} is not a slim-m permission name"
     return None
 
