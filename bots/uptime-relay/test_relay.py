@@ -79,11 +79,14 @@ async def _post(port, path, body, headers=None):
     return status
 
 
-def _with_server(scenario):
+def _with_server(scenario, delivered=True):
     received = []
 
     async def on_alerts(alerts):
         received.extend(alerts)
+        if isinstance(delivered, BaseException):
+            raise delivered
+        return delivered
 
     async def run():
         async def handler(r, w):
@@ -123,6 +126,40 @@ def test_the_listener_refuses_bad_bodies_paths_and_oversize():
     statuses, received = _with_server(scenario)
     assert statuses == [400, 400, 404, 413]
     assert not received
+
+
+def test_a_webhook_the_bot_could_not_deliver_is_answered_503_so_a_sender_can_retry():
+    async def scenario(port):
+        return await _post(port, "/hook/kuma?token=s3cret", KUMA_DOWN)
+
+    for outcome in (False, RuntimeError("store unavailable")):
+        status, received = _with_server(scenario, delivered=outcome)
+        assert status == 503, outcome
+        assert len(received) == 1
+
+
+def _grafana_host_down(status, instance, fingerprint=None):
+    item = {"status": status, "labels": {"alertname": "HostDown", "instance": instance}, "annotations": {"summary": f"{instance} is down"}}
+    if fingerprint:
+        item["fingerprint"] = fingerprint
+    return item
+
+
+def test_grafana_alerts_sharing_an_alertname_stay_distinct_per_instance():
+    body = {"status": "firing", "alerts": [_grafana_host_down("firing", "a:9100", "fa"), _grafana_host_down("firing", "b:9100", "fb")]}
+    first, second = relay.parse("grafana", body)
+    assert first.key != second.key
+    assert (first.service, second.service) == ("HostDown on a:9100", "HostDown on b:9100")
+    [resolved] = relay.parse("grafana", {"status": "resolved", "alerts": [_grafana_host_down("resolved", "a:9100", "fa")]})
+    assert resolved.key == first.key and not resolved.down
+
+
+def test_grafana_alerts_without_a_fingerprint_are_told_apart_by_their_labels():
+    body = {"alerts": [_grafana_host_down("firing", "a:9100"), _grafana_host_down("firing", "b:9100")]}
+    first, second = relay.parse("grafana", body)
+    assert first.key != second.key
+    [again] = relay.parse("grafana", {"alerts": [_grafana_host_down("resolved", "a:9100")]})
+    assert again.key == first.key
 
 
 if __name__ == "__main__":
