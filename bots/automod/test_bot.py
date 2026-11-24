@@ -25,6 +25,7 @@ def setup(**config):
     for name, value in {**DEFAULTS, **config}.items():
         setattr(automod, name, value)
     automod._recent.clear()
+    automod._exempt_cache.clear()
     automod._log_channel_id = None
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/channels", CHANNELS)
@@ -255,6 +256,46 @@ def test_a_message_from_an_author_the_server_cannot_resolve_is_left_alone():
     assert deleted(client) == []
     say("damn")
     assert len(deleted(client)) == 1
+
+
+def permission_reads(client, user_id):
+    return [p for m, p, _, _ in client.calls if m == "GET" and p == f"/members/{user_id}/permissions"]
+
+
+def without_role_read(client, user_id, bits):
+    automod.bot.space.roles_readable = False
+    automod.bot.permissions_readable = True
+    client.respond("GET", f"/members/{user_id}/permissions", {"user_id": user_id, "permissions": int(bits)})
+
+
+def test_a_moderator_stays_exempt_when_the_bot_cannot_read_roles():
+    client = setup(MENTION_LIMIT=1)
+    without_role_read(client, "u-mod", Permissions.MANAGE_MESSAGES)
+    say("@a @b @c", user_id="u-mod")
+    assert deleted(client) == [], "a moderator was moderated because the role table was unreadable"
+    without_role_read(client, "u1", 0)
+    say("@a @b @c")
+    assert len(deleted(client)) == 1
+
+
+def test_the_exemption_read_is_reused_until_a_role_frame_says_it_changed():
+    client = setup(MENTION_LIMIT=1)
+    without_role_read(client, "u-mod", Permissions.MANAGE_MESSAGES)
+    say("hi", user_id="u-mod")
+    say("hi again", user_id="u-mod")
+    assert len(permission_reads(client, "u-mod")) == 1, "every message re-read the permissions route"
+    client.respond("GET", "/members/u-mod/permissions", {"user_id": "u-mod", "permissions": 0})
+    handle_frame(automod.bot, {"type": "member.role_changed", "user_id": "u-mod", "role_id": "mods"})
+    say("@a @b @c", user_id="u-mod")
+    assert len(deleted(client)) == 1, "a demoted moderator kept the exemption"
+
+
+def test_the_space_owner_is_never_moderated_whatever_their_roles():
+    client = setup(MENTION_LIMIT=1)
+    client.respond("GET", "/users/u-own", human("u-own", "own", "Own", role_ids=[], is_owner=True))
+    automod.bot.space.roles_readable = True
+    say("@a @b @c", user_id="u-own")
+    assert deleted(client) == [] and timed_out(client) == []
 
 
 CLIENT_LINKIFIED = (

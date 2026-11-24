@@ -35,6 +35,9 @@ EXEMPT_PERMISSIONS = Permissions.MANAGE_MESSAGES
 # user_id -> send times inside the flood window; memory only, a restart forgives everyone.
 _recent = defaultdict(deque)
 _log_channel_id = None
+# user_id -> (read at, exempt) from the permissions route, used only while the bot cannot read the role table.
+_exempt_cache = {}
+EXEMPT_CACHE_SECONDS = 60
 
 
 def domain_listed(host, listed):
@@ -149,6 +152,34 @@ async def enforce(message, member, channel_name, rule, reason, timeout_seconds):
     await write_modlog(_describe(member, channel_name, rule, reason, outcomes))
 
 
+async def is_exempt(member, now):
+    """Whether `member` holds Manage Messages; without the role table that is read from the permissions route, cached briefly."""
+    if bot.space.roles_readable is not False:
+        return member.has_permission(EXEMPT_PERMISSIONS)
+    cached = _exempt_cache.get(member.id)
+    if cached is not None and now - cached[0] < EXEMPT_CACHE_SECONDS:
+        return cached[1]
+    try:
+        read = await bot.space.refresh_permissions(member)
+    except ApiError:
+        read = False
+    if not read:
+        return cached[1] if cached is not None else member.has_permission(EXEMPT_PERMISSIONS)
+    exempt = member.has_permission(EXEMPT_PERMISSIONS)
+    _exempt_cache[member.id] = (now, exempt)
+    return exempt
+
+
+@bot.event
+async def on_member_role_changed(frame):
+    _exempt_cache.pop(frame.get("user_id"), None)
+
+
+@bot.event
+async def on_role_changed(_frame):
+    _exempt_cache.clear()
+
+
 @bot.event
 async def on_raw_message(message):
     author_id = message.get("author_id")
@@ -157,7 +188,7 @@ async def on_raw_message(message):
     if await bot.authors.is_automated(author_id):
         return
     member = await bot.space.find_member(author_id)
-    if member is None or member.has_permission(EXEMPT_PERMISSIONS):
+    if member is None or await is_exempt(member, time.monotonic()):
         return
     channel = bot.space.channels.get(message.get("channel_id"))
     channel_name = channel.name.lower() if channel else ""

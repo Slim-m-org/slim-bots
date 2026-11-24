@@ -49,7 +49,8 @@ Commands: `!automod rules` (what is on), `!automod stats` (how often each rule f
 The bot needs `MANAGE_MESSAGES` to delete someone else's message and `KICK_MEMBERS` to time a member out (the server's `PUT /members/{id}/timeout` requires it).
 The server also refuses a timeout on a member whose permissions the bot's own do not contain, so an admin is never timed out by it.
 When either is refused, the log line says which action failed and names the missing permission, rather than pretending it worked.
-Anyone holding `MANAGE_MESSAGES` is exempt from every rule, as are other bots.
+Anyone holding `MANAGE_MESSAGES` is exempt from every rule, as are the Space owner and other bots.
+With only the two permissions above the bot cannot read the role table, so it reads each author's permissions from the server instead, reusing the answer for up to a minute or until that member's roles change.
 
 ## What this deliberately does not do
 
