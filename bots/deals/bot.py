@@ -239,10 +239,13 @@ async def on_connect():
     bot.background(run_forever(), name="deals-loop")
 
 
+MANAGE_SERVER_ONLY = "only someone with Manage Server can change the deals settings."
+
+
 async def allowed(ctx):
     if ctx.author.has_permission(Permissions.MANAGE_SERVER):
         return True
-    await ctx.reply_ephemeral("only someone with Manage Server can change the deals settings.", public_fallback=True)
+    await ctx.reply_ephemeral(MANAGE_SERVER_ONLY, public_fallback=True)
     return False
 
 
@@ -280,10 +283,11 @@ async def deals_digest(ctx, setting: str = ""):
     await ctx.reply_ephemeral(state + where, public_fallback=True)
 
 
-@deals_group.command(name="now", help="Check for free games and price drops right away", cooldown=60, cooldown_bucket="deployment")
+@deals_group.command(
+    name="now", help="Check for free games and price drops right away", cooldown=60, cooldown_bucket="deployment",
+    requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_SERVER_ONLY,
+)
 async def deals_now(ctx):
-    if not await allowed(ctx):
-        return
     if not await configured_channel():
         await ctx.reply(f"run `{bot.prefix}deals setup` in the deals channel first.")
         return
