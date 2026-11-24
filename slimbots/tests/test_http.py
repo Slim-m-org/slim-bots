@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -181,3 +183,17 @@ def test_a_plaintext_base_that_is_not_loopback_is_refused_before_any_request():
         AsyncClient("http://10.0.0.5:8080", "slimbot_fake", "test/1.0")
     for allowed in ("https://my.space", "http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"):
         AsyncClient(allowed, "slimbot_fake", "test/1.0")
+
+
+async def test_send_marks_a_repost_of_a_member_and_leaves_the_field_out_otherwise():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "m1", "channel_id": "c1", "content": "x"})
+
+    client = _client(handler)
+    await client.send("c1", "quoted", repost_of_author_id="u9")
+    await client.send("c1", "plain")
+    assert bodies[0]["repost_of_author_id"] == "u9"
+    assert "repost_of_author_id" not in bodies[1]

@@ -45,6 +45,12 @@ If either call fails the bot deletes the half-made channel, frees the member's s
 
 A transcript is one line per message, oldest first: `[2026-01-02 03:04:05 UTC] Display Name: text`.
 
+## Blocks
+
+Staff blocks do not cover ticket pings.
+The opening message is posted by the bot and names the opener and the staff role, so a staff member who blocked the opener is still pinged for their ticket.
+That is on purpose: answering tickets is a staff duty.
+
 ## What this deliberately does not do
 
 - **Use threads.** They cannot be made private here, see above.

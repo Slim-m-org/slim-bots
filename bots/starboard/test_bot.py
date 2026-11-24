@@ -66,6 +66,13 @@ def test_below_threshold_posts_nothing():
     assert client.sent == []
 
 
+def test_a_highlight_names_the_member_it_quotes_so_their_blockers_do_not_see_it():
+    client = setup()
+    created(content="a good one")
+    react(3)
+    assert client.sent[0]["repost_of_author_id"] == "u1"
+
+
 def test_reaching_threshold_posts_a_highlight_with_a_link():
     client = setup()
     created(content="a good one")
@@ -309,6 +316,7 @@ def test_a_rejected_attachment_send_falls_back_to_text():
     assert len(calls) == 1
     assert len(client.sent) == 1
     assert "attachment_ids" not in client.sent[0]
+    assert client.sent[0]["repost_of_author_id"] == "u1"
 
 
 def test_an_old_row_without_ids_still_notes_its_attachments():

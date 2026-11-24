@@ -14,6 +14,7 @@ REQUIRED_FILES = ("test_bot.py", "README.md", "requirements.txt")
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
+    (r"\brepost_of_author_id\b", "send(repost_of_author_id=...)", (0, 26, 0)),
     (r"\.author_can\(|\.author_permissions\(|\.permissions_in\(|\bspeak_refusal\b|\.channel_permissions\(", "ctx.author_can, space.permissions_in and speak_refusal", (0, 25, 0)),
     (r"\.ladder_reach\(|\.outranks\(|\.refresh_rank\(", "Space.ladder_reach and Member.outranks", (0, 24, 0)),
     (r"\bmanifest_command\b|\bSLIMM_CONNECTOR\b|\bBot\([^)]*\bconnector\s*=", "connector mode and manifest_command", (0, 23, 0)),
