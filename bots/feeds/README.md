@@ -20,13 +20,14 @@ It does not use `SLIMM_CHANNELS`: a feed posts to the channel where it was added
 
 ## Commands
 
-Changing feeds needs Manage Server; `list` is open to everyone.
+Changing feeds needs Manage Server; `list` is open to everyone and shows only the feeds of the channel it runs in.
 A refusal is a private reply.
 
 | Command | What it does |
 | --- | --- |
 | `!feed add <url> [keywords]` | follow a feed in this channel, optionally with a keyword filter |
-| `!feed list` | every feed with its channel, interval, filter and, if it keeps failing, the last error |
+| `!feed list` | this channel's feeds with their interval, filter and, if one keeps failing, the last error |
+| `!feed list all` | every channel's feeds, as a private reply; needs Manage Server |
 | `!feed remove <id>` | stop following it and forget what was posted |
 | `!feed filter <id> <keywords\|off>` | set or clear the filter |
 | `!feed interval <id> <duration>` | how often to check, such as `30m`, `2h` or `1d` |
@@ -56,6 +57,7 @@ Items skipped by a filter are still recorded as seen, so clearing the filter lat
 - Dedupe is by the entry's guid or id, falling back to its link, then its title, kept in `SLIMM_DB_PATH` (the newest 1000 per feed).
   A restart never reposts, and a send keeps a stable message id as well.
 - Each post is an embed with the title, link, a summary of at most 300 characters, the feed's own title as the footer and the entry date.
+  The message text is the title alone, with any `@` escaped; the link stays on the card, so a handle in it (a Mastodon or Medium URL) mentions no one.
 - A refused post (for example the bot lost `SEND_MESSAGES`) is retried on the next check and the feed shows the error in `list`.
 
 ## Talking to feeds
