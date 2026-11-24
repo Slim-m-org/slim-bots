@@ -85,9 +85,8 @@ def service_url_problem(
     setting: str, url: str, *, allow_http: bool = False, bare_hostnames: bool = False, loopback_http: bool = True,
     opt_in: str | None = None, key_setting: str | None = None, resolve: SyncResolver | None = None,
 ) -> str | None:
-    """Why `url` cannot be a keyed service address, or None.
-    http is accepted for loopback (unless `loopback_http` is off), for a dotless docker service name when `bare_hostnames` and
-    it resolves only to loopback or Docker's bridge range, and for a host whose every address is private when the operator set `allow_http`."""
+    """Why `url` cannot be a keyed service address, or None. http is accepted for loopback (unless `loopback_http` is off),
+    a dotless name resolving only to Docker's bridge range when `bare_hostnames`, and a host with only private addresses when `allow_http`."""
     parts = urlsplit(url)
     host = parts.hostname or ""
     if parts.scheme not in ("https", "http") or not host:
