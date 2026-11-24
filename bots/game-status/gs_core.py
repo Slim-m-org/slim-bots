@@ -6,11 +6,13 @@ import re
 import sqlite3
 
 from slimbots import style
+from slimbots.text import clip, escape_mentions, one_line
 
 from queries import KINDS
 
 MAX_SERVERS = 25
 MAX_NAME = 40
+MAX_FIELD = 120
 HOST_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,253}$")
 COLORS = {"all_up": style.SUCCESS, "mixed": style.WARN, "all_down": style.ERROR}
 
@@ -122,10 +124,21 @@ def txn_list_boards(conn):
     return dict(conn.execute("SELECT channel_id, message_id FROM boards").fetchall())
 
 
+def whole_number(value):
+    """`value` when it is a plain non-negative int, else None: a game server can answer a count with any JSON."""
+    return value if type(value) is int and 0 <= value < 10**9 else None
+
+
+def server_text(value):
+    """A game-server-supplied string as one short line; `status_text` escapes its mentions, an embed field shows it as typed."""
+    return clip(one_line(value), MAX_FIELD) if value else ""
+
+
 def players_text(status):
-    if status.players is None:
+    players, max_players = whole_number(status.players), whole_number(status.max_players)
+    if players is None:
         return None
-    return f"{status.players}/{status.max_players}" if status.max_players is not None else str(status.players)
+    return f"{players}/{max_players}" if max_players is not None else str(players)
 
 
 def server_line(status):
@@ -133,12 +146,13 @@ def server_line(status):
     if not status.up:
         return f"no answer ({status.error})" if status.error else "no answer"
     parts = []
-    if players_text(status):
-        parts.append(f"{players_text(status)} players")
-    if status.map:
-        parts.append(f"map {status.map}")
-    if status.detail:
-        parts.append(status.detail)
+    players, map_name, detail = players_text(status), server_text(status.map), server_text(status.detail)
+    if players:
+        parts.append(f"{players} players")
+    if map_name:
+        parts.append(f"map {map_name}")
+    if detail:
+        parts.append(detail)
     return " - ".join(parts) or "reachable"
 
 
@@ -154,7 +168,7 @@ def status_text(rows, now):
     """Plain-text rendering, used for the on-demand reply and as the fallback when embeds are refused."""
     if not rows:
         return "**Game servers**\nno servers are configured."
-    lines = [f"{server_title(server, status)} - {server_line(status)}" for server, status in rows]
+    lines = [escape_mentions(f"{server_title(server, status)} - {server_line(status)}") for server, status in rows]
     return "**Game servers**\n" + "\n".join(lines) + f"\nlast checked {checked_at(now)}"
 
 
