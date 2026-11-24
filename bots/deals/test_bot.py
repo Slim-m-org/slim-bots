@@ -204,6 +204,15 @@ def test_deals_now_checks_everything_and_reports_a_failing_source():
     assert "slow down" in rig.client.ephemerals[-1]["content"]
 
 
+def test_a_refused_deals_now_leaves_the_cooldown_for_a_moderator():
+    rig = Rig()
+    rig.setup()
+    rig.say("!deals now", permissions=0)
+    assert "Manage Server" in rig.last_private()
+    rig.say("!deals now", keep_cooldowns=True)
+    assert "slow down" not in rig.last_private() and "posted" in rig.last_private()
+
+
 def due_after(seconds, key, interval):
     real = deals.time.time
     deals.time.time = lambda: real() + seconds
