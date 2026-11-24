@@ -139,7 +139,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 3 --retry-all-errors \
             --output "$RUNNER_TEMP/docker-compose.voice.yml" \
             https://raw.githubusercontent.com/Slim-m-org/slim-m/main/docker-compose.voice.yml
-          image_of() { sed -nE 's/^[[:space:]]+image:[[:space:]]+"?(livekit\/livekit-server:[^"[:space:]]+)"?[[:space:]]*$/\1/p' "$1" | sort -u; }
+          image_of() { local file="$1"; sed -nE 's/^[[:space:]]+image:[[:space:]]+"?(livekit\/livekit-server:[^"[:space:]]+)"?[[:space:]]*$/\1/p' "$file" | sort -u; }
           expected="$(image_of "$RUNNER_TEMP/docker-compose.voice.yml")"
           pinned="$(image_of .github/workflows/test.yml)"
           if [ -z "$expected" ] || [ "$expected" != "$pinned" ]; then
