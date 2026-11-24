@@ -153,3 +153,39 @@ async def test_a_failing_choice_still_closes_the_chooser_with_a_retry_hint(caplo
     assert bot.client.edited == ["could not add that - `!demo add` again to retry."]
     record = next(r for r in caplog.records if "could not act on a pick" in r.getMessage())
     assert record.exc_info and "boom" in str(record.exc_info[1])
+
+
+def unescaped_at(text):
+    return [i for i, c in enumerate(text) if c == "@" and (len(text[:i]) - len(text[:i].rstrip("\\"))) % 2 == 0]
+
+
+async def test_the_query_and_the_invoker_name_are_posted_with_no_live_mention():
+    bot = make_bot()
+    chooser = Chooser("demo:", "demo add", lambda item: item["name"], "add")
+
+    async def on_choose(item):
+        return "done"
+
+    await chooser.open(bot, Pick("u1", "@here", "c1", [{"name": "Alpha"}], "@everyone @[Admins] @nick", on_choose))
+    content = bot.client.sent[0]["content"]
+    assert "@everyone" in content and "@here" in content and not unescaped_at(content)
+
+
+async def test_a_title_of_only_hidden_characters_reads_untitled_and_the_chooser_still_works():
+    chosen = []
+    bot = make_bot()
+    chooser = Chooser("demo:", "demo add", lambda item: item["name"], "add")
+    chooser.register(bot)
+
+    async def on_choose(item):
+        chosen.append(item["name"])
+        return "done"
+
+    items = [{"name": "\u200b\u200d"}, {"name": "Shi\u200cr\u200f"}, {"name": "Clean"}]
+    pick = Pick("u1", "Alice", "c1", items, "q", on_choose)
+    await chooser.open(bot, pick)
+    labels = [b["label"] for row in bot.client.sent[0]["components"] for b in row["buttons"]]
+    assert labels == ["Untitled", "Shir", "Clean", "Cancel"]
+    await bot._handle_frame(press("demo:sel:2", pick.message_id))
+    await settle(bot)
+    assert chosen == ["Clean"]

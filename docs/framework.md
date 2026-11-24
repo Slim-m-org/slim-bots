@@ -420,6 +420,7 @@ A press is best effort like typing: a bot that was offline never sees it.
 `slimbots.Chooser(prefix, command, label, verb)` is a message of buttons that only the person who asked may press and that closes itself after five minutes.
 Register it with `chooser.register(bot)`, then open one with `await chooser.open(bot, Pick(invoker_id, invoker_name, channel_id, items, query, on_choose), reply_to_id=)`.
 `on_choose(item)` returns the text the message shows afterwards, and a second press on the same message does nothing.
+The default `render` escapes mentions in the query and the invoker's name, and `chooser.button_label` drops hidden characters from each label, showing `Untitled` when none are left.
 A press by someone else, or on a message that expired, is answered privately with a hint to run `command` again.
 A chooser that pages or changes view subclasses it and overrides `render(pick)` and `handle(interaction, pick, action)`.
 `guard`, `close`, `redraw` and `expire` are there to build on, and `bot-jellyfin`'s `!watch` picker is the worked example.
@@ -472,6 +473,8 @@ Every slim-bot shapes its output through `slimbots.style`, so the fleet reads as
 `clip(text, limit, ellipsis="...")` cuts to a limit and never leaves a space before the ellipsis, and `one_line(text)` collapses all whitespace.
 `escape_mentions(text)` puts a backslash before every `@` the server would read as a mention, using its own rule that an odd run of backslashes already escapes one, so escaping twice changes nothing.
 `break_mentions(text)` puts a zero-width space after each `@` instead, for text inside a code span where a backslash would show.
+Escape anything a member typed, a display name, or text from an outside service before a bot posts it, or the mention is the bot's and carries the bot's permission to ping everyone.
+`strip_hidden(text)` drops the control and invisible characters a button label refuses.
 `format_duration(seconds, style)` prints a count of seconds in the shape a bot always printed it.
 The styles are `exact` (`1h`), `interval` (`5m`), `compact` (`1h5m`), `spaced` (`1h 5m`), `minutes` (`1 h 5 min`) and `uptime` (`2d 3h`).
 `space.channel_label(channel_id, fallback)` is `#name` for a known channel, else the fallback, else the id.
