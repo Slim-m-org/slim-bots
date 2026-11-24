@@ -768,6 +768,9 @@ class Bot:
             self._start_handler("on_member_join", self._dispatch_member_join, frame.get("user_id"))
         elif kind in _GLOBAL_EVENT_FRAMES:
             self._spawn_typed(*_GLOBAL_EVENT_FRAMES[kind], frame)
+            if kind == "member.removed" and frame.get("deleted") is True:
+                # A deletion cannot be undone the way a removal can, so this is where a bot purges what it stores.
+                self._spawn_typed("on_member_deleted", None, frame)
         elif kind in _CHANNEL_EVENT_FRAMES and await self._accepts_channel(frame.get("channel_id"), kind):
             self._spawn_typed(*_CHANNEL_EVENT_FRAMES[kind], frame)
 
