@@ -138,3 +138,11 @@ async def test_place_many_keeps_its_own_ids_when_the_answer_does_not_list_them()
     client.respond("POST", "/channels/c1/canvas/objects/batch", None)
     ids = await Canvas(client, "c1").place_many([{"kind": "shape", "x": 0, "y": 0, "w": 1, "h": 1, "id": "mine"}])
     assert ids == ["mine"]
+
+
+async def test_viewport_sends_cursor_seq_only_when_given():
+    client = FakeAsyncClient()
+    client.respond("GET", "/channels/c1/canvas/objects", {"objects": []})
+    canvas = Canvas(client, "c1")
+    await canvas.viewport(min_x=0, min_y=0, max_x=1, max_y=1, cursor_seq=0)
+    assert client.calls[-1][3]["cursor_seq"] == 0
