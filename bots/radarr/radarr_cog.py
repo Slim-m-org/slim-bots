@@ -1,15 +1,16 @@
 """bot-radarr's `!radarr` command: the shared library command with Radarr's queue and calendar wording."""
 
 from arrkit.guard import Guard
-from arrkit.library import Library, Spec, label
+from arrkit.library import Library, Spec, label, shown
 from slimbots.chooser import Chooser
+from slimbots.text import escape_mentions
 
 import radarr_core as core
 
 
 def queue_line(record):
     left = f", {record['timeleft']} left" if record.get("timeleft") else ""
-    return f"- {label(record.get('movie') or {'title': record.get('title', 'unknown')})} - {record.get('status', 'unknown')}{left}"
+    return escape_mentions(f"- {label(record.get('movie') or {'title': record.get('title', 'unknown')})} - {record.get('status', 'unknown')}{left}")
 
 
 def release_in_window(movie, start, end):
@@ -20,7 +21,7 @@ def release_in_window(movie, start, end):
 
 
 def calendar_line(movie, start, end):
-    return f"{release_in_window(movie, start, end)} {label(movie)}" + (" - downloaded" if movie.get("hasFile") else "")
+    return f"{release_in_window(movie, start, end)} {shown(movie)}" + (" - downloaded" if movie.get("hasFile") else "")
 
 
 SPEC = Spec(

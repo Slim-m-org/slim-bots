@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from slimbots.chooser import Chooser, Pick
 from slimbots.limits import require_int, require_len
+from slimbots.text import escape_mentions
 
 from .guard import UNREACHABLE, Guard
 from .service import AuthError
@@ -23,6 +24,11 @@ CALENDAR_MAX_DAYS = 30
 def label(item):
     year = f" ({item['year']})" if item.get("year") else ""
     return f"{item.get('title') or 'Untitled'}{year}"
+
+
+def shown(item):
+    """`label(item)` for a message, where a title such as `@midnight` must not ping; a button label stays `label`."""
+    return escape_mentions(label(item))
 
 
 @dataclass
@@ -69,7 +75,7 @@ class Library:
         if found is None:
             return None, None
         if not found:
-            await ctx.reply(f'nothing found for "{query}".')
+            await ctx.reply(f'nothing found for "{escape_mentions(query)}".')
             return None, None
         return query, found[:MAX_RESULTS]
 
@@ -77,8 +83,8 @@ class Library:
         query, found = await self._lookup(ctx, query)
         if found is None:
             return
-        lines = [f"- {label(s)}" + (" - in the library" if s.get("id") else "") for s in found]
-        await ctx.reply(f'{len(found)} match(es) for "{query}":\n' + "\n".join(lines))
+        lines = [f"- {shown(s)}" + (" - in the library" if s.get("id") else "") for s in found]
+        await ctx.reply(f'{len(found)} match(es) for "{escape_mentions(query)}":\n' + "\n".join(lines))
 
     async def add(self, ctx, query):
         query, found = await self._lookup(ctx, query)
@@ -86,7 +92,7 @@ class Library:
             return
         addable = [s for s in found if not s.get("id")]
         if not addable:
-            await ctx.reply(f'everything matching "{query}" is already in the library.')
+            await ctx.reply(f'everything matching "{escape_mentions(query)}" is already in the library.')
             return
         pick = Pick(ctx.author.id, ctx.author.display_name, ctx.channel_id, addable, query, self._add_chosen)
         await self.chooser.open(ctx.bot, pick, reply_to_id=ctx.message.get("id"))
@@ -98,8 +104,8 @@ class Library:
             return f"{self.core.SERVICE.name} rejected the bot's api key - an admin needs to fix it."
         except (*UNREACHABLE, RuntimeError) as err:
             reason = str(err) if isinstance(err, RuntimeError) else f"{self.core.SERVICE.name} did not accept it"
-            return f"could not add **{label(item)}**: {reason}."
-        return f"added **{label(item)}** - {self.spec.added_text}."
+            return f"could not add **{shown(item)}**: {escape_mentions(reason)}."
+        return f"added **{shown(item)}** - {self.spec.added_text}."
 
     async def queue(self, ctx):
         if await self.guard.throttled(ctx):

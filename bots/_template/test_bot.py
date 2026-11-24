@@ -52,6 +52,12 @@ def test_vote_posts_the_question_with_two_buttons():
     assert [b["custom_id"] for b in sent["components"][0]["buttons"]] == ["vote:yes", "vote:no"]
 
 
+def test_a_mention_in_the_question_is_echoed_escaped_so_the_bot_pings_nobody():
+    client = setup()
+    say(client, "!vote @everyone and @sam, pizza?")
+    assert client.sent[-1]["content"] == "\\@everyone and \\@sam, pizza?"
+
+
 def test_an_overlong_question_is_refused_privately():
     client = setup()
     say(client, "!vote " + "x" * 300)

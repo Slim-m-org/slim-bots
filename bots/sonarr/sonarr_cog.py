@@ -3,6 +3,7 @@
 from arrkit.guard import Guard
 from arrkit.library import Library, Spec, label
 from slimbots.chooser import Chooser
+from slimbots.text import escape_mentions
 
 import sonarr_core as core
 
@@ -13,13 +14,14 @@ def queue_line(record):
     if episode:
         name = f"{series.get('title', name)} {core.episode_label(episode.get('seasonNumber', 0), episode.get('episodeNumber', 0))}"
     left = f", {record['timeleft']} left" if record.get("timeleft") else ""
-    return f"- {name} - {record.get('status', 'unknown')}{left}"
+    return escape_mentions(f"- {name} - {record.get('status', 'unknown')}{left}")
 
 
 def calendar_line(item, _start, _end):
     when = (item.get("airDateUtc") or "")[:10]
     episode = core.episode_label(item.get("seasonNumber", 0), item.get("episodeNumber", 0))
-    return f"{when} {(item.get('series') or {}).get('title', 'unknown')} {episode}" + (" - downloaded" if item.get("hasFile") else "")
+    title = escape_mentions(str((item.get("series") or {}).get("title", "unknown")))
+    return f"{when} {title} {episode}" + (" - downloaded" if item.get("hasFile") else "")
 
 
 SPEC = Spec(
