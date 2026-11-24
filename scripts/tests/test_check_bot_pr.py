@@ -36,8 +36,8 @@ def test_missing_requirements_fails(tmp_path):
     assert c.check_bot(make_bot(tmp_path, "b", req=None)) == ["bots/b/requirements.txt is missing"]
 
 
-def test_ping_needs_no_test_bot(tmp_path):
-    assert c.check_bot(make_bot(tmp_path, "ping", files=("README.md",), req="websockets>=12\n")) == []
+def test_ping_needs_a_test_bot_like_every_other_bot(tmp_path):
+    assert c.check_bot(make_bot(tmp_path, "ping", files=("README.md",), req="websockets>=12\n")) == ["bots/ping/test_bot.py is missing"]
 
 
 def test_pin_below_feature_version_fails(tmp_path):
@@ -96,6 +96,23 @@ def test_test_files_do_not_count_as_use(tmp_path):
 
 def test_commented_pin_line_is_skipped():
     assert c.pinned_floor("# slim-m>=9.0\nslim-m>=0.5.2\n") == (0, 5, 2)
+
+
+def test_a_bot_importing_a_sibling_package_needs_the_siblings_floor(tmp_path):
+    shared = tmp_path / "bots" / "shared"
+    shared.mkdir(parents=True)
+    (shared / "mod.py").write_text("from slimbots import ApiError, style\n")
+    low = make_bot(tmp_path, "low", req="slim-m>=0.13.0\n", code="from shared import mod\n")
+    ok = make_bot(tmp_path, "ok", req="slim-m>=0.15.0\n", code="from shared import mod\n")
+    alone = make_bot(tmp_path, "alone", req="slim-m>=0.13.0\n", code="import json\n")
+    assert any("slimbots.style" in p for p in c.check_bot(low))
+    assert c.check_bot(ok) == [] and c.check_bot(alone) == []
+
+
+def test_changed_bots_includes_dependents_of_a_changed_sibling(tmp_path):
+    for name, code in (("shared", "x = 1\n"), ("user", "from shared import mod\n"), ("other", "import json\n")):
+        make_bot(tmp_path, name, code=code)
+    assert c.dependents(tmp_path / "bots", {"shared"}) == ["shared", "user"]
 
 
 def test_changed_bots_lists_only_touched_dirs(tmp_path):

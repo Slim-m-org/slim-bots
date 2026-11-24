@@ -35,6 +35,7 @@ class FakeAsyncClient(AsyncClient):
         self.component_edits: list[dict[str, Any]] = []
         self.acks: list[str] = []
         self._responses: dict[tuple[str, str], Any] = {}
+        self._response_headers: dict[tuple[str, str], dict[str, str]] = {}
         self._next_seq = 1
         self.respond("GET", "/me", {"id": me_id})
         self.respond("GET", "/channels", [])
@@ -57,10 +58,17 @@ class FakeAsyncClient(AsyncClient):
         """Queues `response` (or, if callable, its return value) for every future `method path` call."""
         self._responses[(method, path)] = response
 
+    def respond_headers(self, method: str, path: str, headers: dict[str, str]) -> None:
+        """Response headers handed to `on_headers` on every future `method path` call."""
+        self._response_headers[(method, path)] = headers
+
     async def call(  # type: ignore[override]
-        self, method: str, path: str, body: Any = None, *, params: Any = None, headers: Any = None, **_kwargs: Any,
+        self, method: str, path: str, body: Any = None, *, params: Any = None, headers: Any = None,
+        on_headers: Any = None, **_kwargs: Any,
     ) -> Any:
         self.calls.append((method, path, body, params))
+        if on_headers is not None and (method, path) in self._response_headers:
+            on_headers(self._response_headers[(method, path)])
         seq = self._record_send(method, path, body)
         self._record_ephemeral(method, path, body)
         if self._record_component_call(method, path, body):

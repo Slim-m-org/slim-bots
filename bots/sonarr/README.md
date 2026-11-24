@@ -47,8 +47,9 @@ A poll where a send fails keeps its cursor and retries next cycle; what already 
 
 | Variable | Meaning |
 | --- | --- |
-| `SONARR_URL` | Sonarr's base URL. Plaintext is accepted only for loopback or a bare docker service name; anything else must be https. |
+| `SONARR_URL` | Sonarr's base URL. Plaintext is accepted only for loopback or a bare docker service name that resolves to a Docker bridge address; anything else must be https. |
 | `SONARR_API_KEY` | Sonarr's key from Settings, General. It goes in an `X-Api-Key` header and is never logged. |
 | `SONARR_POLL_SECONDS` | Poll interval, default 60. |
+| `SONARR_ALLOW_HTTP` | `1` allows a plaintext `http` URL to a host on your own network (every address it resolves to is private); a public host still needs https. Default off. |
 | `SONARR_QUALITY_PROFILE` | Profile name or id for `add`; default is the first Sonarr lists. |
 | `SONARR_ROOT_FOLDER` | Root folder path for `add`; default is the first Sonarr lists. |

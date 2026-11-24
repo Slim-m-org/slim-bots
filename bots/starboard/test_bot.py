@@ -7,7 +7,7 @@ import time
 
 os.environ["STARBOARD_CHANNEL"] = "hl"
 import bot as starboard
-from slimbots import Message, Store
+from slimbots import Store
 from slimbots.events import ReactionsChanged
 from slimbots.http import ApiError, is_token_revoked
 from slimbots.testing import FakeAsyncClient, handle_frame, run_module_tests, wire_bot

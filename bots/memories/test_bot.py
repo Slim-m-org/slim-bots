@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as memories  # noqa: E402
 import history  # noqa: E402
+from slimbots.models import Channel  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
 
 ANN = human("u-ann", "ann", "Ann")
@@ -215,6 +216,40 @@ def test_the_daily_post_goes_out_once():
     asyncio.run(memories.daily())
     asyncio.run(memories.daily())
     assert len([s for s in client.sent if "On this day" in s["content"]]) == 1
+
+
+def test_a_listed_name_never_unlocks_a_restricted_channel_with_that_name():
+    year_ago = ms(2025, 11, 4)
+    secret = {**msg(year_ago, "private staff chatter that must never be quoted here"), "channel_id": "c-priv"}
+    client = setup({"c-priv": [secret]})
+    memories.EXTRA_PUBLIC = ["staff"]
+    say("!onthisday")
+    assert "staff chatter" not in client.sent[-1]["content"] and "#staff" not in client.sent[-1]["content"]
+    assert "c-priv" not in client.pages
+
+
+def test_a_listed_name_still_marks_a_channel_the_server_says_nothing_about():
+    unknown = {**msg(ms(2025, 11, 4), "an old message in a channel with no restricted flag"), "channel_id": "c-unk"}
+    client = setup({"c-unk": [unknown]})
+    memories.EXTRA_PUBLIC = ["unknown"]
+    say("!onthisday")
+    assert "in #unknown" in client.sent[-1]["content"]
+
+
+def test_a_listed_id_is_an_explicit_choice_and_is_honoured():
+    setup({})
+    memories.EXTRA_PUBLIC = ["c-priv"]
+    assert [c.id for c in memories.public_channels()] == ["c-gen", "c-priv"]
+
+
+def test_startup_warns_about_a_listed_name_that_is_ambiguous_or_restricted():
+    setup({})
+    memories.bot.space.channels["c-dup"] = Channel({"id": "c-dup", "name": "unknown", "kind": "text"})
+    memories.EXTRA_PUBLIC = ["unknown", "staff", "c-gen"]
+    warnings = memories.channel_list_warnings()
+    assert any("'unknown' matches 2 channels" in w for w in warnings), warnings
+    assert any("'staff'" in w and "restricted" in w for w in warnings), warnings
+    assert len(warnings) == 2, warnings
 
 
 if __name__ == "__main__":

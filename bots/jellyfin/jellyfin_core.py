@@ -483,19 +483,31 @@ def render_embed(card):
     return style.info(card["title"], card.get("description"))
 
 
-async def search_items(query, limit):
+async def _scoped_search(params, limit, user_id):
+    """`/Items` matches inside JELLYFIN_LIBRARY_IDS, as `user_id` may see them, minus excluded genres, as the poll loop scopes."""
+    if user_id:
+        params["userId"] = user_id
+    found = {}
+    for library_id in JELLYFIN_LIBRARY_IDS or [None]:
+        library_params = {**params, "parentId": library_id} if library_id else params
+        for item in (await jf_get("/Items", library_params)).get("Items", []):
+            if not is_excluded(item):
+                found.setdefault(item["Id"], item)
+    return list(found.values())[:limit]
+
+
+async def search_items(query, limit, user_id=None):
     params = {
         "searchTerm": query, "recursive": "true", "fields": FIELDS,
         "includeItemTypes": ",".join(JELLYFIN_ITEM_TYPES) if JELLYFIN_ITEM_TYPES else None, "limit": limit,
     }
-    params = {k: v for k, v in params.items() if v is not None}
-    return (await jf_get("/Items", params)).get("Items", [])
+    return await _scoped_search({k: v for k, v in params.items() if v is not None}, limit, user_id)
 
 
-async def watch_search(query, limit):
+async def watch_search(query, limit, user_id=None):
     """Matches `!watch` can start or drill into: movies and episodes to play, series to browse."""
     params = {"searchTerm": query, "recursive": "true", "fields": FIELDS, "includeItemTypes": "Movie,Series,Episode", "limit": limit}
-    return (await jf_get("/Items", params)).get("Items", [])
+    return await _scoped_search(params, limit, user_id)
 
 
 async def series_seasons(series_id, user_id=None):

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import smoke_bot as s  # noqa: E402
 
-GOOD_ENV = {"SLIMM_URL": "u", "SLIMM_BOT_TOKEN": "b", "SLIMM_SMOKE_TESTER_TOKEN": "t", "SLIMM_SMOKE_CHANNEL": "c", "SLIMM_SMOKE_PRIVATE": "1"}
+GOOD_ENV = {"SLIMM_URL": "http://127.0.0.1:1", "SLIMM_BOT_TOKEN": "b", "SLIMM_SMOKE_TESTER_TOKEN": "t", "SLIMM_SMOKE_CHANNEL": "c", "SLIMM_SMOKE_PRIVATE": "1"}
 
 
 def test_refuses_without_secrets_or_private_confirmation():
@@ -313,3 +313,48 @@ def test_stop_bot_leaves_a_bot_that_exits_on_sigterm_alone():
     proc = Polite()
     s.stop_bot(proc, grace=1)
     assert not proc.killed
+
+
+class _Booted(Exception):
+    pass
+
+
+def test_the_bot_under_test_never_sees_the_testers_token(smoke_run, monkeypatch):
+    seen = {}
+
+    def capture(_args, **kwargs):
+        seen.update(kwargs["env"])
+        raise _Booted
+
+    monkeypatch.setenv("SLIMM_SMOKE_BOT_ID", "")
+    monkeypatch.setattr(s.subprocess, "Popen", capture)
+    with pytest.raises(_Booted):
+        s.main(["stubborn"])
+    assert not [k for k in seen if k.startswith("SLIMM_SMOKE_")], seen
+    assert seen["SLIMM_URL"] == GOOD_ENV["SLIMM_URL"] and seen["SLIMM_BOT_TOKEN"] == GOOD_ENV["SLIMM_BOT_TOKEN"]
+    assert seen["SLIMM_CHANNELS"] == GOOD_ENV["SLIMM_SMOKE_CHANNEL"]
+
+
+def test_the_manifest_env_still_overrides_the_channel_but_never_adds_a_smoke_variable():
+    env = s.bot_env({**GOOD_ENV, "PATH": "/bin"}, "c", {"SLIMM_CHANNELS": "lobby", "SLIMM_SMOKE_TESTER_TOKEN": "x"})
+    assert env["SLIMM_CHANNELS"] == "lobby" and env["PATH"] == "/bin"
+    assert not [k for k in env if k.startswith("SLIMM_SMOKE_")]
+
+
+@pytest.mark.parametrize("url", ["http://slim.example.com", "http://10.0.0.5:8080", "ws://127.0.0.1", "slim.example.com"])
+def test_a_plaintext_url_off_loopback_is_refused_before_any_request(monkeypatch, url):
+    for key, value in GOOD_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("SLIMM_URL", url)
+
+    def no_request(*_args, **_kwargs):
+        raise AssertionError("no request may be made to a plaintext url")
+
+    monkeypatch.setattr(s.httpx, "Client", no_request)
+    monkeypatch.setattr(s, "PrivateReplies", no_request)
+    assert s.main(["greeter"]) == 2
+
+
+@pytest.mark.parametrize("url", ["https://slim.example.com", "http://127.0.0.1:18080", "http://localhost:8080"])
+def test_https_and_loopback_urls_may_carry_the_tokens(url):
+    assert s.base_url_problem(url) is None

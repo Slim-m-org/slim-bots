@@ -225,3 +225,72 @@ async def test_reap_kills_a_running_process_and_drains_it():
     await asyncio.wait_for(media.reap(process), timeout=10)
     assert process.returncode is not None
     await media.reap(process)
+
+
+def failing_roster_bot(failures, then):
+    bot = Bot(prefix="!")
+    bot.client = FakeAsyncClient()
+    bot.me_id = "me"
+    queue = list(failures)
+
+    def roster():
+        if queue:
+            raise queue.pop(0)
+        return {"participants": then}
+
+    bot.client.respond("GET", "/channels/v1/voice/roster", roster)
+    return bot
+
+
+@pytest.mark.parametrize("failure", [ApiError(404, "404 page not found"), ApiError(None, "connection refused"), ApiError(503, {"error": "busy"}), ApiError(429, {"error": "slow"})])
+async def test_a_failed_roster_read_is_skipped_and_the_watchdog_keeps_polling(failure):
+    bot = failing_roster_bot([failure], [{"user_id": "me"}])
+    fired = []
+
+    async def on_empty():
+        fired.append(1)
+
+    await asyncio.wait_for(watch_empty(bot, "v1", asyncio.Event(), on_empty, poll=0.001), timeout=5)
+    assert fired == [1]
+
+
+async def test_a_roster_read_that_hits_a_revoked_token_still_stops_the_watchdog():
+    bot = failing_roster_bot([ApiError(401, {"error": "revoked"})], [])
+    with pytest.raises(ApiError):
+        await watch_empty(bot, "v1", asyncio.Event(), lambda: None, poll=0.001)
+
+
+async def test_a_failing_tick_does_not_end_the_watchdog():
+    bot = watched_bot([[{"user_id": "u1"}], [{"user_id": "me"}]])
+    fired, ticks = [], []
+
+    async def tick():
+        ticks.append(1)
+        if len(ticks) == 1:
+            raise RuntimeError("progress report failed")
+
+    async def on_empty():
+        fired.append(1)
+
+    await asyncio.wait_for(watch_empty(bot, "v1", asyncio.Event(), on_empty, poll=0.001, on_tick=tick), timeout=5)
+    assert fired == [1] and len(ticks) == 2
+
+
+@pytest.mark.parametrize("status", [403, 404])
+async def test_a_roster_the_server_keeps_refusing_ends_the_session_instead_of_raising(status):
+    bot = failing_roster_bot([ApiError(status, {"error": "no"})] * 10, [])
+    fired = []
+
+    async def on_empty():
+        fired.append(1)
+
+    await asyncio.wait_for(watch_empty(bot, "v1", asyncio.Event(), on_empty, poll=0.001), timeout=5)
+    assert fired == [1]
+
+
+async def test_a_roster_that_keeps_returning_a_bodiless_404_never_ends_the_session():
+    bot = failing_roster_bot([ApiError(404, "404 page not found")] * 10, [{"user_id": "u1"}])
+    task = asyncio.ensure_future(watch_empty(bot, "v1", asyncio.Event(), lambda: None, poll=0.001))
+    await asyncio.sleep(0.1)
+    assert not task.done()
+    task.cancel()

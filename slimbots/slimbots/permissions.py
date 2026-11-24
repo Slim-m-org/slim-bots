@@ -30,7 +30,9 @@ class Permissions:
 
     @classmethod
     def contains(cls, bits: int, permission: int) -> bool:
-        """Whether `bits` grants `permission`, with ADMINISTRATOR bypassing all."""
+        """Whether `bits` grants `permission`, with ADMINISTRATOR bypassing all; a zero requirement is never granted."""
+        if permission == cls.NONE:
+            return False
         if bits & cls.ADMINISTRATOR:
             return True
         return (bits & permission) == permission

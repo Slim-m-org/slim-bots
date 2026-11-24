@@ -22,10 +22,12 @@ def command(author_id, content):
     return {"id": f"m-{author_id}-{content}", "author_id": author_id, "channel_id": "c1", "content": content}
 
 
-def two_calls():
+def two_calls(restricted=()):
     client = setup_with_voice(
         member_channels={"u1": "v1", "u2": "v2", "u3": "v3"},
-        voice_channels=[Channel({"id": f"v{n}", "name": f"call-{n}", "kind": "voice"}) for n in (1, 2, 3)],
+        voice_channels=[
+            Channel({"id": f"v{n}", "name": f"call-{n}", "kind": "voice", "restricted": f"v{n}" in restricted}) for n in (1, 2, 3)
+        ],
     )
     client.respond("GET", "/members", MEMBERS + EXTRA_MEMBERS)
     asyncio.run(jellyfin.bot.space.refresh_members())
@@ -37,7 +39,7 @@ def watching():
         self._video_source, self._audio_source = FakeVideoSource(), FakeAudioSource()
 
     return Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
         (stream_session.WatchSession, "start", fake_start),
     )
@@ -128,6 +130,39 @@ def test_voice_activity_wakes_only_that_calls_monitor():
     handler = jellyfin.bot._listeners["on_voice_activity"][0]
     asyncio.run(handler(SimpleNamespace(channel_id="v2")))
     assert live["v2"]._wake_monitor.is_set() and not live["v1"]._wake_monitor.is_set()
+    session_registry.clear()
+
+
+def test_a_person_in_another_call_is_not_told_about_a_private_call():
+    client = two_calls(restricted={"v2"})
+    start_both(client)
+    process(client, command("u3", "!np"))
+    assert client.ephemerals[-1]["content"] == "nothing is playing in #call-3 (streaming in #call-1)."
+    session_registry.clear()
+
+
+def test_a_person_in_no_call_never_reaches_or_hears_of_a_private_call():
+    client = two_calls(restricted={"v1", "v2"})
+    with watching():
+        process(client, command("u2", "!watch inception"))
+        session_registry.add(next(iter(session_registry.live_sessions().values())))
+        jellyfin.bot.voice.member_channels.pop("u3")
+        process(client, command("u3", "!np"))
+    reply = client.ephemerals[-1]
+    assert not reply.get("embeds"), "the private party's title is not shown"
+    assert reply["content"] == "nothing is playing.", reply["content"]
+    start_both(client)
+    process(client, command("u3", "!np"))
+    assert client.ephemerals[-1]["content"] == "nothing is playing."
+    session_registry.clear()
+
+
+def test_a_person_in_no_call_reaches_the_only_public_party_beside_a_private_one():
+    client = two_calls(restricted={"v2"})
+    start_both(client)
+    jellyfin.bot.voice.member_channels.pop("u3")
+    process(client, command("u3", "!np"))
+    assert client.ephemerals[-1].get("embeds")
     session_registry.clear()
 
 

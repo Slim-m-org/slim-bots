@@ -8,8 +8,10 @@ import uuid
 from collections import defaultdict, deque
 
 from slimbots import ApiError, Bot, Member, Permissions, style
+from slimbots.text import escape_mentions
 
 from link_rules import link_domains, strip_punctuation, visible_text
+from mention_rules import mention_count
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, rule TEXT NOT NULL)")
@@ -35,14 +37,13 @@ EXEMPT_PERMISSIONS = Permissions.MANAGE_MESSAGES
 # user_id -> send times inside the flood window; memory only, a restart forgives everyone.
 _recent = defaultdict(deque)
 _log_channel_id = None
+# user_id -> (read at, exempt) from the permissions route, used only while the bot cannot read the role table.
+_exempt_cache = {}
+EXEMPT_CACHE_SECONDS = 60
 
 
 def domain_listed(host, listed):
     return any(host == d or host.endswith("." + d) for d in listed)
-
-
-def mention_count(text):
-    return sum(1 for token in text.split() if len(token) > 1 and token.startswith("@") and token[1].isalnum())
 
 
 def words_hit(text):
@@ -76,12 +77,16 @@ def is_new_member(member, now):
 
 
 def verdict(message, member, channel_name, now):
-    """`(rule, reason, timeout_seconds)` for the first rule the message breaks, or None; checked cheapest first."""
-    text = message.get("content") or ""
+    """`(rule, reason, timeout_seconds)` for the first rule a new message breaks, or None; checked cheapest first."""
     user_id = message["author_id"]
     if flood_tripped(user_id, now):
         _recent[user_id].clear()
         return "flood", f"more than {FLOOD_MESSAGES} messages in {FLOOD_SECONDS}s", FLOOD_TIMEOUT
+    return content_verdict(message.get("content") or "", member, channel_name, now)
+
+
+def content_verdict(text, member, channel_name, now):
+    """The rules that read the text, so an edit is held to them too; flood counts sends, not edits."""
     if MENTION_LIMIT > 0 and mention_count(text) > MENTION_LIMIT:
         return "mention-spam", f"more than {MENTION_LIMIT} mentions in one message", MENTION_TIMEOUT
     hosts = link_domains(text)
@@ -149,21 +154,63 @@ async def enforce(message, member, channel_name, rule, reason, timeout_seconds):
     await write_modlog(_describe(member, channel_name, rule, reason, outcomes))
 
 
+async def is_exempt(member, now):
+    """Whether `member` holds Manage Messages; without the role table that is read from the permissions route, cached briefly."""
+    if bot.space.roles_readable is not False:
+        return member.has_permission(EXEMPT_PERMISSIONS)
+    cached = _exempt_cache.get(member.id)
+    if cached is not None and now - cached[0] < EXEMPT_CACHE_SECONDS:
+        return cached[1]
+    try:
+        read = await bot.space.refresh_permissions(member)
+    except ApiError:
+        read = False
+    if not read:
+        return cached[1] if cached is not None else member.has_permission(EXEMPT_PERMISSIONS)
+    exempt = member.has_permission(EXEMPT_PERMISSIONS)
+    _exempt_cache[member.id] = (now, exempt)
+    return exempt
+
+
 @bot.event
-async def on_raw_message(message):
+async def on_member_role_changed(frame):
+    _exempt_cache.pop(frame.get("user_id"), None)
+
+
+@bot.event
+async def on_role_changed(_frame):
+    _exempt_cache.clear()
+
+
+async def _subject(message):
+    """`(member, channel_name)` when the rules apply to this message's author, else None."""
     author_id = message.get("author_id")
     if not author_id or author_id == bot.me_id or not message.get("id"):
-        return
+        return None
     if await bot.authors.is_automated(author_id):
-        return
+        return None
     member = await bot.space.find_member(author_id)
-    if member is None or member.has_permission(EXEMPT_PERMISSIONS):
-        return
+    if member is None or await is_exempt(member, time.monotonic()):
+        return None
     channel = bot.space.channels.get(message.get("channel_id"))
-    channel_name = channel.name.lower() if channel else ""
-    found = verdict(message, member, channel_name, time.time())
+    return member, channel.name.lower() if channel else ""
+
+
+@bot.event
+async def on_raw_message(message):
+    subject = await _subject(message)
+    found = subject and verdict(message, *subject, time.time())
     if found:
-        await enforce(message, member, channel_name, *found)
+        await enforce(message, *subject, *found)
+
+
+@bot.event
+async def on_message_edited(event):
+    message = event.message
+    subject = await _subject(message)
+    found = subject and content_verdict(message.get("content") or "", *subject, time.time())
+    if found:
+        await enforce(message, *subject, *found)
 
 
 def _count_actions(conn):
@@ -186,6 +233,15 @@ def rules_summary():
     return lines
 
 
+async def lift_refusal(invoker, target):
+    """Why the role ladder keeps `invoker` from lifting `target`'s timeout, read fresh from the server; None when it does not."""
+    reach = await bot.space.ladder_reach(invoker, target)
+    name = escape_mentions(target.display_name)
+    if reach is None:
+        return f"I cannot read where {name} stands on the role ladder to check you may lift their timeout."
+    return None if reach else f"{name} ranks at or above you; ask someone who outranks them to lift it."
+
+
 @bot.command(name="automod", help="Show the rules that are on, what they did, or lift a timeout", usage="<rules|stats|lift @member>", choices={"sub": ("rules", "stats", "lift")})
 async def automod_cmd(ctx, sub: str, member: Member = None):
     sub = sub.lower()
@@ -198,6 +254,10 @@ async def automod_cmd(ctx, sub: str, member: Member = None):
     elif sub == "lift" and member is not None:
         if not ctx.author.has_permission(Permissions.KICK_MEMBERS):
             await ctx.reply("only someone with Kick Members can lift a timeout.")
+            return
+        refusal = await lift_refusal(ctx.author, member)
+        if refusal:
+            await ctx.reply(refusal)
             return
         await bot.client.lift_member_timeout(member.id)
         await write_modlog(f"automod: {ctx.author.mention()} lifted {member.mention()}'s timeout")

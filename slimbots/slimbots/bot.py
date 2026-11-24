@@ -50,6 +50,11 @@ DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
 
+
+def env_cursor_path() -> str:
+    """The cursor db a bot with no store of its own uses: SLIMM_CURSOR_DB, else the default file."""
+    return os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB
+
 # Seconds a noted message seq waits to be written with its neighbours, and before a failed write is tried again.
 CURSOR_FLUSH_SECONDS = 0.1
 CURSOR_RETRY_SECONDS = 1.0
@@ -176,6 +181,7 @@ class Bot:
         self._fatal_error: BaseException | None = None
         self._main_task: asyncio.Task[Any] | None = None
         self._gateway: Gateway | None = None
+        self._dropped_commands: set[str] = set()
         self._held_live: list[tuple[str | None, dict[str, Any]]] | None = None
         self._replayed_ids: set[str] = set()
         self.moderation_head: int | None = None
@@ -356,8 +362,9 @@ class Bot:
 
     def add_command(self, command: Command) -> None:
         for name in command.names:
-            if name in self.commands:
-                raise ValueError(f"command name/alias `{name}` is already registered")
+            clash = next((known for known in self.commands if known.lower() == name.lower()), None)
+            if clash is not None:
+                raise ValueError(f"command name/alias `{name}` is already registered (as `{clash}`; names compare case-insensitively)")
             self.commands[name] = command
         self._unique_commands.append(command)
 
@@ -483,10 +490,16 @@ class Bot:
         # A connector's commands are declared in its manifest, so it publishes none of its own.
         if self.connector:
             return
+        self._dropped_commands = set()
         try:
-            await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
+            await register_commands(
+                self.client, prefix=self.prefix, commands=self.unique_commands(), on_dropped=self._note_dropped_commands,
+            )
         except RegistrationConflict as err:
             log.error("the server refused this bot's commands: %s", err.reason or err)
+
+    def _note_dropped_commands(self, names: list[str]) -> None:
+        self._dropped_commands = {name.lower() for name in names}
 
     async def process_message(self, message: dict[str, Any]) -> None:
         """One `message.created` payload: the bot-ignore default, command
@@ -505,6 +518,9 @@ class Bot:
 
         invoked_with, raw_args = split_first_word(invocation)
         command = self.commands.get(invoked_with)
+        if command is not None and self._is_dropped_by_prefix(message, invoked_with):
+            log.debug("ignored %s%s: the server gave that command to another bot", self.prefix, invoked_with)
+            return
         if command is None:
             if self._listeners.get("on_command_not_found"):
                 await self._dispatch_not_found(message, author_id, invoked_with, raw_args)
@@ -518,6 +534,10 @@ class Bot:
             command=command, invoked_with=invoked_with, raw_args=raw_args,
         )
         await self._invoke(ctx, command)
+
+    def _is_dropped_by_prefix(self, message: dict[str, Any], invoked_with: str) -> bool:
+        """A prefixed use of a command the server gave to another bot; an @mention still reaches this bot."""
+        return invoked_with.lower() in self._dropped_commands and (message.get("content") or "").startswith(self.prefix)
 
     def _strip_invocation(self, content: str) -> str | None:
         """The text after the prefix or an `@username` address, or None when `content` addresses this bot by neither."""
@@ -579,22 +599,47 @@ class Bot:
             return
         if kind == "role.changed":
             await guard_dispatch(self._reload_roles)
-        elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
+            return
+        if kind != "member.role_changed":
+            return
+        if self.me_id is not None and frame.get("user_id") == self.me_id:
+            self.permissions_readable = None
+            await guard_dispatch(self._reload_roles)
+        if frame.get("user_id") in self.space.members:
             await guard_dispatch(self.space.fetch_member, frame["user_id"])
 
     async def _track_members(self, kind: str, frame: dict[str, Any]) -> None:
-        """Drops a removed member from `space.members` and refetches a restored or renamed one, so lookups are never stale."""
-        user_id = frame.get("user_id")
-        if self.space is None or not user_id:
+        """Keeps `space.members` current from removal, restore, profile, timeout, join gate and ownership frames."""
+        if self.space is None:
             return
+        user_id = frame.get("user_id")
+        if kind == "owner.changed":
+            await self._refetch_owners(user_id)
+            return
+        if not user_id:
+            return
+        cached = self.space.members.get(user_id)
         if kind == "member.removed":
             self.space.members.pop(user_id, None)
-        elif kind == "member.restored" or (kind == "profile.changed" and user_id in self.space.members):
+        elif kind == "member.timeout" and cached is not None:
+            until = frame.get("until")
+            cached.timed_out_until = until if isinstance(until, int) else None
+        elif kind == "member.restored" or (kind in ("profile.changed", "join_gate.changed") and cached is not None):
+            await guard_dispatch(self.space.fetch_member, user_id)
+
+    async def _refetch_owners(self, heir: str | None) -> None:
+        """Refetches the cached owner and the heir, so the owner's every-bit grant moves with ownership."""
+        assert self.space is not None
+        stale = {m.id for m in self.space.members.values() if m.is_owner}
+        for user_id in sorted(stale | ({heir} if heir else set())):
             await guard_dispatch(self.space.fetch_member, user_id)
 
     async def _reload_roles(self) -> None:
+        """Reloads the role table and recomputes every cached member, also when the table was just lost."""
         assert self.space is not None
-        if await self._load_roles():
+        try:
+            await self._load_roles()
+        finally:
             self.space.reapply_roles()
 
     async def _load_roles(self) -> bool:
@@ -656,26 +701,35 @@ class Bot:
             for global_check in self._global_checks:
                 refusal = await global_check(ctx)
                 if refusal:
-                    await ctx.reply_ephemeral(refusal, public_fallback=True)
+                    await self._reply_refusal(ctx, refusal)
                     return
             await command.invoke(ctx)
         except MissingPermissions as err:
-            await ctx.reply_ephemeral(str(err), public_fallback=True)
+            await self._reply_refusal(ctx, str(err))
             await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
-            await ctx.reply_ephemeral(self._permission_refusal(err) or str(err), public_fallback=True)
+            await self._reply_refusal(ctx, self._permission_refusal(err) or str(err))
             await self._dispatch_event("on_command_error", ctx, err)
         except ApiError as err:
             if is_token_revoked(err):
                 raise
             reply = f"I can't do that: {err.reason or 'missing permission'}" if is_forbidden(err) \
                 else UNEXPECTED_ERROR_REPLY
-            await ctx.reply_ephemeral(reply, public_fallback=True)
+            await self._reply_refusal(ctx, reply)
             await self._dispatch_event("on_command_error", ctx, err)
         except Exception as err:
             log.error("unhandled error in command `%s`", command.name, exc_info=err)
             await self._reply_unexpected(ctx)
             await self._dispatch_event("on_command_error", ctx, err)
+
+    async def _reply_refusal(self, ctx: Context, text: str) -> None:
+        """Tells the invoker why a command did nothing; a reply the server refuses, such as to a deleted command, is only logged."""
+        try:
+            await ctx.reply_ephemeral(text, public_fallback=True)
+        except ApiError as err:
+            if is_token_revoked(err):
+                raise
+            log_failure(log, err, "could not tell the invoker why `%s` did nothing", ctx.invoked_with)
 
     async def _reply_unexpected(self, ctx: Context) -> None:
         """Tells the invoker something broke, with no detail: the traceback stays in the log, never the chat."""
@@ -697,8 +751,8 @@ class Bot:
         if kind == "message.created":
             await self._route_message(frame)
         elif kind == "interaction.created":
-            # A call control is used on a call, which a channel-scoped bot is not scoped to, so scope never gates it.
-            if frame.get("kind") == "call_control" or await self._accepts_channel(frame.get("channel_id"), kind):
+            # A call control is used on a call, and the server offers a message menu in every channel the bot can view, so scope never gates either.
+            if frame.get("kind") in ("call_control", "message_menu") or await self._accepts_channel(frame.get("channel_id"), kind):
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
@@ -806,8 +860,7 @@ class Bot:
         pending = self._catch_up_channels()
         if not pending or self._cursor_conn is None:
             return
-        for channel_id in pending:
-            await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+        pending = await self._bootstrap_channels(pending)
         while pending:
             scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in pending]
             more, starved = [], []
@@ -822,6 +875,21 @@ class Bot:
                     (more if scope["messages"] else starved).append(channel_id)
             # A scope the shared response budget left empty can only get a page once another scope has used one.
             pending = more + (starved if more else [])
+
+    async def _bootstrap_channels(self, channels: list[str]) -> list[str]:
+        """Bootstraps each channel on its own; one the server refuses for good is logged by id and left out of this catch-up."""
+        assert self.client is not None and self._cursor_conn is not None
+        usable = []
+        for channel_id in channels:
+            try:
+                await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+            except ApiError as err:
+                if err.status not in (400, 403, 404):
+                    raise
+                log.exception("skipping channel %s: the server answered HTTP %s (is it viewable by this bot?)", channel_id, err.status)
+                continue
+            usable.append(channel_id)
+        return usable
 
     async def _replay_page(self, channel_id: str, messages: list[dict[str, Any]]) -> None:
         assert self._cursor_conn is not None
@@ -851,16 +919,17 @@ class Bot:
         me = await self.client.me()
         self.me_id = me["id"]
         self.username = me.get("username")
-        await self.space.refresh_channels()
-        self.permissions_readable = None
-        await self._load_roles()
-        await self.space.refresh_members()
         await self._adopt_assigned_prefix(me)
         await self._register_commands()
         if self._ui:
             self._ui_registered = await register_ui(self.client, self._ui)
-        await self._dispatch_event("on_connect")
+        # Subscribed before the snapshot, so a change landing while the bot connects arrives as a queued frame.
         async with await Gateway.open(self.client) as gateway:
+            await self.space.refresh_channels()
+            self.permissions_readable = None
+            await self._load_roles()
+            await self.space.refresh_members()
+            await self._dispatch_event("on_connect")
             self._gateway = gateway
             self.voice.forget_members()
             head = gateway.hello.get("moderation_seq")

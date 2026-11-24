@@ -20,11 +20,11 @@ python3 bot.py
 | Command | Who | What it does |
 | --- | --- | --- |
 | `!event "movie night" fri 8pm` | anyone | post the plan with buttons; the day is a weekday, `today`, `tomorrow` or `YYYY-MM-DD`, the time `8pm`, `8:30pm` or `20:00` |
-| `!event list` | anyone | the open events with their numbers |
+| `!event list` | anyone | the open events planned in this channel, with their numbers |
 | `!event cancel <n>` | the planner, or Manage Messages | cancel an event and take the buttons off its post |
 
 A quoted title is optional: `!event game night sat 19:30` works too.
-At most 10 events are open at once, and a start can be at most 60 days away.
+A member can have at most 3 events open at once and a channel at most 10, a member waits 30 seconds between plans, and a start can be at most 60 days away.
 A weekday that has already passed today means next week.
 The press of a button is private to the member and can be changed any time before the start.
 

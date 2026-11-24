@@ -13,6 +13,7 @@ import sonarr_cog  # noqa: E402
 import sonarr_core as core  # noqa: E402
 from arrkit import history, poller, store  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
+from slimbots import ApiError  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
 harness = Harness(sonarr.bot, core.init_db)
@@ -104,7 +105,7 @@ def test_the_live_poll_bootstraps_then_posts_a_new_import_once_as_an_embed_in_th
         asyncio.run(sonarr.poll_once())
     assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c1"
     assert client.sent[0]["embeds"][0]["title"].startswith("Downloaded: Show (2020) S01E02")
-    assert client.sent[0]["content"] == ""
+    assert client.sent[0]["content"].startswith("Downloaded: Show (2020) S01E02")
 
 
 def test_the_poll_asks_sonarr_for_the_series_and_episode_inline():
@@ -169,6 +170,56 @@ def test_adding_with_no_profile_or_root_folder_says_what_sonarr_lacks():
     with Patched(core, "api", api):
         harness.press_chooser(client, ("sonarrpick:sel:0", "u1"))
     assert "sonarr has no quality profile or root folder to add into" in client.edited[-1]["content"]
+
+
+def unescaped_at(text):
+    return [i for i, c in enumerate(text) if c == "@" and (len(text[:i]) - len(text[:i].rstrip("\\"))) % 2 == 0]
+
+
+def test_a_query_with_a_mention_is_echoed_with_no_live_mention():
+    client, _ = command("!sonarr search @everyone", **{"/series/lookup": []})
+    assert client.sent[-1]["content"] == 'nothing found for "\\@everyone".'
+    client, _ = command("!sonarr search @here", **{"/series/lookup": [{"title": "@midnight", "year": 2013, "id": 3}]})
+    content = client.sent[-1]["content"]
+    assert "@here" in content and "@midnight" in content and not unescaped_at(content)
+
+
+def test_sonarr_titles_in_queue_calendar_and_add_carry_no_live_mention():
+    queue = {"records": [{"title": "@everyone", "status": "@here", "series": {"title": "@midnight"}, "episode": {"seasonNumber": 1, "episodeNumber": 2}}]}
+    client, _ = command("!sonarr queue", **{"/queue": queue})
+    assert "@midnight" in client.sent[-1]["content"] and not unescaped_at(client.sent[-1]["content"])
+    items = [{"airDateUtc": "2026-10-01T01:00:00Z", "seasonNumber": 1, "episodeNumber": 4, "series": {"title": "@midnight"}}]
+    client, _ = command("!sonarr calendar 3", **{"/calendar": items})
+    assert "@midnight" in client.sent[-1]["content"] and not unescaped_at(client.sent[-1]["content"])
+    client, api = command("!sonarr add @nick", **{"/series/lookup": [{"title": "@midnight", "tvdbId": 1}], "/qualityprofile": [{"id": 4, "name": "HD"}], "/rootfolder": [{"path": "/tv"}]})
+    assert not unescaped_at(client.sent[-1]["content"]) and labels(newest_buttons(client)) == ["@midnight", "Cancel"]
+    with Patched(core, "api", api):
+        harness.press_chooser(client, ("sonarrpick:sel:0", "u1"))
+    assert "@midnight" in client.edited[-1]["content"] and not unescaped_at(client.edited[-1]["content"])
+
+
+
+def test_a_history_post_that_falls_back_to_plain_text_carries_no_live_mention():
+    client = harness.setup()
+    failed = record(8, "downloadFailed", source="@everyone.S01E01", data={"message": "@here broke"})
+    failed["series"]["title"] = "@midnight"
+    records = [record(7, "downloadFolderImported")]
+    answers = [ApiError(400, {"error": "embeds are not supported"}), {"id": "m1", "seq": 1}]
+
+    def older_server():
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    client.respond("POST", "/channels/c1/messages", older_server)
+    with Patched(core, "api", history_api(records)):
+        asyncio.run(sonarr.poll_once())
+        records.append(failed)
+        asyncio.run(sonarr.poll_once())
+    plain = client.sent[-1]["content"]
+    assert "@midnight" in plain and "@here" in plain and not unescaped_at(plain)
+    assert client.sent[0]["embeds"][0]["title"].startswith("Failed: @midnight")
 
 
 if __name__ == "__main__":

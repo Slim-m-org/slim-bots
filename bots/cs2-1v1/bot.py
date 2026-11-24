@@ -9,11 +9,12 @@ import time
 import a2s
 import core
 from dockerapi import DockerClient, DockerError, ImageMissing
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, CheckFailure
 from slimbots.http import is_token_revoked
 from slimbots.permissions import Permissions
 
 WATCH_SECONDS = 15
+STOP_RETRY_MAX_SECONDS = 600
 START_COOLDOWN_SECONDS = 10
 
 bot = Bot(prefix="!")
@@ -36,8 +37,11 @@ def may_stop(ctx, server):
     return ctx.author.id == server.owner_id or ctx.author.has_permission(Permissions.ADMINISTRATOR)
 
 
-def where_allowed(ctx):
-    return not core.CS2_CHANNEL or ctx.channel_id == core.CS2_CHANNEL
+def in_the_1v1_channel(ctx):
+    """The group check, so every subcommand stays in CS2_CHANNEL: status can show the password."""
+    if core.CS2_CHANNEL and ctx.channel_id != core.CS2_CHANNEL:
+        raise CheckFailure("that is not the channel for this; ask where 1v1 servers are started.")
+    return True
 
 
 async def say(channel_id, text):
@@ -112,11 +116,8 @@ def running_text():
     return "\n".join(lines) + f"\nuse `{bot.prefix}1v1 status` to see it, or `{bot.prefix}1v1 stop` if it is yours."
 
 
-@bot.group(name="1v1", help="Start a private CS2 1v1 server: `1v1 [map]`, `stop`, `status`", suggest={"rest": ("stop", "status", "help")})
+@bot.group(name="1v1", help="Start a private CS2 1v1 server: `1v1 [map]`, `stop`, `status`", suggest={"rest": ("stop", "status", "help")}, check=in_the_1v1_channel)
 async def one_v_one(ctx, rest: str = ""):
-    if not where_allowed(ctx):
-        await ctx.reply_ephemeral("that is not the channel for this; ask where 1v1 servers are started.", public_fallback=True)
-        return
     if rest.strip().lower() == "help":
         await ctx.reply(help_text())
         return
@@ -177,16 +178,22 @@ async def stop_cmd(ctx):
         await ctx.reply("only the member who started the server, or an admin, can stop it.")
         return
     for server in mine:
-        await finish(server, f"stopped by {ctx.author.mention()}")
+        await finish(server, f"stopped by {ctx.author.mention()}", by_watcher=False)
 
 
-async def finish(server, reason):
-    """Stops the container and tells the channel; the server leaves the table even when Docker complains."""
+async def finish(server, reason, *, by_watcher=True):
+    """Stops the container and tells the channel; the watcher reports a refused stop once, then retries it with backoff."""
     try:
         await docker.stop(server.container_id)
     except DockerError as err:
         print(f"could not stop {server.name}: {err}", file=sys.stderr)
-        await say(server.channel_id, f"I could not stop the 1v1 server on `{server.map_name}` ({err}); an admin should check it.")
+        if not by_watcher:
+            await say(server.channel_id, f"I could not stop the 1v1 server on `{server.map_name}` ({err}); an admin should check it.")
+            return
+        server.stop_failures += 1
+        server.stop_retry_at = clock() + min(WATCH_SECONDS * 2 ** server.stop_failures, STOP_RETRY_MAX_SECONDS)
+        if server.stop_failures == 1:
+            await say(server.channel_id, f"I could not stop the 1v1 server on `{server.map_name}` ({err}); I will keep trying, and an admin should check it.")
         return
     servers.pop(server.container_id, None)
     await say(server.channel_id, f"the 1v1 server on `{server.map_name}` is stopped: {reason}.")
@@ -213,12 +220,16 @@ async def report_progress(server, now):
 
 
 async def watch_one(server):
+    if server.stop_failures and clock() < server.stop_retry_at:
+        return
     try:
         info = await asyncio.to_thread(query, server.name, server.port)
     except a2s.QueryError:
         info = None
     now = clock()
     action = core.decide(server, info, now)
+    if not isinstance(action, tuple):
+        server.stop_failures = 0
     if action == "ready":
         await announce_ready(server)
     elif action is not None:

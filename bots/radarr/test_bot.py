@@ -135,6 +135,15 @@ def test_queue_names_the_movie_and_its_time_left():
     assert "1 in the queue:\n- Dune (2021) - downloading, 00:10:00 left" in client.sent[-1]["content"]
 
 
+def test_a_movie_title_with_a_mention_is_escaped_in_queue_and_calendar():
+    queue = {"records": [{"title": "x", "status": "@here", "movie": {"title": "@everyone"}}], "totalRecords": 1}
+    client, _ = command("!radarr queue", **{"/queue": queue})
+    assert "- \\@everyone - \\@here" in client.sent[-1]["content"]
+    today = library.calendar_window(1)[0]
+    client, _ = command("!radarr calendar 3", **{"/calendar": [{"title": "@midnight", "digitalRelease": f"{today}T00:00:00Z"}]})
+    assert f"{today} \\@midnight" in client.sent[-1]["content"]
+
+
 def test_calendar_dates_a_movie_by_the_release_inside_the_window():
     today = library.calendar_window(1)[0]
     items = [{"title": "Dune", "year": 2021, "inCinemas": "2000-01-01T00:00:00Z", "digitalRelease": f"{today}T00:00:00Z", "hasFile": False}]

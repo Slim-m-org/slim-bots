@@ -75,9 +75,34 @@ def test_give_moves_chips_between_accounts():
     client = setup()
     casino.credit(casino.bot.store.connection, "u1", 100)
     process(client, message("u1", "!give 30 sam", "m1"))
-    assert "sent 30 chips to Sam" in client.sent[-1]["content"]
+    assert "sent 30 chips to @sam" in client.sent[-1]["content"]
     assert casino.get_balance(casino.bot.store.connection, "u1") == 70
     assert casino.get_balance(casino.bot.store.connection, "u2") == 30
+
+
+def roster_with(*extra):
+    """`setup()`, then a roster with `extra` members ahead of the usual ones, so they are the older accounts."""
+    client = setup()
+    client.respond("GET", "/members", [*extra, *MEMBERS])
+    asyncio.run(casino.bot.space.refresh_members())
+    return client
+
+
+def test_give_goes_to_the_username_not_an_older_member_whose_display_name_copies_it():
+    client = roster_with(human("u0", "mallory", "sam", role_ids=[]))
+    casino.credit(casino.bot.store.connection, "u1", 100)
+    process(client, message("u1", "!give 30 sam", "m1"))
+    assert "sent 30 chips to @sam" in client.sent[-1]["content"]
+    assert casino.get_balance(casino.bot.store.connection, "u2") == 30
+    assert casino.get_balance(casino.bot.store.connection, "u0") == 0
+
+
+def test_give_to_a_display_name_two_members_share_asks_for_the_username():
+    client = roster_with(human("u7", "twin1", "Twin", role_ids=[]), human("u8", "twin2", "twin", role_ids=[]))
+    casino.credit(casino.bot.store.connection, "u1", 100)
+    process(client, message("u1", "!give 30 twin", "m1"))
+    assert "@username" in client.ephemerals[-1]["content"]
+    assert casino.get_balance(casino.bot.store.connection, "u1") == 100
 
 
 def test_give_refuses_yourself():

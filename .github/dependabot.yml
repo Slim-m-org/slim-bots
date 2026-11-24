@@ -4,3 +4,21 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The bot templates' lock, compiled from bot-templates-requirements.in.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      bot-templates:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  # slimbots' pyproject.toml and the requirements-*.in files its CI, livekit and build locks compile from.
+  - package-ecosystem: pip
+    directory: /slimbots
+    schedule:
+      interval: weekly
+    groups:
+      slimbots:
+        patterns: ["*"]
+        update-types: [minor, patch]

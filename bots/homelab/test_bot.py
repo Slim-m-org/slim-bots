@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+from unittest import mock
 
 import httpx
 
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as homelab  # noqa: E402
 import sources  # noqa: E402
-from slimbots import Canvas  # noqa: E402
+from slimbots import Canvas, urlpolicy  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
@@ -64,7 +65,6 @@ class Rig:
         asyncio.run(homelab.bot.open_store(migrate=homelab.init_db))
         homelab.get_url = self.get
         homelab.canvas = Canvas(self.client, "c1")
-        homelab.canvas_channel_name = "voice"
         homelab.status.clear()
 
     def get(self, url, headers, cafile=None):
@@ -80,11 +80,12 @@ class Rig:
     def tick(self):
         asyncio.run(homelab.refresh())
 
-    def say(self, text, permissions=Permissions.MANAGE_SERVER):
+    def say(self, text, permissions=Permissions.MANAGE_SERVER, channel_id="c1"):
         member = homelab.bot.space._make_member({**ADMIN, "role_ids": []})
         member._base_permissions = permissions
         homelab.bot.space.members["u-admin"] = member
-        asyncio.run(homelab.bot.process_message({"id": f"m{len(self.client.calls)}", "channel_id": "c1", "author_id": "u-admin", "content": text, "seq": 1}))
+        message = {"id": f"m{len(self.client.calls)}", "channel_id": channel_id, "author_id": "u-admin", "content": text, "seq": 1}
+        asyncio.run(homelab.bot.process_message(message))
         return self.client.ephemerals[-1]["content"] if self.client.ephemerals else ""
 
 
@@ -137,6 +138,17 @@ def test_a_removed_event_forgets_the_tile():
     asyncio.run(homelab.on_canvas_objects_removed({"object_ids": [rig.client.placed[0]["id"]]}))
     rig.tick()
     assert len(rig.client.placed) == 2 and not rig.client.ops
+
+
+def test_clearing_another_canvas_keeps_the_tiles():
+    rig = Rig()
+    rig.tick()
+    asyncio.run(homelab.on_canvas_cleared({"channel_id": "other"}))
+    rig.tick()
+    assert len(rig.client.placed) == 1 and not rig.client.ops
+    asyncio.run(homelab.on_canvas_cleared({"channel_id": "c1"}))
+    rig.tick()
+    assert len(rig.client.placed) == 2
 
 
 def test_containers_and_jellyfin_tiles_sit_side_by_side():
@@ -245,22 +257,49 @@ def test_an_oversized_answer_and_a_dead_host_are_sentences_that_name_no_url():
     assert fetched("https://pve.lan:8006/x?token=SECRET") == "homelab could not be reached (ConnectError)"
 
 
+DNS = {"pve.lan": ["192.168.1.10"], "jellyfin": ["172.18.0.5"], "pve.example.com": ["1.1.1.1"]}
+
+
+def test_the_docker_reader_can_go_through_a_filtering_proxy_over_http():
+    seen = scripted_transport(lambda request: httpx.Response(200, content=b"[]"))
+    try:
+        assert sources.docker_get("http://homelab-docker-proxy:2375/") == (200, b"[]")
+    finally:
+        sources.TRANSPORT = None
+    assert [(r.method, r.url.host, r.url.port, r.url.path, r.url.query) for r in seen] == [
+        ("GET", "homelab-docker-proxy", 2375, "/containers/json", b"all=1"),
+    ]
+
+
+def test_a_docker_setting_that_is_neither_a_socket_path_nor_an_http_url_stops_the_bot():
+    Rig(DOCKER_SOCKET="tcp://homelab-docker-proxy:2375")
+    homelab.ALLOW_HTTP = False
+    assert "HOMELAB_DOCKER_SOCKET" in homelab.check_config()
+    for good in ("/var/run/docker.sock", "run/docker.sock", "http://homelab-docker-proxy:2375", "https://docker.lan:2376"):
+        Rig(DOCKER_SOCKET=good)
+        assert homelab.check_config() is None, good
+
+
 def test_a_plaintext_lan_url_stops_the_bot_unless_the_operator_allows_it():
-    Rig(PROXMOX_URL="http://pve.lan:8006")
-    homelab.ALLOW_HTTP = False
-    assert "refusing a plaintext HOMELAB_PROXMOX_URL" in homelab.check_config() and "HOMELAB_ALLOW_HTTP" in homelab.check_config()
-    homelab.ALLOW_HTTP = True
-    assert homelab.check_config() is None
-    homelab.ALLOW_HTTP = False
-    Rig(JELLYFIN_URL="http://10.0.0.100:8096", JELLYFIN_KEY="k")
-    assert "HOMELAB_JELLYFIN_URL" in homelab.check_config()
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        Rig(PROXMOX_URL="http://pve.lan:8006")
+        homelab.ALLOW_HTTP = False
+        assert "refusing a plaintext HOMELAB_PROXMOX_URL" in homelab.check_config() and "HOMELAB_ALLOW_HTTP" in homelab.check_config()
+        homelab.ALLOW_HTTP = True
+        assert homelab.check_config() is None
+        Rig(PROXMOX_URL="http://pve.example.com:8006")
+        assert "covers only a host on your own network" in homelab.check_config()
+        homelab.ALLOW_HTTP = False
+        Rig(JELLYFIN_URL="http://10.0.0.100:8096", JELLYFIN_KEY="k")
+        assert "HOMELAB_JELLYFIN_URL" in homelab.check_config()
 
 
 def test_https_loopback_a_bare_docker_name_and_unset_sources_pass_the_url_check():
-    for urls in ({"PROXMOX_URL": "https://pve.lan:8006"}, {"PROXMOX_URL": "http://localhost:8006"}, {"JELLYFIN_URL": "http://jellyfin:8096", "JELLYFIN_KEY": "k"}, {"PROXMOX_URL": "", "PROXMOX_TOKEN": ""}):
-        Rig(**urls)
-        homelab.ALLOW_HTTP = False
-        assert homelab.check_config() is None, urls
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        for urls in ({"PROXMOX_URL": "https://pve.lan:8006"}, {"PROXMOX_URL": "http://localhost:8006"}, {"JELLYFIN_URL": "http://jellyfin:8096", "JELLYFIN_KEY": "k"}, {"PROXMOX_URL": "", "PROXMOX_TOKEN": ""}):
+            Rig(**urls)
+            homelab.ALLOW_HTTP = False
+            assert homelab.check_config() is None, urls
 
 
 def test_a_url_that_carries_credentials_is_refused():
@@ -282,6 +321,27 @@ def test_a_non_voice_channel_is_refused_at_connect():
     else:
         raise AssertionError("a text channel was accepted")
     homelab.CANVAS_CHANNEL = None
+
+
+def test_status_names_a_public_canvas_channel_to_anyone():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = False
+    assert rig.say("!homelab", permissions=0, channel_id="c-text").startswith("drawing on #voice")
+
+
+def test_status_does_not_name_a_restricted_canvas_channel_to_a_member_elsewhere():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = True
+    reply = rig.say("!homelab", permissions=Permissions.MANAGE_SERVER, channel_id="c-text")
+    assert "#voice" not in reply
+    assert reply.startswith("drawing on a channel you cannot see")
+
+
+def test_status_names_a_restricted_canvas_channel_in_that_channel_or_to_an_administrator():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = True
+    assert rig.say("!homelab", permissions=0, channel_id="c1").startswith("drawing on #voice")
+    assert rig.say("!homelab", permissions=Permissions.ADMINISTRATOR, channel_id="c-text").startswith("drawing on #voice")
 
 
 if __name__ == "__main__":

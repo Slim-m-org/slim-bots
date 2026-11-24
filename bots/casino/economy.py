@@ -20,7 +20,7 @@ def _txn_daily(conn, request_id, user_id):
     remaining = casino_core.DAILY_COOLDOWN_SECONDS - (now - last_daily)
     if remaining > 0:
         conn.execute("ROLLBACK")
-        return {"error": f"already claimed - try again in {format_duration(remaining, "spaced")}"}
+        return {"error": f"already claimed - try again in {format_duration(remaining, 'spaced')}"}
     conn.execute(
         "UPDATE accounts SET balance = balance + ?, last_daily = ? WHERE user_id = ?",
         (casino_core.DAILY_AMOUNT, now, user_id),
@@ -118,7 +118,7 @@ def setup(bot):
         if "error" in result:
             await ctx.reply(result["error"])
             return
-        await ctx.reply(f"sent {amount} chips to {member.display_name}. your balance: {result['balance']}")
+        await ctx.reply(f"sent {amount} chips to @{member.username}. your balance: {result['balance']}")
 
     @bot.command(help="Coinflip, about a 5% house edge", usage="<amount|all> <heads|tails>")
     async def flip(ctx, amount_spec: str, guess: str):

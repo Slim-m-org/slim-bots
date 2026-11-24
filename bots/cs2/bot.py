@@ -4,11 +4,13 @@
 import asyncio
 
 import steam
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, Cooldown
 from slimbots.text import escape_mentions
 
 MAX_LINKED = 50
 MAX_NOTE = 100
+LFG_COOLDOWN = Cooldown(600)
+LFG_COOLDOWN_KEY = "lfg"
 
 
 def init_db(conn):
@@ -165,25 +167,40 @@ async def cs2_who(ctx):
     await reply(ctx, "\n".join([f"- {await name_of(user_id)}: {describe(found.get(steam_id))}" for user_id, steam_id, _q, _c in players]))
 
 
-@cs2.command(name="lfg", help="Ask for a game: pings the CS2 role when enough linked members are online and free", usage="[note]", cooldown=600, cooldown_bucket="deployment")
+@cs2.command(name="lfg", help="Ask for a game: pings the CS2 role when enough linked members are online and free", usage="[note]")
 async def cs2_lfg(ctx, note: str = ""):
+    """One ping per deployment every 10 minutes; a refusal or a failed post costs nothing."""
+    wait = LFG_COOLDOWN.check(LFG_COOLDOWN_KEY)
+    if wait:
+        await reply(ctx, wait)
+        return
+    pinged = False
+    try:
+        pinged = await ping_free_players(ctx, note)
+    finally:
+        if not pinged:
+            LFG_COOLDOWN.reset(LFG_COOLDOWN_KEY)
+
+
+async def ping_free_players(ctx, note):
     if not STEAM_API_KEY:
         await reply(ctx, NO_KEY)
-        return
+        return False
     players = await bot.store.run(all_players)
     try:
         found = await summaries(players) if players else {}
     except steam.SteamError as err:
         await reply(ctx, f"Steam did not answer: {err}.")
-        return
+        return False
     free = [p[0] for p in players if describe(found.get(p[1])) == "online"]
     if len(free) < LFG_MIN:
         await reply(ctx, f"only {len(free)} linked member{'s are' if len(free) != 1 else ' is'} online and free right now; I ping at {LFG_MIN}.")
-        return
+        return False
     mentions = " ".join([await name_of(u) for u in free])
-    lead = f"@{LFG_ROLE}" if LFG_ROLE else mentions
+    lead = f"@[{LFG_ROLE}]" if LFG_ROLE else mentions
     extra = f" - {escape_mentions(note.strip()[:MAX_NOTE])}" if note.strip() else ""
     await ctx.reply(f"{lead} {ctx.author.mention()} wants a CS2 game{extra}. Free now: {mentions}")
+    return True
 
 
 @cs2.command(name="server", help="Players and map on the group's CS2 server")

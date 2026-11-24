@@ -11,6 +11,7 @@ MAX_REASON = 300
 MAX_SHOWN = 15
 MAX_RULES = 10
 SECONDS_PER_DAY = 86400
+MAX_TIMEOUT_SECONDS = 28 * SECONDS_PER_DAY
 RULE_NEEDS = {"kick": Permissions.BAN_MEMBERS, "timeout": Permissions.KICK_MEMBERS}
 ALL_BITS = tuple(bit for name, bit in vars(Permissions).items() if name.isupper() and name != "NONE" and isinstance(bit, int))
 
@@ -66,6 +67,11 @@ def delete_warn(conn, warn_id):
     return cur.rowcount > 0
 
 
+def warn_owner(conn, warn_id):
+    row = conn.execute("SELECT user_id FROM warns WHERE id = ?", (warn_id,)).fetchone()
+    return row[0] if row else None
+
+
 def clear_warns(conn, user_id):
     cur = conn.execute("DELETE FROM warns WHERE user_id = ?", (user_id,))
     conn.commit()
@@ -114,7 +120,7 @@ def parse_action(tokens):
         return "kick", 0
     if tokens[:1] == ["timeout"] and len(tokens) == 2:
         seconds = Duration.parse(tokens[1].lower())
-        if seconds:
+        if seconds and seconds <= MAX_TIMEOUT_SECONDS:
             return "timeout", int(seconds)
     return None
 
@@ -149,12 +155,17 @@ def _held(member):
     return {bit for bit in ALL_BITS if member.has_permission(bit)}
 
 
+def _timed_out(member):
+    until = member.timed_out_until
+    return isinstance(until, int) and until > time.time() * 1000
+
+
 async def _rank_is_known(target):
     """Whether the target's granted permissions are readable; without the role table the route's timeout-reduced bits would understate them."""
     space = bot.space
     if space.roles_readable is not False:
         return True
-    if target.timed_out_until or not bot.permissions_readable:
+    if _timed_out(target) or not bot.permissions_readable:
         return False
     try:
         return await space.refresh_permissions(target)
@@ -162,20 +173,35 @@ async def _rank_is_known(target):
         return False
 
 
+def unreadable_rank(target):
+    return f"I cannot read where {escape_mentions(target.display_name)} stands on the role ladder to check you may"
+
+
+def out_of_reach(target):
+    return f"{escape_mentions(target.display_name)} ranks at or above you; ask someone who outranks them"
+
+
 async def refusal_for(invoker, target, rule):
-    """Why `invoker` could not run this rule on `target` themselves, which is the server's own test, or None when they could."""
+    """Why `invoker` could not run this rule on `target` themselves, by the server's own tests, or None when they could."""
     if rule is None:
         return None
     action, seconds = rule
+    does = f"this warn would {describe_rule(action, seconds)}"
     if not invoker.has_permission(RULE_NEEDS[action]):
         need = "Ban Members" if action == "kick" else "Kick Members"
-        return f"this warn would {describe_rule(action, seconds)}, and only someone with {need} can do that."
+        return f"{does}, and only someone with {need} can do that."
+    reach = await bot.space.ladder_reach(invoker, target)
+    if reach is None:
+        return f"{does}, but {unreadable_rank(target)}."
+    if not reach:
+        return f"{does}, and {out_of_reach(target)}."
+    if invoker.is_owner:
+        return None
     name = escape_mentions(target.display_name)
     if not await _rank_is_known(target):
-        return f"this warn would {describe_rule(action, seconds)}, but I cannot read {name}'s permissions to check you may."
-    theirs, yours = _held(target), _held(invoker)
-    if not theirs <= yours or (theirs == yours and not invoker.has_permission(Permissions.ADMINISTRATOR)):
-        return f"this warn would {describe_rule(action, seconds)}, and {name} ranks at or above you; ask someone who outranks them."
+        return f"{does}, but I cannot read {name}'s permissions to check you may."
+    if not _held(target).issubset(_held(invoker)):
+        return f"{does}, and {name} holds permissions you do not; ask someone who outranks them."
     return None
 
 
@@ -183,6 +209,9 @@ async def refusal_for(invoker, target, rule):
 async def warn(ctx, member: Member, reason: str = ""):
     if member.id == ctx.author.id or member.is_bot:
         await ctx.reply_ephemeral("you can warn another person, not yourself or a bot.", public_fallback=True)
+        return
+    if getattr(member, "is_owner", False):
+        await ctx.reply_ephemeral("nobody can warn the space owner.", public_fallback=True)
         return
     reason = escape_mentions(reason.strip()[:MAX_REASON]) or "no reason given"
     store = bot.store
@@ -215,12 +244,16 @@ async def warns(ctx, member: Member = None):
         lines.append(f"- #{warn_id} {time.strftime('%Y-%m-%d', time.gmtime(created))}: {reason}")
     if len(rows) > MAX_SHOWN:
         lines.append(f"(the latest {MAX_SHOWN} of {len(rows)})")
-    await ctx.reply_ephemeral("\n".join(lines), public_fallback=True)
+    await ctx.reply_ephemeral("\n".join(lines))
 
 
 @bot.command(name="unwarn", help="Remove one warn by its number, or all of a member's with `clear @member`", usage="<number> | clear <@member>", requires=Permissions.KICK_MEMBERS, requires_message=NEEDS_KICK)
 async def unwarn(ctx, first: str, member: Member = None):
     if first.lower() == "clear" and member is not None:
+        refusal = await unwarn_refusal(ctx.author, member)
+        if refusal:
+            await ctx.reply_ephemeral(f"not cleared: {refusal}", public_fallback=True)
+            return
         removed = await bot.store.run(clear_warns, member.id)
         await write_log(f"{ctx.author.mention()} cleared {removed} warn(s) for {member.mention()}")
         await ctx.reply_ephemeral(f"cleared {removed} warn{'s' if removed != 1 else ''} for {member.display_name}.", public_fallback=True)
@@ -228,11 +261,30 @@ async def unwarn(ctx, first: str, member: Member = None):
     if not first.isdigit():
         await ctx.reply_ephemeral(style.usage_text(f"{bot.prefix}unwarn <number>", f"{bot.prefix}unwarn clear @member"), public_fallback=True)
         return
-    if not await bot.store.run(delete_warn, int(first)):
+    owner_id = await bot.store.run(warn_owner, int(first))
+    if owner_id is None:
         await ctx.reply_ephemeral(f"there is no warn #{first}.", public_fallback=True)
         return
+    warned = await bot.space.find_member(owner_id)
+    refusal = await unwarn_refusal(ctx.author, warned) if warned is not None else None
+    if refusal:
+        await ctx.reply_ephemeral(f"not removed: {refusal}", public_fallback=True)
+        return
+    await bot.store.run(delete_warn, int(first))
     await write_log(f"{ctx.author.mention()} removed warn #{first}")
     await ctx.reply_ephemeral(f"removed warn #{first}.", public_fallback=True)
+
+
+async def unwarn_refusal(invoker, target):
+    """Why `invoker` may not take warns off `target`: their own, or someone not below them on the ladder; None when they may."""
+    reach = await bot.space.ladder_reach(invoker, target)
+    if invoker.is_owner and reach is not None:
+        return None
+    if target.id == invoker.id:
+        return "those are your own warns; ask someone who outranks you."
+    if reach is None:
+        return f"{unreadable_rank(target)}."
+    return None if reach else f"{out_of_reach(target)}."
 
 
 @bot.group(name="warnrule", help="What happens at a number of warns: `add`, `remove`, `list`")
@@ -260,7 +312,8 @@ async def warnrule_add(ctx, args: str = ""):
     action = parse_action(tokens[1:]) if tokens and tokens[0].isdigit() and int(tokens[0]) > 0 else None
     if action is None:
         p = bot.prefix
-        await ctx.reply_ephemeral(style.usage_text(f"{p}warnrule add 3 timeout 1h", f"{p}warnrule add 5 kick"), public_fallback=True)
+        usage = style.usage_text(f"{p}warnrule add 3 timeout 1h", f"{p}warnrule add 5 kick")
+        await ctx.reply_ephemeral(f"{usage} A timeout can be at most {style_duration(MAX_TIMEOUT_SECONDS)}.", public_fallback=True)
         return
     if len(await bot.store.run(all_rules)) >= MAX_RULES and await bot.store.run(rule_at, int(tokens[0])) is None:
         await ctx.reply_ephemeral(f"keep it to {MAX_RULES} rules; remove one first.", public_fallback=True)

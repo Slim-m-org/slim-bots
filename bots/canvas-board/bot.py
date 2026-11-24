@@ -4,8 +4,9 @@
 import asyncio
 import sys
 
-from slimbots import ApiError, Bot
+from slimbots import ApiError, Bot, Permissions
 from slimbots.migrations import ensure_columns
+from slimbots.text import clip
 
 # A note's box is 220x140, the app's own quick-placement default, so a note this bot places renders identically to a hand-drawn one.
 BOARD_X = 0.0
@@ -17,6 +18,7 @@ MAX_SLOTS = 20
 VIEWPORT_LIMIT = 2000  # the server's ceiling; a busier rectangle answers has_more, which reconcile treats as incomplete
 # A note is a fixed 220x140 box; text past this overflows it regardless of what the canvas itself allows.
 MAX_TEXT_LENGTH = 240
+REPLY_BUDGET = 3900
 
 def help_text():
     p = bot.prefix
@@ -49,7 +51,6 @@ bot = Bot(prefix="!", require_channels=True, default_data_path="board.db", store
 CANVAS_CHANNEL = bot.setting("CANVAS_CHANNEL")
 
 canvas = None  # set once the canvas channel is resolved, in on_connect
-canvas_channel_name = None
 
 
 def _validated_voice_channel(id_or_name, *, source):
@@ -230,33 +231,66 @@ async def move_item(ctx, n, to):
     await ctx.reply(f"moved #{n} to #{to}: {text}")
 
 
-async def list_items(ctx):
+def canvas_channel():
+    return bot.space.channels.get(canvas.channel_id) if canvas is not None else None
+
+
+def invoker_can_view(ctx, channel):
+    """A stopgap until slimbots can check a member's view in one channel: public, the channel typed in, or an administrator."""
+    return channel.restricted is False or channel.id == ctx.channel_id or ctx.author.has_permission(Permissions.ADMINISTRATOR)
+
+
+async def list_items(ctx, channel):
     rows = await bot.store.run(active_items)
     if not rows:
-        await ctx.reply(f"the board is empty (drawing on #{canvas_channel_name})")
+        await ctx.reply(f"the board is empty (drawing on #{channel.name})")
         return
-    lines = [f"drawing on #{canvas_channel_name}:"]
+    lines = [f"drawing on #{channel.name}:"]
     for _, slot, text, _, added_by in rows:
         name = await name_of(added_by) if added_by else None
-        lines.append(f"#{slot + 1}: {text} (added by {name})" if name else f"#{slot + 1}: {text}")
-    await ctx.reply("\n".join(lines))
+        line = f"#{slot + 1}: {text} (added by {clip(name, 40)})" if name else f"#{slot + 1}: {text}"
+        lines.append(clip(line, REPLY_BUDGET))
+    for chunk in _chunks(lines):
+        await ctx.reply(chunk)
+
+
+def _chunks(lines):
+    """Lines packed into messages that each stay under the server's message cap."""
+    chunk = []
+    for line in lines:
+        if chunk and len("\n".join([*chunk, line])) > REPLY_BUDGET:
+            yield "\n".join(chunk)
+            chunk = []
+        chunk.append(line)
+    yield "\n".join(chunk)
 
 
 @bot.command(name="board", help="List, `add <text>`, `done <n>`, `move <n> <slot>`, or `clear` (asks to confirm)", usage="[add|done|move|clear|list ...]")
 async def board_cmd(ctx, sub: str = None, rest: str = None):
-    sub = (sub or "list").lower()
+    channel = canvas_channel()
+    if channel is None or not invoker_can_view(ctx, channel):
+        await ctx.reply("the board is on a channel you cannot see.")
+        return
+    await _run_board_subcommand(ctx, channel, (sub or "list").lower(), rest)
+
+
+async def _move_args(ctx, rest):
+    parts = (rest or "").split()
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        await move_item(ctx, int(parts[0]), int(parts[1]))
+    else:
+        await ctx.reply(help_text())
+
+
+async def _run_board_subcommand(ctx, channel, sub, rest):
     if sub == "list":
-        await list_items(ctx)
+        await list_items(ctx, channel)
     elif sub == "add" and rest:
         await add_item(ctx, rest)
     elif sub == "done" and rest and rest.isdigit():
         await done_item(ctx, int(rest))
     elif sub == "move":
-        parts = (rest or "").split()
-        if len(parts) == 2 and all(p.isdigit() for p in parts):
-            await move_item(ctx, int(parts[0]), int(parts[1]))
-        else:
-            await ctx.reply(help_text())
+        await _move_args(ctx, rest)
     elif sub == "clear":
         await clear_board(ctx)
     else:
@@ -294,13 +328,12 @@ async def _refuse_to_start(err):
 
 @bot.event
 async def on_connect():
-    global canvas, canvas_channel_name
+    global canvas
     try:
         channel = resolve_canvas_channel()
     except RuntimeError as err:
         bot.background(_refuse_to_start(err), name="canvas-board-config")
         return
-    canvas_channel_name = channel.name
     canvas = bot.canvas(channel.id)
     await reconcile()
 

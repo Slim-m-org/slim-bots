@@ -4,10 +4,10 @@
 import uuid
 
 import menu_store
-from slimbots import Bot, Button, Permissions, rows
+from slimbots import Bot, Button, KeyValueTable, Permissions, rows
 from slimbots.http import ApiError, is_forbidden, is_not_found
 
-# Namespace for deriving a stable listing-message id from the channel id, so nothing needs to be persisted to disk.
+# Namespace for the first listing id of a channel; a replacement id is stored once the first one is deleted.
 LISTING_NAMESPACE = uuid.UUID("d1f6a9d0-0f0f-4b6a-9b0f-2f6b6f0f9a10")
 
 
@@ -42,8 +42,16 @@ def unusable_role_names(mapping):
     return bad
 
 
+STATE = KeyValueTable("state")
+
+
 def listing_message_id():
     return str(uuid.uuid5(LISTING_NAMESPACE, bot.channel))
+
+
+def _remember_listing_id(conn, channel_id, message_id):
+    STATE.set(conn, f"listing-message:{channel_id}", message_id)
+    conn.commit()
 
 
 def listing_text():
@@ -57,13 +65,17 @@ def listing_text():
 
 
 async def post_listing():
-    """Publishes the role listing at startup, editing the previous one in place when it already exists."""
-    message_id = listing_message_id()
+    """Publishes the role listing at startup, editing the previous one in place; when it is gone, posts a new one under a fresh stored id.
+    A deleted message keeps its id on the server, so reposting under that id would replay the tombstone."""
+    store = await bot.open_store(migrate=menu_store.init_db)
+    message_id = await store.run(lambda conn: STATE.get(conn, f"listing-message:{bot.channel}")) or listing_message_id()
     try:
         await bot.client.edit_message(bot.channel, message_id, listing_text())
     except ApiError as err:
         if not is_not_found(err):
             raise
+        message_id = str(uuid.uuid4())
+        await store.run(_remember_listing_id, bot.channel, message_id)
         await bot.client.send(bot.channel, listing_text(), message_id=message_id)
 
 

@@ -1,6 +1,8 @@
-"""Small text helpers bots keep rewriting: clip, one-line, mention escaping, and durations in the few shapes bots print."""
+"""Small text helpers bots keep rewriting: clip, one-line, hidden-character stripping, mention escaping, and durations in the few shapes bots print."""
 
 from __future__ import annotations
+
+from .hidden_chars import is_hidden_char
 
 ZERO_WIDTH_SPACE = "\u200b"
 
@@ -15,6 +17,11 @@ def clip(text: str, limit: int, ellipsis: str = "...") -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - len(ellipsis))].rstrip() + ellipsis
+
+
+def strip_hidden(text: str) -> str:
+    """`text` without the control and invisible characters a button label or name refuses (see `hidden_chars`)."""
+    return "".join(char for char in text if not is_hidden_char(char))
 
 
 def escape_mentions(text: str) -> str:

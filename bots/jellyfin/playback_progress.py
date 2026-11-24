@@ -1,10 +1,13 @@
 """Reads and writes a Jellyfin user's own playback position, so Continue Watching stays right; see README.md.
-The API key can act as any user; the shared default is `JELLYFIN_USER_ID`, else the first enabled user, and a linked member uses theirs."""
+The API key can act as any user; a linked member uses theirs, anyone else the shared `JELLYFIN_USER_ID`, and with that unset nobody."""
 
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
+
+from slimbots.web import ServiceError, ServiceHTTPError
 
 import jellyfin_core
 
@@ -15,7 +18,12 @@ REPORT_EVERY_SECONDS = 30
 
 JELLYFIN_USER_ID = ""
 
-_resolved_user_id = None
+# The shared account that last passed `check_shared_account`, so it is looked up once.
+_checked_user_id = None
+
+
+class SharedAccountError(RuntimeError):
+    """`JELLYFIN_USER_ID` would lend members an account that is not theirs to borrow; the message names the setting."""
 
 
 def configure(bot):
@@ -23,16 +31,49 @@ def configure(bot):
     JELLYFIN_USER_ID = bot.setting("JELLYFIN_USER_ID", "") or ""
 
 
+async def check_shared_account():
+    """Raises `SharedAccountError` unless `JELLYFIN_USER_ID` is unset or names an enabled, non-administrator user."""
+    global _checked_user_id
+    if not JELLYFIN_USER_ID or _checked_user_id == JELLYFIN_USER_ID:
+        return
+    try:
+        user = await jellyfin_core.jf_get(f"/Users/{JELLYFIN_USER_ID}")
+    except ServiceHTTPError as err:
+        if err.status in (400, 404):
+            raise SharedAccountError(f"JELLYFIN_USER_ID ({JELLYFIN_USER_ID}) names no jellyfin user.") from err
+        raise
+    policy = user.get("Policy") or {}
+    if policy.get("IsAdministrator"):
+        raise SharedAccountError(
+            "JELLYFIN_USER_ID names a jellyfin administrator, so every member without a link would watch with its access "
+            "and write to its history. Set it to an ordinary account, or leave it unset so members link their own."
+        )
+    if policy.get("IsDisabled"):
+        raise SharedAccountError(f"JELLYFIN_USER_ID ({JELLYFIN_USER_ID}) names a disabled jellyfin user.")
+    _checked_user_id = JELLYFIN_USER_ID
+
+
+async def startup_problem():
+    """`check_shared_account` as a pre-flight message; jellyfin being unreachable leaves the check to first use."""
+    try:
+        await check_shared_account()
+    except SharedAccountError as err:
+        return str(err)
+    except ServiceError as err:
+        print(f"could not check JELLYFIN_USER_ID yet, checking at first use: {err}", file=sys.stderr)
+    return None
+
+
 async def resolve_user_id():
-    """The configured user, else the first enabled account `GET /Users` lists; None when neither exists."""
-    global _resolved_user_id
-    if JELLYFIN_USER_ID:
-        return JELLYFIN_USER_ID
-    if _resolved_user_id is None:
-        users = await jellyfin_core.jf_get("/Users")
-        enabled = [u for u in users if not (u.get("Policy") or {}).get("IsDisabled")]
-        _resolved_user_id = enabled[0]["Id"] if enabled else None
-    return _resolved_user_id
+    """The shared account for a member without a link, or None when there is none or it was refused."""
+    if not JELLYFIN_USER_ID:
+        return None
+    try:
+        await check_shared_account()
+    except SharedAccountError as err:
+        print(f"not using the shared account: {err}", file=sys.stderr)
+        return None
+    return JELLYFIN_USER_ID
 
 
 def saved_position_seconds(item, duration_seconds):

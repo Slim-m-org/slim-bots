@@ -6,10 +6,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import planning
-from slimbots import ApiError, Bot, Button, Permissions, rows
+from slimbots import ApiError, Bot, Button, Cooldown, Permissions, rows
 from slimbots.http import is_token_revoked
 
-MAX_OPEN_EVENTS = 10
+MAX_OPEN_PER_MEMBER = 3
+MAX_OPEN_PER_CHANNEL = 10
+PLAN_COOLDOWN_SECONDS = 30
 MAX_MENTIONS = 25
 TICK_SECONDS = 20
 
@@ -34,6 +36,13 @@ REMIND_MINUTES = max(bot.setting("EVENTS_REMIND_MINUTES", 15, type=int), 0)
 
 # Event states: 0 open, 1 reminded, 2 started, 3 cancelled.
 OPEN, REMINDED, STARTED, CANCELLED = 0, 1, 2, 3
+
+
+def cooldown_text(remaining):
+    return f"you just planned an event; try again in {remaining}s."
+
+
+plan_cooldown = Cooldown(PLAN_COOLDOWN_SECONDS, format_remaining=cooldown_text)
 
 
 def zone():
@@ -62,8 +71,16 @@ def get_event(conn, event_id):
     return conn.execute("SELECT id, channel_id, message_id, title, start_ts, creator_id, state FROM events WHERE id = ?", (event_id,)).fetchone()
 
 
-def open_events(conn):
-    return conn.execute("SELECT id, title, start_ts FROM events WHERE state < ? ORDER BY start_ts", (STARTED,)).fetchall()
+def open_events(conn, channel_id):
+    return conn.execute("SELECT id, title, start_ts FROM events WHERE state < ? AND channel_id = ? ORDER BY start_ts", (STARTED, channel_id)).fetchall()
+
+
+def open_counts(conn, channel_id, creator_id):
+    """How many open events this channel holds, and how many this member planned anywhere."""
+    return conn.execute(
+        "SELECT COALESCE(SUM(channel_id = ?), 0), COALESCE(SUM(creator_id = ?), 0) FROM events WHERE state < ?",
+        (channel_id, creator_id, STARTED),
+    ).fetchone()
 
 
 def set_state(conn, event_id, state):
@@ -125,8 +142,14 @@ async def _create(ctx, args):
     except ValueError as err:
         await ctx.reply_ephemeral(f"{err} Example: `{bot.prefix}event \"movie night\" fri 8pm` ({TZ_NAME} time).", public_fallback=True)
         return
-    if len(await bot.store.run(open_events)) >= MAX_OPEN_EVENTS:
-        await ctx.reply_ephemeral(f"there are already {MAX_OPEN_EVENTS} open events; cancel one first.", public_fallback=True)
+    wait = plan_cooldown.check(ctx.author.id)
+    if wait:
+        await ctx.reply_ephemeral(wait, public_fallback=True)
+        return
+    refusal = await _over_cap(ctx)
+    if refusal:
+        plan_cooldown.reset(ctx.author.id)
+        await ctx.reply_ephemeral(refusal, public_fallback=True)
         return
     start_ts = int(start.timestamp())
     event_id = await bot.store.run(add_event, ctx.channel_id, title, start_ts, ctx.author.id)
@@ -134,8 +157,17 @@ async def _create(ctx, args):
     await bot.store.run(set_message, event_id, sent.id)
 
 
+async def _over_cap(ctx):
+    in_channel, by_member = await bot.store.run(open_counts, ctx.channel_id, ctx.author.id)
+    if by_member >= MAX_OPEN_PER_MEMBER:
+        return f"you already have {MAX_OPEN_PER_MEMBER} open events; cancel one first."
+    if in_channel >= MAX_OPEN_PER_CHANNEL:
+        return f"this channel already has {MAX_OPEN_PER_CHANNEL} open events; cancel one first."
+    return None
+
+
 async def _list(ctx):
-    events = await bot.store.run(open_events)
+    events = await bot.store.run(open_events, ctx.channel_id)
     if not events:
         await ctx.reply_ephemeral("no events are planned.", public_fallback=True)
         return

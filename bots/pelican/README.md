@@ -32,7 +32,7 @@ With no log channel configured, the power commands are off.
 | --- | --- | --- |
 | `PELICAN_URL` | required | Panel base URL. Must be `https`. |
 | `PELICAN_API_KEY` | required | A Client API key (an account key, `ptlc_...`). |
-| `PELICAN_ALLOW_HTTP` | off | `1` allows an `http` URL, for a panel on a trusted LAN only. |
+| `PELICAN_ALLOW_HTTP` | off | `1` allows an `http` URL, for a panel on a trusted LAN only; a host that resolves to a public address is still refused. |
 | `PELICAN_SERVERS` | all | Comma-separated server names or identifiers the bot may show and control. |
 | `PELICAN_CONTROL_ROLE` | none | A role id whose holders may use the power commands. |
 | `PELICAN_CONTROL_PERMISSION` | `MANAGE_SERVER` | A `slimbots` permission name that also grants control. `ADMINISTRATOR` always passes. |
@@ -66,7 +66,8 @@ In connector mode the `!` commands are not published to the composer's list, tho
 
 ## The status message
 
-The message id is derived from the channel id, so a restart finds and edits the same message instead of posting a new one.
+The message id is stored in a small `pelican.db` (`SLIMM_DB_PATH`), starting from an id derived from the channel id, so a restart finds and edits the same message.
+If someone deletes the message, the next change posts a new one under a fresh id and remembers it.
 It is edited only when the text changed.
 The panel caches resource stats for about 20 seconds, so an interval under that shows the same numbers.
 
@@ -75,4 +76,4 @@ The panel caches resource stats for about 20 seconds, so an interval under that 
 - **Player counts.** The Client API does not expose them; they come from the game's own query protocol, which differs per game.
 - **Console or `kill`.** No console websocket and no `kill` signal, only start, stop and restart.
 - **Announce up/down transitions.** The status message shows the state; it does not post a new message when one changes.
-- **Store anything.** No database; the state lives in the panel and the one status message.
+- **Store anything.** The only thing it keeps is the status message's id; the rest lives in the panel and that message.

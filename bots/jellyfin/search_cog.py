@@ -15,7 +15,8 @@ async def run_search(ctx, query):
         return
     query = require_len(query.strip(), max_len=jellyfin_core.MAX_QUERY_LENGTH, field="a search query")
     try:
-        items = await jellyfin_core.search_items(query, jellyfin_core.MAX_SEARCH_RESULTS)
+        user_id = await accounts.user_for(ctx.bot, ctx.author.id)
+        items = await jellyfin_core.search_items(query, jellyfin_core.MAX_SEARCH_RESULTS, user_id)
     except jellyfin_core.JellyfinAuthError:
         await ctx.reply("jellyfin search is unavailable right now.")
         return

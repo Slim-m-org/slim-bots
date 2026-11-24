@@ -46,14 +46,24 @@ def build_embed(entry, source_name):
     )
 
 
+def mention_safe_link(url):
+    """`url` with every `@` after the host percent-encoded, so the server's mention scan reads no handle in a link like `/@name/1`."""
+    if not url:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    rest = urllib.parse.urlunsplit(("", "", parts.path, parts.query, parts.fragment)).replace("@", "%40")
+    return f"{parts.scheme}://{parts.netloc}{rest}" if parts.netloc else rest
+
+
 async def post_entry(feed, entry, source_name):
+    """The body is the escaped title alone; the link rides on the card, which the server never reads for mentions."""
     assert bot.client is not None, "post runs only once connected"
     embed = build_embed(entry, source_name)
     title = escape_mentions(entry.title)
-    fallback = f"{title}\n{entry.link}".strip()
+    fallback = f"{title}\n{mention_safe_link(entry.link)}".strip()
     try:
         await bot.client.send(
-            feed["channel_id"], entry.link or title, message_id=str(uuid.uuid5(POST_NAMESPACE, f"{feed['id']}|{entry.key}")),
+            feed["channel_id"], title, message_id=str(uuid.uuid5(POST_NAMESPACE, f"{feed['id']}|{entry.key}")),
             **style.send_kwargs(embed, fallback),
         )
     except ApiError as err:
@@ -119,10 +129,10 @@ async def note_unexpected(feed, err):
 MANAGE_DENIED = "only someone with Manage Server can change feeds."
 
 
-@bot.group(name="feed", help="`add <url> [keywords]`, `list`, `remove <id>`, `filter <id> <keywords|off>`, `interval <id> <duration>`")
+@bot.group(name="feed", help="`add <url> [keywords]`, `list [all]`, `remove <id>`, `filter <id> <keywords|off>`, `interval <id> <duration>`")
 async def feed_group(ctx, rest: str = ""):
     p = bot.prefix
-    await ctx.reply(style.usage_text(f"{p}feed add <url>", f"{p}feed list", f"{p}feed remove <id>", f"{p}feed filter <id> <keywords|off>", f"{p}feed interval <id> <10m|2h|1d>"))
+    await ctx.reply(style.usage_text(f"{p}feed add <url>", f"{p}feed list [all]", f"{p}feed remove <id>", f"{p}feed filter <id> <keywords|off>", f"{p}feed interval <id> <10m|2h|1d>"))
 
 
 @feed_group.command(name="add", help="Follow a feed in this channel", usage="<url> [keywords]", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
@@ -147,7 +157,7 @@ async def feed_add(ctx, url: str, keywords: str = ""):
     feed = await bot.store.run(db.get_feed, feed_id)
     problem = await finish_add(feed, result)
     tail = f" Posting the latest item failed ({problem}); it retries on the next poll." if problem else ""
-    await ctx.reply(f"following **{escape_mentions(name)}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, "interval")}. Only the latest item is posted now, then new ones as they appear.{tail}")
+    await ctx.reply(f"following **{escape_mentions(name)}** here as feed `{feed_id}`, checked every {format_duration(DEFAULT_INTERVAL, 'interval')}. Only the latest item is posted now, then new ones as they appear.{tail}")
 
 
 async def finish_add(feed, result):
@@ -161,7 +171,7 @@ async def finish_add(feed, result):
 
 
 def describe(feed):
-    bits = [f"`{feed['id']}` {escape_mentions(feed['name'])}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], "interval")}"]
+    bits = [f"`{feed['id']}` {escape_mentions(feed['name'])}", f"{host_of(feed['url'])}", bot.space.channel_label(feed["channel_id"], "unknown channel") if bot.space else "unknown channel", f"every {format_duration(feed['interval'], 'interval')}"]
     if feed["keywords"]:
         bits.append(f"filter: {feed['keywords']}")
     if feed["failures"] >= db.FAILING_AFTER:
@@ -171,12 +181,9 @@ def describe(feed):
     return " - ".join(bits)
 
 
-@feed_group.command(name="list", help="Show the followed feeds and any that keep failing")
-async def feed_list(ctx):
-    feeds = await bot.store.run(db.list_feeds)
+def list_text(feeds, empty):
     if not feeds:
-        await ctx.reply(f"no feeds yet - try `{bot.prefix}feed add <url>`.")
-        return
+        return empty
     lines, used = [], 0
     for index, feed in enumerate(feeds):
         line = describe(feed)
@@ -185,7 +192,20 @@ async def feed_list(ctx):
             break
         lines.append(line)
         used += len(line) + 1
-    await ctx.reply("\n".join(lines))
+    return "\n".join(lines)
+
+
+@feed_group.command(name="list", help="Show this channel's feeds, or `all` of them privately (Manage Server)", usage="[here|all]", choices={"scope": ("here", "all")})
+async def feed_list(ctx, scope: str = "here"):
+    feeds = await bot.store.run(db.list_feeds)
+    if scope == "all":
+        if not ctx.author.has_permission(Permissions.MANAGE_SERVER):
+            await ctx.reply_ephemeral("only someone with Manage Server can list every channel's feeds.")
+            return
+        await ctx.reply_ephemeral(list_text(feeds, f"no feeds yet - try `{bot.prefix}feed add <url>`."))
+        return
+    here = [feed for feed in feeds if feed["channel_id"] == ctx.channel_id]
+    await ctx.reply(list_text(here, f"no feeds yet in this channel - try `{bot.prefix}feed add <url>`."))
 
 
 @feed_group.command(name="remove", help="Stop following a feed", usage="<id>", requires=Permissions.MANAGE_SERVER, requires_message=MANAGE_DENIED)
@@ -207,12 +227,12 @@ async def feed_filter(ctx, feed_id: int, keywords: str):
 async def feed_interval(ctx, feed_id: int, duration: Duration):
     seconds = int(duration)
     if not MIN_INTERVAL <= seconds <= MAX_INTERVAL:
-        await ctx.reply(f"pick between {format_duration(MIN_INTERVAL, "interval")} and {format_duration(MAX_INTERVAL, "interval")}.")
+        await ctx.reply(f"pick between {format_duration(MIN_INTERVAL, 'interval')} and {format_duration(MAX_INTERVAL, 'interval')}.")
         return
     if not await bot.store.run(db.set_field, feed_id, "interval", seconds):
         await ctx.reply(f"no feed `{feed_id}`.")
         return
-    await ctx.reply(f"feed `{feed_id}` is checked every {format_duration(seconds, "interval")}.")
+    await ctx.reply(f"feed `{feed_id}` is checked every {format_duration(seconds, 'interval')}.")
 
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ def test_watch_reads_the_resume_position_of_the_linked_user():
         return with_position(movie_for_watch(), 600)
 
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         started = run_watch_pressing("!watch inception", "jfp:resume")
@@ -96,7 +96,7 @@ def test_a_member_without_a_link_still_uses_the_shared_account():
         return movie_for_watch()
 
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", fetch),
     ):
         run_watch_pressing("!watch inception")
@@ -112,7 +112,7 @@ def test_progress_goes_to_the_account_of_whoever_started_the_stream():
         return None
 
     with Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
         (stream_session.WatchSession, "start", fake_start),
         (jellyfin_core, "TRANSPORT", httpx.MockTransport(lambda request: posted.append((request.url.path, dict(request.url.params))) or httpx.Response(204))),
@@ -148,6 +148,25 @@ def test_init_db_adds_the_links_table_to_an_older_database_without_touching_the_
     accounts.set_link(conn, "u1", "jf-a", "Alice")
     assert accounts.get_link(conn, "u1") == ("jf-a", "Alice")
     assert jellyfin_core.already_posted(conn, "m1")
+
+
+def test_a_quick_connect_claim_replaces_a_name_only_link_to_the_same_jellyfin_user():
+    conn = sqlite3.connect(":memory:")
+    jellyfin_core.init_db(conn)
+    accounts.set_link(conn, "squatter", "jf-b", "Bob")
+    assert accounts.claim_link(conn, "bob", "jf-b", "Bob", verified=True)
+    assert accounts.verified_link(conn, "bob") == ("jf-b", "Bob")
+    assert accounts.get_link(conn, "squatter") is None
+
+
+def test_a_claim_never_takes_over_a_link_that_was_proved_or_is_itself_unproved():
+    conn = sqlite3.connect(":memory:")
+    jellyfin_core.init_db(conn)
+    accounts.set_link(conn, "alice", "jf-a", "Alice", verified=True)
+    accounts.set_link(conn, "carol", "jf-c", "Carol")
+    assert not accounts.claim_link(conn, "mallory", "jf-a", "Alice", verified=True)
+    assert not accounts.claim_link(conn, "mallory", "jf-c", "Carol")
+    assert accounts.get_link(conn, "alice") == ("jf-a", "Alice") and accounts.get_link(conn, "carol") == ("jf-c", "Carol")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ def test_hidden_character_in_a_label_is_refused_locally():
 
 def test_hidden_character_in_a_custom_id_is_refused_locally():
     with pytest.raises(ValueError, match="invisible"):
-        Button("Nick", "id‮")
+        Button("Nick", "id\u202e")
 
 
 def test_the_label_goes_out_trimmed_like_the_server_trims_it():

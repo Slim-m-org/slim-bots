@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from .components import MAX_LABEL, Button, grid, rows
 from .http import ApiError
 from .lifecycle import log_failure
-from .text import clip
+from .text import clip, escape_mentions, one_line, strip_hidden
 
 if TYPE_CHECKING:
     from .bot import Bot
@@ -22,6 +22,12 @@ log = logging.getLogger(__name__)
 
 EXPIRES_SECONDS = 300
 EXPIRED_REPLY = "that choice has expired - run {retry} again."
+UNTITLED = "Untitled"
+
+
+def button_label(text: str) -> str:
+    """`text` as a button takes it: hidden characters gone, one line, clipped, and `UNTITLED` when nothing is left."""
+    return clip(strip_hidden(one_line(text)).strip(), MAX_LABEL, "~") or UNTITLED
 
 
 @dataclass
@@ -75,9 +81,10 @@ class Chooser:
 
     def render(self, pick: Any) -> tuple[str, list[dict[str, Any]]]:
         assert self.label is not None, "the default render needs a label function"
-        buttons = [Button(clip(self.label(item), MAX_LABEL, "~"), f"{self.prefix}sel:{i}") for i, item in enumerate(pick.items)]
+        buttons = [Button(button_label(self.label(item)), f"{self.prefix}sel:{i}") for i, item in enumerate(pick.items)]
         layout = [*grid(buttons, self.per_row), [Button("Cancel", f"{self.prefix}cancel", style="danger")]]
-        text = f'{len(pick.items)} match(es) for "{pick.query}"{pick.note} - {pick.invoker_name}, pick one to {self.verb}.'
+        query, name = escape_mentions(pick.query), escape_mentions(pick.invoker_name)
+        text = f'{len(pick.items)} match(es) for "{query}"{pick.note} - {name}, pick one to {self.verb}.'
         return text, rows(*layout)
 
     async def open(self, bot: Bot, pick: Any, *, reply_to_id: str | None = None) -> Any:
@@ -122,7 +129,7 @@ class Chooser:
             return None
         if interaction.user_id != pick.invoker_id:
             with contextlib.suppress(ApiError):
-                await interaction.reply_ephemeral(f"only {pick.invoker_name} can choose here - {retry} starts your own.")
+                await interaction.reply_ephemeral(f"only {escape_mentions(pick.invoker_name)} can choose here - {retry} starts your own.")
             return None
         return pick
 

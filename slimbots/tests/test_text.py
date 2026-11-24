@@ -4,7 +4,8 @@ import re
 
 import pytest
 
-from slimbots.text import break_mentions, clip, escape_mentions, format_duration, one_line
+from slimbots.hidden_chars import has_hidden_char
+from slimbots.text import break_mentions, clip, escape_mentions, format_duration, one_line, strip_hidden
 
 MENTION_START = re.compile(r"[A-Za-z0-9_]")
 
@@ -167,3 +168,12 @@ def test_the_minutes_style_rounds_a_fractional_count_like_the_original():
 def test_an_unknown_style_is_refused():
     with pytest.raises(ValueError):
         format_duration(5, "long")
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Plain", "Plain"), ("\u200b\u200c\u200d", ""), ("Ma\u00adtrix", "Matrix"), ("\u202eevil", "evil"),
+    ("tab\there", "tabhere"), ("heart \u2764\ufe0f", "heart \u2764\ufe0f"), ("\ufeffBOM\U000e0041", "BOM"),
+])
+def test_strip_hidden_drops_every_character_a_button_label_refuses(text, expected):
+    assert strip_hidden(text) == expected
+    assert not has_hidden_char(strip_hidden(text))

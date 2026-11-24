@@ -243,6 +243,27 @@ def test_transcript_lookup_is_staff_only_paged_and_private():
     assert not [m for m in client.sent if "page" in m["content"]]
 
 
+def closed_ticket_with_ephemeral_failing(status, body):
+    client = setup()
+    open_one(client)
+    client.respond("GET", "/channels/t-1/messages", history(("Sam", "my card number is 1234")))
+    press("ticket:close", "s-1", "t-1")
+    client.respond("POST", "/channels/c-panel/ephemeral-messages", ApiError(status, body))
+    return client
+
+
+def test_a_transcript_is_never_posted_publicly_when_the_command_was_deleted():
+    client = closed_ticket_with_ephemeral_failing(404, {"error": "message not found"})
+    say(client, "!ticket transcript 1", user_id="s-1")
+    assert not [m for m in client.sent if "card number" in m["content"]]
+
+
+def test_a_transcript_is_never_posted_publicly_on_a_server_without_private_replies():
+    client = closed_ticket_with_ephemeral_failing(405, None)
+    say(client, "!ticket transcript 1", user_id="s-1")
+    assert not [m for m in client.sent if "card number" in m["content"]]
+
+
 def test_reason_is_limited_and_updates_the_topic():
     client = setup()
     open_one(client)

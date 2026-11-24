@@ -4,7 +4,7 @@ A slim-m bot: rules a moderator writes (message flood, links, listed words, ment
 Every action is posted to a log channel when one is configured, and a timeout can be undone by a person with `!automod lift @member`.
 
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
-It needs `slim-m>=0.6.0`, which added `time_out_member` and `lift_member_timeout`.
+It needs `slim-m>=0.24.0`, which added `space.ladder_reach` for the lift command.
 
 ```bash
 pip install -r requirements.txt
@@ -29,7 +29,8 @@ Every rule is off by default.
 - **flood**: `AUTOMOD_FLOOD_MESSAGES` (0 = off), `AUTOMOD_FLOOD_SECONDS` (default 10), `AUTOMOD_FLOOD_TIMEOUT` (default 300 seconds).
   More than N messages in M seconds deletes the message that tripped it and times the member out.
 - **mention spam**: `AUTOMOD_MENTION_LIMIT` (0 = off), `AUTOMOD_MENTION_TIMEOUT` (default 300).
-  More than N `@name` tokens in one message deletes it and times the member out.
+  More than N mentions in one message deletes it and times the member out.
+  Mentions are counted the way the server reads them: every unescaped `@name`, even glued together like `@ann@bob`, and every `@[Role]`; code blocks and inline code are skipped.
 - **links**: `AUTOMOD_LINK_POLICY` is `off` (default), `deny` (block listed domains) or `allow` (block every domain not listed), with `AUTOMOD_LINK_DOMAINS` as a comma-separated list.
   A link is found the way the app finds one, so `[x](https://host)`, `a,https://host` and `https://host.` count; an invisible character in a link or a listed word is ignored.
   A listed domain also covers its subdomains.
@@ -42,21 +43,23 @@ Every rule is off by default.
 `AUTOMOD_LOG_CHANNEL` is a `category/channel` path or a bare channel name.
 With it unset, nothing is logged beyond the bot's own local counts.
 
-Commands: `!automod rules` (what is on), `!automod stats` (how often each rule fired), `!automod lift @member` (needs Kick Members).
+An edited message is checked again against every rule except flood, so posting clean text and editing it afterwards does not get past a rule.
+
+Commands: `!automod rules` (what is on), `!automod stats` (how often each rule fired), `!automod lift @member` (needs Kick Members, and the member's highest role must sit strictly below yours, as the server asks of a lift in the app).
 
 ## Permissions
 
 The bot needs `MANAGE_MESSAGES` to delete someone else's message and `KICK_MEMBERS` to time a member out (the server's `PUT /members/{id}/timeout` requires it).
 The server also refuses a timeout on a member whose permissions the bot's own do not contain, so an admin is never timed out by it.
 When either is refused, the log line says which action failed and names the missing permission, rather than pretending it worked.
-Anyone holding `MANAGE_MESSAGES` is exempt from every rule, as are other bots.
+Anyone holding `MANAGE_MESSAGES` is exempt from every rule, as are the Space owner and other bots.
+With only the two permissions above the bot cannot read the role table, so it reads each author's permissions from the server instead, reusing the answer for up to a minute or until that member's roles change.
 
 ## What this deliberately does not do
 
 - **Remember across a restart.** Flood counters live in memory, so a restart forgives everyone.
   New-member status comes from the server's join time and survives restarts.
-- **Catch what it was offline for.** It acts on live `message.created` frames only.
+- **Catch what it was offline for.** It acts on live `message.created` and `message.edited` frames only.
   A message posted while it was disconnected is never checked; slim-m does not yet give moderation events a `seq` to catch up from.
-- **Edit-evasion.** An edited message is not rechecked.
 - **Look at attachments or embeds**, only the message text.
 - **Ban or kick.** The strongest action is a timeout, which a human can lift.

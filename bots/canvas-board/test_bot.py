@@ -6,10 +6,14 @@ import asyncio
 import bot as board
 from slimbots import Store
 from slimbots import Canvas
+from slimbots.models import Channel
+from slimbots.permissions import Permissions
 from slimbots.http import ApiError
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
 MEMBERS = [human("u1", "nick", "Nick", role_ids=[])]
+VOICE_ROOM = {"id": "c1", "name": "voice-room", "kind": "voice"}
+BOARD_TEXT = {"id": "c-text", "name": "board", "kind": "text", "restricted": False}
 
 
 def message(content, msg_id="m1"):
@@ -31,8 +35,8 @@ def setup():
     client.respond("GET", "/members", MEMBERS)
     wire_bot(board.bot, client, me_id="bot-1")
     board.canvas = Canvas(client, "c1")
-    board.canvas_channel_name = "voice-room"
     asyncio.run(board.bot.space.refresh_members())
+    board.bot.space.channels = {c.id: c for c in (Channel(VOICE_ROOM), Channel(BOARD_TEXT))}
     return client
 
 
@@ -302,6 +306,53 @@ def test_two_moves_to_one_target_in_flight_do_not_collide():
     asyncio.run(both())
     slots = sorted(row[1] for row in board.active_items(conn))
     assert slots == [1, 3], slots
+
+
+def from_board_text(content, msg_id="m-text"):
+    return {"id": msg_id, "author_id": "u1", "channel_id": "c-text", "content": content}
+
+
+def with_restricted_canvas(client, *, restricted):
+    board.bot.channels = {"c1", "c-text"}
+    board.bot.space.channels["c1"].restricted = restricted
+    client.respond("POST", "/channels/c1/canvas/objects", {"id": "o1", "seq": 5})
+    process(client, message("!board add secret plan"))
+
+
+def test_a_public_canvas_is_listed_from_another_channel():
+    client = setup()
+    with_restricted_canvas(client, restricted=False)
+    process(client, from_board_text("!board"))
+    assert client.sent[-1]["content"] == "drawing on #voice-room:\n#1: secret plan (added by Nick)"
+
+
+def test_a_restricted_canvas_is_neither_named_nor_shown_to_a_member_elsewhere():
+    client = setup()
+    with_restricted_canvas(client, restricted=True)
+    for n, command in enumerate(("!board", "!board done 1", "!board move 1 2")):
+        process(client, from_board_text(command, f"m-text-{n}"))
+        reply = client.sent[-1]["content"]
+        assert "voice-room" not in reply and "secret plan" not in reply, reply
+        assert reply == "the board is on a channel you cannot see.", reply
+    assert board.active_items(board.bot.store.connection)[0][1:3] == (0, "secret plan"), "a refused command changes nothing"
+
+
+def test_a_restricted_canvas_is_shown_to_an_administrator_elsewhere():
+    client = setup()
+    with_restricted_canvas(client, restricted=True)
+    board.bot.space.members["u1"]._base_permissions = Permissions.ADMINISTRATOR
+    process(client, from_board_text("!board"))
+    assert client.sent[-1]["content"].startswith("drawing on #voice-room:")
+
+
+def test_a_long_board_is_listed_in_messages_under_the_server_cap():
+    client = setup()
+    for slot in range(board.MAX_SLOTS):
+        asyncio.run(board.bot.store.run(board._insert_item, f"o{slot}", slot, "n" * board.MAX_TEXT_LENGTH, slot + 1, None))
+    process(client, message("!board"))
+    replies = [m["content"] for m in client.sent]
+    assert len(replies) > 1 and all(len(r) <= 4000 for r in replies), [len(r) for r in replies]
+    assert "#1:" in replies[0] and f"#{board.MAX_SLOTS}:" in replies[-1]
 
 
 if __name__ == "__main__":

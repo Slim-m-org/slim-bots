@@ -6,7 +6,8 @@ import asyncio
 import bot as yt
 import party as parties
 import youtube_core
-from slimbots import Permissions
+from slimbots import ApiError, Permissions
+from slimbots.limits import Cooldown
 from slimbots.models import Channel
 from slimbots.testing import FakeAsyncClient, FakeVoice, human, run_module_tests, wire_bot
 from slimbots.voice import VoiceError
@@ -44,8 +45,10 @@ class Rig:
     def __init__(self, member_channels=None, join_error=None):
         parties.clear()
         yt._start_locks.clear()
+        parties.MIN_GAP_SECONDS = 0.01
         self.lookup = yt.lookup = FakeLookup()
         self.clock = Clock()
+        yt.link_cooldown = Cooldown(5.0, clock=self.clock)
         self.client = FakeAsyncClient(me_id="bot-1")
         self.client.respond("GET", "/members", MEMBERS)
         self.client.respond("GET", "/roles", ROLES)
@@ -139,6 +142,7 @@ def test_a_video_that_refuses_embedding_or_does_not_exist_is_refused_before_join
 
     async def scenario():
         await rig.say(f"!yt {RICK}")
+        rig.clock.now += 10
         await rig.say(f"!yt {ZOO}", msg_id="m2")
         replies = rig.replies()
         assert any("does not allow it to play outside YouTube" in r for r in replies)
@@ -232,6 +236,7 @@ def test_a_video_that_ends_plays_the_next_and_the_last_one_ends_the_party():
 
     async def scenario():
         await rig.say(f"!yt {ZOO}")
+        rig.clock.now += 10
         await rig.say(f"!yt {RICK}", msg_id="m2")
         party = rig.party()
         rig.clock.now += 20
@@ -289,6 +294,142 @@ def test_titles_cannot_mention_or_format():
     async def scenario():
         await rig.say("!yt https://youtu.be/aaaaaaaaaaa")
         assert any("Something \\@everyone" in r for r in rig.replies())
+
+    run(rig, scenario)
+
+
+def refuse_session_writes(rig, *, when):
+    """Makes every watch-session PUT for which `when(body)` holds answer with `error`; returns the list of errors to set."""
+    real = rig.client.call
+    state = {"error": None}
+
+    async def call(method, path, body=None, **kwargs):
+        if method == "PUT" and path == "/channels/v1/watch-session" and state["error"] and when(body):
+            rig.client.calls.append((method, path, body, None))
+            raise state["error"]
+        return await real(method, path, body, **kwargs)
+
+    rig.client.call = call
+    return state
+
+
+def test_a_400_on_the_controller_retries_without_it_and_keeps_the_party():
+    rig = Rig()
+    state = refuse_session_writes(rig, when=lambda body: body.get("controller_user_id"))
+
+    async def scenario():
+        state["error"] = ApiError(400, {"error": "controller cannot view the channel"})
+        await rig.say(f"!yt {RICK}")
+        await asyncio.sleep(0.2)
+        writes = rig.session_writes()
+        assert writes[0]["controller_user_id"] == "u1"
+        assert any(not w.get("controller_user_id") for w in writes[1:])
+        assert not rig.party().finished
+
+    run(rig, scenario)
+
+
+def test_a_refused_session_write_ends_the_party_and_says_why():
+    rig = Rig()
+    state = refuse_session_writes(rig, when=lambda body: True)
+
+    async def scenario():
+        state["error"] = ApiError(409, {"error": "another bot is running a watch session here"})
+        await rig.say(f"!yt {RICK}")
+        await asyncio.sleep(0.2)
+        assert rig.party() is None
+        assert yt.bot.voice.sessions[0].left
+        said = [m.get("content") or "" for m in rig.client.sent]
+        assert any("the watch party ended" in c and "another bot is running a watch session here" in c for c in said)
+
+    run(rig, scenario)
+
+
+def test_a_persistent_400_ends_the_party_too():
+    rig = Rig()
+    state = refuse_session_writes(rig, when=lambda body: True)
+
+    async def scenario():
+        state["error"] = ApiError(400, {"error": "bad position"})
+        await rig.say(f"!yt {RICK}")
+        await asyncio.sleep(0.3)
+        assert rig.party() is None
+        assert any("the watch party ended" in (m.get("content") or "") for m in rig.client.sent)
+
+    run(rig, scenario)
+
+
+def test_a_seek_past_seven_days_is_clamped_to_what_the_server_accepts():
+    rig = Rig()
+
+    async def scenario():
+        await rig.say("!yt https://youtu.be/aaaaaaaaaaa")
+        await rig.say("!yt seek 999:00:00", msg_id="m2")
+        await asyncio.sleep(0.2)
+        assert max(w["position_ms"] for w in rig.session_writes()) <= 7 * 24 * 3600 * 1000
+
+    run(rig, scenario)
+
+
+def test_a_video_queued_while_the_party_ends_starts_a_new_party():
+    rig = Rig()
+
+    async def scenario():
+        await rig.say(f"!yt {RICK}")
+        first = rig.party()
+        real = rig.lookup.video
+
+        async def video_then_end(video_id):
+            result = await real(video_id)
+            async with first.lock:
+                await first.stop(reason="the queue is empty")
+            return result
+
+        rig.lookup.video = video_then_end
+        rig.clock.now += 10
+        await rig.say(f"!yt {ZOO}", user="u2", msg_id="m2")
+        second = rig.party()
+        assert second is not None and second is not first and second.current.video_id == "jNQXAC9IVRw"
+        assert not any("number 1 in line" in r for r in rig.replies())
+
+    run(rig, scenario)
+
+
+def test_a_full_queue_refuses_before_any_lookup():
+    rig = Rig()
+
+    async def scenario():
+        await rig.say(f"!yt {RICK}")
+        party = rig.party()
+        party.queue.extend([youtube_core.Video("aaaaaaaaaaa", "x")] * parties.MAX_QUEUE)
+        looked = []
+        real = rig.lookup.video
+
+        async def counting(video_id):
+            looked.append(video_id)
+            return await real(video_id)
+
+        rig.lookup.video = counting
+        rig.clock.now += 10
+        await rig.say(f"!yt {ZOO}", user="u2", msg_id="m2")
+        assert looked == []
+        assert any("the queue is full" in r for r in rig.replies())
+
+    run(rig, scenario)
+
+
+def test_a_member_repeating_yt_is_slowed_down_but_other_members_and_controls_are_not():
+    rig = Rig()
+
+    async def scenario():
+        await rig.say(f"!yt {RICK}")
+        await rig.say(f"!yt {ZOO}", msg_id="m2")
+        assert any("slow down" in r for r in rig.replies())
+        assert rig.party().queue == []
+        await rig.say(f"!yt {ZOO}", user="u2", msg_id="m3")
+        assert len(rig.party().queue) == 1
+        await rig.say("!yt pause", msg_id="m4")
+        assert rig.party().paused
 
     run(rig, scenario)
 

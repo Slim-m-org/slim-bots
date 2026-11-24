@@ -37,7 +37,6 @@ ALLOW_HTTP = bot.setting("HOMELAB_ALLOW_HTTP", False, type=bool)
 get_url = sources.http_get
 get_docker = sources.docker_get
 canvas = None
-canvas_channel_name = None
 # tile name -> "ok" or the sentence for the last problem, for `!homelab`.
 status = {}
 last_poll = [0.0]
@@ -53,6 +52,8 @@ def check_config():
         )
         if problem:
             return problem
+    if DOCKER_SOCKET and "://" in DOCKER_SOCKET and not sources.is_docker_proxy_url(DOCKER_SOCKET):
+        return "HOMELAB_DOCKER_SOCKET must be a unix socket path or the http(s) URL of a filtering socket proxy"
     return None
 
 
@@ -162,6 +163,8 @@ async def on_canvas_objects_removed(frame):
 
 @bot.event
 async def on_canvas_cleared(frame):
+    if canvas is None or frame.get("channel_id") != canvas.channel_id:
+        return
     await bot.store.run(forget_tiles)
 
 
@@ -182,13 +185,12 @@ async def _refuse_to_start(err):
 
 @bot.event
 async def on_connect():
-    global canvas, canvas_channel_name
+    global canvas
     try:
         channel = resolve_channel()
     except RuntimeError as err:
         bot.background(_refuse_to_start(err), name="homelab-config")
         return
-    canvas_channel_name = channel.name
     canvas = bot.canvas(channel.id)
 
 
@@ -200,11 +202,25 @@ def missing_sources_text():
     )
 
 
-def status_text():
+def invoker_can_view(ctx, channel):
+    """A stopgap until slimbots can check a member's view in one channel: public, the channel typed in, or an administrator."""
+    return channel.restricted is False or channel.id == ctx.channel_id or ctx.author.has_permission(Permissions.ADMINISTRATOR)
+
+
+def where_text(ctx):
+    channel = bot.space.channels.get(canvas.channel_id) if canvas is not None else None
+    if channel is None:
+        return "the canvas channel is not resolved yet"
+    if not invoker_can_view(ctx, channel):
+        return "drawing on a channel you cannot see"
+    return f"drawing on #{channel.name}"
+
+
+def status_text(ctx):
     names = tile_names()
     if not names:
         return missing_sources_text()
-    where = f"drawing on #{canvas_channel_name}" if canvas_channel_name else "the canvas channel is not resolved yet"
+    where = where_text(ctx)
     lines = [f"{where}, every {INTERVAL}s"]
     lines += [f"- {name}: {status.get(name, 'not polled yet')}" for name in names]
     return "\n".join(lines)
@@ -221,7 +237,7 @@ async def homelab(ctx, sub: str = "status"):
             await canvas.remove(ids)
         await bot.store.run(forget_tiles)
         await refresh()
-    await ctx.reply_ephemeral(status_text(), public_fallback=True)
+    await ctx.reply_ephemeral(status_text(ctx), public_fallback=True)
 
 
 if __name__ == "__main__":

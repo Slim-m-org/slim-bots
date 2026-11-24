@@ -4,6 +4,7 @@
 import sqlite3
 
 from slimbots import Bot, Button, Permissions, rows
+from slimbots.text import escape_mentions
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -38,7 +39,7 @@ async def vote(ctx, question: str):
         await ctx.reply_ephemeral(f"keep the question under {MAX_QUESTION} characters.", public_fallback=True)
         return
     buttons = [Button(choice.title(), f"vote:{choice}", style="primary" if choice == "yes" else "secondary") for choice in CHOICES]
-    await bot.client.send(ctx.channel_id, question, reply_to_id=ctx.message.get("id"), components=rows(buttons))
+    await bot.client.send(ctx.channel_id, escape_mentions(question), reply_to_id=ctx.message.get("id"), components=rows(buttons))
 
 
 @bot.button(prefix="vote:")

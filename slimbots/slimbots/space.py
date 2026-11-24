@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from .http import ApiError, is_forbidden, is_not_found
 from .models import Channel, Member, Role
+from .permissions import Permissions
 
 if TYPE_CHECKING:
     from .http import AsyncClient
+
+ALL_PERMISSIONS = sum(bit for name, bit in vars(Permissions).items() if name.isupper() and isinstance(bit, int))
 
 
 class Space:
@@ -21,23 +24,63 @@ class Space:
         self.roles: dict[str, Role] = {}
         self.roles_readable: bool | None = None
 
-    def _base_permissions(self, role_ids: list[str]) -> int:
+    def _base_permissions(self, role_ids: list[str], *, is_owner: bool = False) -> int:
+        """The member's bits from the role table; the Space owner holds every bit whatever their roles, as the server rules."""
+        if is_owner:
+            return ALL_PERMISSIONS
         bits = 0
         for role in self.roles.values():
             if role.is_everyone or role.id in role_ids:
                 bits |= role.permissions
         return bits
 
+    def _member_permissions(self, member: Member, role_ids: list[str]) -> int:
+        return self._base_permissions(role_ids, is_owner=member.is_owner)
+
+    def _top_role_position(self, role_ids: list[str]) -> tuple[bool, int | None]:
+        """`(known, position)` of the highest held role in `.roles`; unknown when a held role or its position is missing."""
+        held = [r for r in role_ids if not (r in self.roles and self.roles[r].is_everyone)]
+        positions = [self.roles[r].position if r in self.roles else None for r in held]
+        if not self.roles_readable or None in positions:
+            return False, None
+        return True, max((p for p in positions if p is not None), default=None)
+
+    def _rerank(self, member: Member) -> None:
+        known, position = self._top_role_position(member.role_ids)
+        if known:
+            member._set_top_role_position(position)
+
     def _make_member(self, data: dict[str, Any]) -> Member:
-        return Member(data, base_permissions=self._base_permissions(data.get("role_ids") or []))
+        role_ids = data.get("role_ids") or []
+        member = Member(data, base_permissions=self._base_permissions(role_ids, is_owner=bool(data.get("is_owner"))))
+        if not member.rank_known:
+            self._rerank(member)
+        return member
+
+    async def refresh_rank(self, member: Member) -> bool:
+        """Rereads `member`'s place on the role ladder, leaving permissions alone; False when the server does not say."""
+        member._read_rank(await self._client.get_user(member.id))
+        if not member.rank_known:
+            self._rerank(member)
+        return member.rank_known
+
+    async def ladder_reach(self, invoker: Member, target: Member) -> bool | None:
+        """Whether the role ladder puts `target` strictly below `invoker`, both reread now; None when either rank is unreadable."""
+        try:
+            if await self.refresh_rank(invoker) and await self.refresh_rank(target):
+                return invoker.outranks(target)
+        except ApiError:
+            pass
+        return None
 
     async def refresh_roles(self) -> dict[str, Role]:
-        """Reloads every role; needs the bot's own token to hold MANAGE_ROLES, else `roles_readable` goes False and the 403 is raised."""
+        """Reloads every role; needs MANAGE_ROLES, else the table is emptied, `roles_readable` goes False and the 403 is raised."""
         try:
             roles = await self._client.list_roles()
         except ApiError as err:
             if is_forbidden(err):
                 self.roles_readable = False
+                self.roles = {}
             raise
         self.roles_readable = True
         self.roles = {r["id"]: Role(r) for r in roles}
@@ -94,7 +137,8 @@ class Space:
     def reapply_roles(self) -> None:
         """Recomputes every cached member's permissions from the current `.roles`, after a role's bits changed."""
         for member in self.members.values():
-            member._apply_roles(member.role_ids, self._base_permissions(member.role_ids))
+            member._apply_roles(member.role_ids, self._member_permissions(member, member.role_ids))
+            self._rerank(member)
 
     async def find_member(self, user_id: str) -> Member | None:
         """The cached member for `user_id`, else one fetched directly; None only when the server answers 404 for that user."""
@@ -108,16 +152,22 @@ class Space:
                 return None
             raise
 
-    async def get_member(self, id_or_name: str) -> Member | None:
-        """A cached member by id or by username/display name (case-insensitive)."""
+    async def get_member(self, id_or_name: str, *, usernames_only: bool = False) -> Member | None:  # NOSONAR: public awaitable API, bots await it
+        """A cached member by exact id, else by username, else by a display name only one member has (names case-insensitive)."""
         member = self.members.get(id_or_name)
         if member:
             return member
         needle = id_or_name.lower()
-        for member in self.members.values():
-            if member.username.lower() == needle or member.display_name.lower() == needle:
-                return member
-        return None
+        by_username = next((m for m in self.members.values() if m.username.lower() == needle), None)
+        if by_username is not None or usernames_only:
+            return by_username
+        named = self.members_named(id_or_name)
+        return named[0] if len(named) == 1 else None
+
+    def members_named(self, display_name: str) -> list[Member]:
+        """Every cached member whose display name is `display_name` (case-insensitive); more than one means ask for the username."""
+        needle = display_name.lower()
+        return [m for m in self.members.values() if m.display_name.lower() == needle]
 
     def channel_label(self, channel_id: str | None, fallback: str | None = None) -> str:
         """`#name` for a channel the space knows, else `fallback`, else the id itself."""
@@ -163,7 +213,8 @@ class Space:
         await self._client.assign_role(member.id, role_id)
         if role_id not in member.role_ids:
             new_role_ids = member.role_ids + [role_id]
-            member._apply_roles(new_role_ids, self._base_permissions(new_role_ids))
+            member._apply_roles(new_role_ids, self._member_permissions(member, new_role_ids))
+            self._rerank(member)
         return member
 
     async def revoke_role(self, member: Member, role: Role | str) -> Member:
@@ -171,12 +222,13 @@ class Space:
         role_id = role.id if isinstance(role, Role) else role
         await self._client.unassign_role(member.id, role_id)
         remaining = [r for r in member.role_ids if r != role_id]
-        member._apply_roles(remaining, self._base_permissions(remaining))
+        member._apply_roles(remaining, self._member_permissions(member, remaining))
+        self._rerank(member)
         return member
 
     async def resolve_member(self, storage_key: str) -> Member:
         """The reverse of `Member.storage_key`: a live `Member` for a stored id."""
-        member = await self.get_member(storage_key)
+        member = self.members.get(storage_key)
         if member:
             return member
         return await self.fetch_member(storage_key)

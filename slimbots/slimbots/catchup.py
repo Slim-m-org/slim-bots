@@ -22,6 +22,13 @@ async def jump_to_latest(client: AsyncClient, conn: sqlite3.Connection, channel_
     cursor.set(conn, channel_id, latest[0]["seq"] if latest else 0, table)
 
 
+MAX_SYNC_SCOPES = 200
+
+
 async def sync(client: AsyncClient, scopes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    response = await client.call("POST", "/sync", {"scopes": scopes})
-    return response["scopes"]
+    """POST /sync in requests of at most MAX_SYNC_SCOPES scopes, the server's cap, and the answers joined in order."""
+    answered: list[dict[str, Any]] = []
+    for start in range(0, len(scopes), MAX_SYNC_SCOPES):
+        response = await client.call("POST", "/sync", {"scopes": scopes[start:start + MAX_SYNC_SCOPES]})
+        answered.extend(response["scopes"])
+    return answered

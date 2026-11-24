@@ -1,5 +1,5 @@
 """Which Jellyfin account a slim-m member watches as: `!jellyfin link|unlink|account`; see README.md.
-With no link a member uses the shared account (`JELLYFIN_USER_ID`, else the first enabled user)."""
+With no link a member uses the shared account `JELLYFIN_USER_ID`, and with that unset has to link first."""
 
 from __future__ import annotations
 
@@ -73,10 +73,13 @@ def set_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name, verified=Fals
 
 
 def claim_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name, verified=False):
-    """One store call, so the owner check and the write cannot be split by another member's link; False if someone else holds it."""
+    """One store call, so the owner check and the write cannot be split by another member's link; False if someone else holds it.
+    A Quick Connect claim outranks another member's name-only link, which never proved the account was theirs."""
     taken_by = owner_of(conn, jellyfin_user_id)
     if taken_by not in (None, slimm_user_id):
-        return False
+        if not verified or verified_link(conn, taken_by) is not None:
+            return False
+        conn.execute("DELETE FROM user_links WHERE slimm_user_id = ?", (taken_by,))
     set_link(conn, slimm_user_id, jellyfin_user_id, jellyfin_name, verified)
     return True
 
@@ -215,7 +218,8 @@ async def run_confirm(ctx):
 
 async def run_unlink(ctx):
     removed = await ctx.bot.store.run(remove_link, ctx.author.id)
-    text = f"unlinked - `{ctx.bot.prefix}watch` uses the shared jellyfin account again." if removed else "you were not linked to a jellyfin user."
+    after = "uses the shared jellyfin account again" if playback_progress.JELLYFIN_USER_ID else "needs a link again"
+    text = f"unlinked - `{ctx.bot.prefix}watch` {after}." if removed else "you were not linked to a jellyfin user."
     await _tell(ctx, text, "done.")
 
 
@@ -233,7 +237,9 @@ async def _current_name(jellyfin_user_id):
 async def run_account(ctx):
     p = ctx.bot.prefix
     link = await ctx.bot.store.run(get_link, ctx.author.id)
-    if link is None:
+    if link is None and not playback_progress.JELLYFIN_USER_ID:
+        text = f"you are not linked, and there is no shared jellyfin account here, so `{p}watch` needs `{p}jellyfin link` first."
+    elif link is None:
         text = f"you are not linked, so `{p}watch` uses the shared jellyfin account. `{p}jellyfin link` links you with a Quick Connect code."
     elif await ctx.bot.store.run(verified_link, ctx.author.id) is None:
         text = f'you are linked to "{link[1]}" by name only, which was never confirmed. `{p}jellyfin link` confirms it with a Quick Connect code.'

@@ -74,11 +74,12 @@ def upgrade_idents(records, deleted_type, ident_of):
 
 
 def make_post(namespace, kind, what, group, **extra):
-    """One announcement for a group of events, with a message id that is the same on every retry."""
+    """One announcement for a group of events, with a message id that is the same on every retry of the same records and new for any later ones."""
     keys = sorted(e["key"] for e in group)
+    record_ids = ",".join(str(i) for i in sorted(e["id"] for e in group))
     return {
         "kind": kind, "what": what, "marks": [(e["key"], e["detail"]) for e in group], "max_id": max(e["id"] for e in group),
-        "message_id": str(uuid.uuid5(namespace, "|".join(keys) + kind)), **extra,
+        "message_id": str(uuid.uuid5(namespace, "|".join(keys) + "#" + record_ids + kind)), **extra,
     }
 
 

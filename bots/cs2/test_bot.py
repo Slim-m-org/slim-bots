@@ -32,6 +32,7 @@ class Rig:
         self.vanity = {"annvanity": ID_ANN}
         self.urls = []
         cs2.get = self.get
+        self.clear_cooldowns()
 
     def get(self, url):
         self.urls.append(url)
@@ -43,11 +44,17 @@ class Rig:
         players = [{"steamid": i, "personaname": self.players[i][0], "personastate": self.players[i][1], "gameid": self.players[i][2]} for i in ids if i in self.players]
         return 200, json.dumps({"response": {"players": players}}).encode()
 
-    def say(self, text, user=ANN):
+    @staticmethod
+    def clear_cooldowns():
+        cs2.LFG_COOLDOWN.reset(cs2.LFG_COOLDOWN_KEY)
         for command in cs2.bot.commands.values():
             for each in (command, *getattr(command, "subcommands", {}).values()):
                 if each.cooldown is not None:
                     each.cooldown._last.clear()
+
+    def say(self, text, user=ANN, keep_cooldowns=False):
+        if not keep_cooldowns:
+            self.clear_cooldowns()
         asyncio.run(cs2.bot.process_message({"id": "m1", "channel_id": "c1", "author_id": user["id"], "content": text, "seq": 1}))
         return self.client.ephemerals[-1]["content"] if self.client.ephemerals else ""
 
@@ -130,7 +137,19 @@ def test_lfg_pings_the_role_when_one_is_set():
     rig = Rig(LFG_ROLE="cs2-crew")
     rig.link_all()
     rig.say("!cs2 lfg")
-    assert rig.client.sent[-1]["content"].startswith("@cs2-crew ")
+    assert rig.client.sent[-1]["content"].startswith("@[cs2-crew] ")
+
+
+def test_a_refused_lfg_leaves_the_cooldown_unspent_and_a_sent_one_spends_it():
+    rig = Rig()
+    rig.link_all()
+    rig.players[ID_BOB] = ("Bob", 1, "570")
+    assert "only 1 linked member" in rig.say("!cs2 lfg", keep_cooldowns=True)
+    rig.players[ID_BOB] = ("Bob", 1, "")
+    rig.say("!cs2 lfg", keep_cooldowns=True)
+    assert "wants a CS2 game" in rig.client.sent[-1]["content"]
+    assert "slow down" in rig.say("!cs2 lfg", user=BOB, keep_cooldowns=True)
+    assert len(rig.client.sent) == 1
 
 
 def test_who_lists_linked_members_with_their_state():

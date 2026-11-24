@@ -302,6 +302,62 @@ def test_the_channel_restriction_refuses_other_channels():
     assert rig.docker.calls
 
 
+def test_status_stop_and_help_outside_the_channel_are_refused_and_never_show_the_password():
+    rig = Rig(CS2_CHANNEL="c-games")
+    rig.say("!1v1", channel="c-games")
+    rig.tick(answer=info())
+    password = next(iter(cs2.servers.values())).password
+    before = len(rig.posts())
+    for text in ("!1v1 status", "!1v1 stop", "!1v1 help"):
+        rig.say(text, channel="c-other")
+    replies = rig.posts()[before:] + [e["content"] for e in rig.client.ephemerals]
+    assert not any(password in r for r in replies)
+    assert sum("not the channel" in r for r in replies) == 3
+    assert len(rig.running()) == 1
+    assert password in rig.say("!1v1 status", channel="c-games")
+
+
+def test_a_stop_docker_refuses_is_reported_once_then_retried_quietly_until_it_works():
+    rig = Rig(CS2_MAX_MATCH_SECONDS=1800)
+    rig.say("!1v1")
+    rig.tick(answer=info(players=2))
+    rig.docker.down = True
+    rig.tick(1801)
+    for _ in range(40):
+        rig.tick()
+    assert sum("could not stop" in p for p in rig.posts()) == 1
+    assert cs2.servers and rig.running()
+    rig.docker.down = False
+    rig.tick(600)
+    assert not rig.running() and "time limit" in rig.posts()[-1]
+
+
+def test_a_stop_that_is_no_longer_needed_clears_the_failure_so_a_later_one_is_reported_again():
+    rig = Rig()
+    rig.say("!1v1")
+    rig.tick(answer=info(players=2))
+    rig.tick(15, answer=info(players=0))
+    rig.docker.down = True
+    rig.tick(61)
+    rig.tick(60, answer=info(players=1))
+    rig.tick(15, answer=info(players=0))
+    rig.tick(61)
+    assert sum("could not stop" in p for p in rig.posts()) == 2 and rig.running()
+
+
+def test_a_member_stop_docker_refuses_is_answered_every_time():
+    rig = Rig()
+    rig.say("!1v1")
+
+    async def refuse(container_id):
+        raise cs2.DockerError("POST is turned off on the proxy")
+
+    rig.docker.stop = refuse
+    rig.say("!1v1 stop")
+    rig.say("!1v1 stop")
+    assert sum("could not stop" in p for p in rig.posts()) == 2 and cs2.servers
+
+
 def test_status_shows_the_connect_line_once_up():
     rig = Rig()
     assert "no 1v1 server" in rig.say("!1v1 status")

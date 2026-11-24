@@ -85,9 +85,11 @@ class Canvas:
         body = {"id": op_id or str(uuid.uuid4()), "kind": "reorder", "object_id": object_id, "z_index": z_index}
         return await self._client.call("POST", f"/channels/{self.channel_id}/canvas/ops", body)
 
-    async def viewport(self, *, min_x: float, min_y: float, max_x: float, max_y: float, limit: int = 100) -> Any:
-        """One page of objects in a rectangle - a bot's own reconciliation ground truth; see docs/framework.md."""
-        params = {"min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y, "limit": limit}
+    async def viewport(self, *, min_x: float, min_y: float, max_x: float, max_y: float, limit: int = 100, cursor_seq: int | None = None) -> Any:
+        """One page of objects in a rectangle - a bot's own reconciliation ground truth; `cursor_seq` pages forward from a seq (0 starts at the oldest); see docs/framework.md."""
+        params: dict[str, Any] = {"min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y, "limit": limit}
+        if cursor_seq is not None:
+            params["cursor_seq"] = cursor_seq
         return await self._client.call("GET", f"/channels/{self.channel_id}/canvas/objects", params=params)
 
     async def send_cursor(self, x: float, y: float) -> None:

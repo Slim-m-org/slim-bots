@@ -87,15 +87,21 @@ One line each way, by construction: neither name is spelled `id`, so a bot canno
 
 ## The Space model
 
-`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed`, `member.role_changed`, `member.removed`, `member.restored` and `profile.changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached), and reloadable on demand:
+`bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed`, `member.role_changed`, `member.removed`, `member.restored`, `profile.changed`, `member.timeout`, `join_gate.changed` and `owner.changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached, and one on the bot itself also reloads the roles, so gaining or losing role read takes effect without a restart; a timeout frame sets the cached `timed_out_until`; an ownership hand-off refetches the old and new owner), and reloadable on demand.
+The snapshot is taken after the gateway is open, so a change made while the bot connects arrives as a queued frame and is applied on top of it.
 
-- `space.get_member(id_or_name)`, `space.get_channel(...)`, `space.get_role(...)`
+- `space.get_member(id_or_name)` matches an id, then a username, then a display name only one member has, so a shared or copied display name never picks the wrong person; `space.get_channel(...)`, `space.get_role(...)`
 - `await space.find_channel_by_path("category/channel")` (or a bare `"channel"`) returns the channel id by name without case, or `None`
 - `await space.refresh_members()` / `refresh_channels()` / `refresh_roles()`
 - `await space.grant_role(member, role)` / `revoke_role(...)` - real calls, not stubs, so a ported bot-roles hands out roles through the library.
 - `Member.has_permission(permission)` checks the *caller's* base (deployment-level) permissions, the same set `GET /me` calls "base permissions", never the bot's own.
   `space.refresh_roles()` needs the bot's own token to hold `MANAGE_ROLES` (the same gate `GET /roles` has).
   Without it, every `has_permission` check answers `False`, deny by default, same as an unresolvable role-gated command anywhere else.
+  Losing it empties `space.roles`, so no cached bit comes from a table the bot can no longer read; a bot that checks permissions outside a command reads them with `space.refresh_permissions(member)` while `space.roles_readable` is False.
+- `Member.is_owner` marks the Space owner, who holds every permission whatever their roles, as the server rules.
+- `member.outranks(other)` answers the server's role ladder: True when `other`'s highest role sits strictly below this member's, the Space owner above everyone, and `None` when either rank is unknown.
+  `member.top_role_position` and `member.is_owner` come from the member payload; an older server without them falls back to `Role.position` from the role table.
+  `await space.ladder_reach(invoker, target)` rereads both ranks first, so a moderation command acting with the bot's authority refuses what the server would refuse the invoker.
 
 `on_member_join(member)` fires on a real `member.joined` frame - registration, or an existing account spending an invite code, never a restore (`on_member_restored` already covers that).
 It is the one handler in this list that does not take a raw frame or an `events.py` payload: the frame carries only a `user_id`, so `Bot._handle_frame` resolves it to a live `Member` (`bot.space.resolve_member`, the same cache-then-fetch `_resolve_author` already does for a message's own author) before dispatching, which is why it lives as its own special case above `_GLOBAL_EVENT_FRAMES` rather than another entry in it.
@@ -300,7 +306,7 @@ It returns a sentence, or `None`, and refuses a scheme other than http and https
 `await destination_problem(url, allow_private=False, allow_hosts=())` is the check for a URL a member supplied.
 It returns `urlpolicy.PRIVATE` or `urlpolicy.UNRESOLVABLE`, or `None` when every address the name resolves to is public.
 Private, loopback, link-local, carrier-grade NAT, multicast, reserved and unspecified addresses all fail, in IPv4, IPv6 and IPv4-mapped IPv6 form, and so does a name with even one such answer.
-`allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` exempts its Jellyfin host).
+`allow_private` is the operator opt-in (`bot-feeds`'s `FEEDS_ALLOW_PRIVATE`), and `allow_hosts` exempts a host the operator configured on purpose (`bot-music` passes its Jellyfin host only for a URL on the exact configured Jellyfin origin, with same-origin redirects, since `allow_hosts` matches the host and not the port).
 `JsonService(public_only=True)` runs the same check before the request and again for every redirect hop.
 It then connects to the addresses it checked, with the Host header and the TLS server name still the original host's, so a name that answers differently the second time cannot reach the LAN.
 It also caps the body at 10 MiB unless `max_bytes` says otherwise.
@@ -392,6 +398,7 @@ Nothing is stored: it has no seq, never shows in history, search or sync, is gon
 It may carry an `embed` and `attachment_ids`, but a private message cannot make a new file fetchable, so an attachment must already be visible to both the bot and the member (for example a file on a message in that channel) or the server answers 400. `content` may be empty when either is given, except on a server that predates this, which refuses an empty one.
 A member who blocked the bot still gets a 200 back, so a bot cannot tell.
 On a server that predates it the call is a 404 or 405 and raises `ApiError`; pass `public_fallback=True` to reply in the channel instead. Only do that for a refusal - never for anything private like a balance.
+A 404 `message not found` means the command message was deleted before the answer, and it always raises, fallback or not, so a private answer never lands in the channel.
 `FakeAsyncClient` records each one in `client.ephemerals`, separate from `client.sent`.
 
 ## Buttons
@@ -420,6 +427,7 @@ A press is best effort like typing: a bot that was offline never sees it.
 `slimbots.Chooser(prefix, command, label, verb)` is a message of buttons that only the person who asked may press and that closes itself after five minutes.
 Register it with `chooser.register(bot)`, then open one with `await chooser.open(bot, Pick(invoker_id, invoker_name, channel_id, items, query, on_choose), reply_to_id=)`.
 `on_choose(item)` returns the text the message shows afterwards, and a second press on the same message does nothing.
+The default `render` escapes mentions in the query and the invoker's name, and `chooser.button_label` drops hidden characters from each label, showing `Untitled` when none are left.
 A press by someone else, or on a message that expired, is answered privately with a hint to run `command` again.
 A chooser that pages or changes view subclasses it and overrides `render(pick)` and `handle(interaction, pick, action)`.
 `guard`, `close`, `redraw` and `expire` are there to build on, and `bot-jellyfin`'s `!watch` picker is the worked example.
@@ -472,6 +480,8 @@ Every slim-bot shapes its output through `slimbots.style`, so the fleet reads as
 `clip(text, limit, ellipsis="...")` cuts to a limit and never leaves a space before the ellipsis, and `one_line(text)` collapses all whitespace.
 `escape_mentions(text)` puts a backslash before every `@` the server would read as a mention, using its own rule that an odd run of backslashes already escapes one, so escaping twice changes nothing.
 `break_mentions(text)` puts a zero-width space after each `@` instead, for text inside a code span where a backslash would show.
+Escape anything a member typed, a display name, or text from an outside service before a bot posts it, or the mention is the bot's and carries the bot's permission to ping everyone.
+`strip_hidden(text)` drops the control and invisible characters a button label refuses.
 `format_duration(seconds, style)` prints a count of seconds in the shape a bot always printed it.
 The styles are `exact` (`1h`), `interval` (`5m`), `compact` (`1h5m`), `spaced` (`1h 5m`), `minutes` (`1 h 5 min`) and `uptime` (`2d 3h`).
 `space.channel_label(channel_id, fallback)` is `#name` for a known channel, else the fallback, else the id.

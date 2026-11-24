@@ -15,7 +15,7 @@ from arrkit import history, library, poller, service, store  # noqa: E402
 from slimbots.chooser import Chooser  # noqa: E402
 from arrkit.guard import Guard  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
-from slimbots import ApiError, Bot  # noqa: E402
+from slimbots import ApiError, Bot, urlpolicy  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
 SERVICE = service.Service("demo", "/api/v3")
@@ -103,6 +103,14 @@ def test_the_message_id_is_the_same_on_every_retry_and_differs_by_kind():
     assert first["message_id"] != history.make_post(ns, "failed", "x", group)["message_id"]
 
 
+def test_two_distinct_upgrades_of_one_item_get_different_ids_and_a_retry_keeps_its_id():
+    ns = uuid.UUID(int=1)
+    first = [{"key": "i|a", "detail": "HD", "id": 1}]
+    later = [{"key": "i|a", "detail": "4K", "id": 9}]
+    assert history.make_post(ns, "upgraded", "x", first)["message_id"] != history.make_post(ns, "upgraded", "x", later)["message_id"]
+    assert history.make_post(ns, "upgraded", "x", later)["message_id"] == history.make_post(ns, "upgraded", "x", list(later))["message_id"]
+
+
 def test_the_cursor_only_moves_forward():
     conn = fresh_db()
     store.advance_cursor(conn, 50)
@@ -122,11 +130,42 @@ def test_fetch_since_pages_back_only_while_a_page_is_all_new_and_returns_oldest_
     assert [r["id"] for r in got][:2] == [121, 122] and len(got) == 130
 
 
+DNS = {"sonarr": ["172.18.0.4"], "nas": ["192.168.1.20"], "x.example.com": ["1.1.1.1"]}
+
+
+def checked(url, allow_http=False):
+    svc = service.Service("demo", "/api")
+    svc.url, svc.allow_http = url, allow_http
+    with Patched(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        return svc.problem()
+
+
 def test_the_url_rule_allows_loopback_and_bare_service_names_and_refuses_public_plaintext():
     for url, ok in (("http://sonarr:8989", True), ("http://127.0.0.1:1", True), ("http://x.example.com", False), ("https://x.example.com", True)):
+        assert (checked(url) is None) is ok, url
+
+
+def test_a_bare_name_that_resolves_to_a_lan_host_needs_the_opt_in():
+    refusal = checked("http://nas:8989")
+    assert "Docker bridge" in refusal and "DEMO_ALLOW_HTTP=1" in refusal
+    assert checked("http://nas:8989", allow_http=True) is None
+    assert checked("http://192.168.1.20:8989", allow_http=True) is None
+
+
+def test_the_opt_in_never_covers_a_public_plaintext_host():
+    for url in ("http://x.example.com", "http://1.1.1.1:8989"):
+        assert "covers only a host on your own network" in checked(url, allow_http=True), url
+
+
+def test_the_opt_in_is_read_from_the_environment():
+    os.environ["DEMO_URL"], os.environ["DEMO_API_KEY"], os.environ["DEMO_ALLOW_HTTP"] = "http://nas:8989", "k", "1"
+    try:
         svc = service.Service("demo", "/api")
-        svc.url = url
-        assert (svc.problem() is None) is ok, url
+        svc.configure(Bot(prefix="!"))
+        assert svc.allow_http is True
+    finally:
+        for name in ("DEMO_URL", "DEMO_API_KEY", "DEMO_ALLOW_HTTP"):
+            os.environ.pop(name, None)
 
 
 def test_the_api_key_goes_in_a_header_never_the_url_and_a_401_is_an_auth_error():
@@ -353,6 +392,16 @@ def test_the_first_poll_starts_at_the_newest_record_and_a_later_one_posts_it_onc
     asyncio.run(poller.history_poll_once(bot, core))
     assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c1"
     assert client.sent[0]["embeds"][0]["title"] == "Downloaded: item 8 [HD]"
+
+
+def test_an_announcement_carries_its_text_as_content_beside_the_embed():
+    client = harness.setup()
+    records = [{"id": 1}]
+    core = history_core(records)
+    asyncio.run(poller.history_poll_once(bot, core))
+    records.append({"id": 2})
+    asyncio.run(poller.history_poll_once(bot, core))
+    assert client.sent[0]["content"] == "Downloaded: item 2 [HD]"
 
 
 def test_a_failed_send_keeps_the_cursor_and_retries_without_repeating_what_landed():

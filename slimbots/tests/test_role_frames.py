@@ -49,11 +49,12 @@ async def test_a_role_permission_edit_is_applied_to_every_cached_member_after_ro
     assert not (await bot.space.resolve_member("u1")).has_permission(Permissions.MANAGE_SERVER), "role permission edit not applied"
 
 
-async def test_a_role_change_the_bot_may_not_read_is_ignored_not_raised(monkeypatch):
+async def test_a_role_change_the_bot_may_not_read_is_not_raised_and_leaves_no_stale_grant(monkeypatch):
     bot, client = await make(monkeypatch, ["approver"])
     client.respond("GET", "/roles", ApiError(403, {"error": "forbidden"}))
     await bot._handle_frame({"type": "role.changed", "role_id": "approver"})
-    assert (await bot.space.resolve_member("u1")).has_permission(Permissions.MANAGE_SERVER)
+    assert bot.space.roles_readable is False
+    assert not (await bot.space.resolve_member("u1")).has_permission(Permissions.MANAGE_SERVER), "a stale grant survived"
 
 
 async def test_a_role_change_for_a_member_not_in_the_cache_costs_no_request(monkeypatch):

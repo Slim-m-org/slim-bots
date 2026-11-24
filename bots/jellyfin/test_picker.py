@@ -36,7 +36,7 @@ async def _no_pipeline(self, start_seconds=0.0):
 def searching(results, **more):
     pairs = [
         (stream_session.WatchSession, "start", _no_pipeline),
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: results)),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: results)),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch(item_id, "Chosen"))),
         (jellyfin_core, "series_seasons", asynced(lambda series_id, user_id=None: more.get("seasons", []))),
         (jellyfin_core, "season_episodes", asynced(lambda series_id, season_id, user_id=None: more.get("episodes", []))),

@@ -7,7 +7,7 @@ import logging
 import math
 import urllib.parse
 import uuid
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import httpx
 
@@ -61,13 +61,24 @@ def is_rate_limited(err: BaseException) -> bool:
     return isinstance(err, ApiError) and err.status == 429
 
 
+RETRYABLE_STATUSES = frozenset({500, 502, 503, 504})
+
+
+def is_unexplained_refusal(err: BaseException) -> bool:
+    """A 4xx that carries no slim-m `{"error"}` body, such as a reverse proxy's plain 404 while the server restarts; the server did not say it."""
+    return isinstance(err, ApiError) and err.status is not None and 400 <= err.status < 500 and err.reason is None
+
+
 def is_retryable(err: BaseException) -> bool:
-    """A 429 is worth retrying only when it names a wait; one without is a quota that waiting does not lift."""
+    """A 429 is worth retrying only when it names a wait; one without is a quota that waiting does not lift.
+    A 501 or 507 is the server's final answer, so only 500, 502, 503, 504, a network error and a proxy's bodiless 404 retry."""
     if not isinstance(err, ApiError):
         return False
     if err.status == 429:
         return err.retry_after is not None
-    return err.status is None or err.status >= 500
+    if err.status == 404:
+        return is_unexplained_refusal(err)
+    return err.status is None or err.status in RETRYABLE_STATUSES
 
 
 def _retry_after(response: httpx.Response, detail: Any) -> float | None:
@@ -168,9 +179,10 @@ class AsyncClient:
         headers: dict[str, str] | None = None, raw_body: bytes | None = None,
         retries: int = 5, base_delay: float = 0.5, max_delay: float = 8.0, max_retry_after: float = MAX_RETRY_AFTER,
         only_unprocessed: bool = False, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        on_headers: Callable[[Mapping[str, str]], None] | None = None,
     ) -> Any:
         """One authenticated call, retrying an uncertain outcome and a 429 that names a wait; `raw_body` sends bytes as-is.
-        `only_unprocessed` retries just that 429, for a write with no idempotency key, since the server answers it before acting."""
+        `only_unprocessed` retries just that 429, for a write with no idempotency key; `on_headers` gets the success response's headers."""
         attempt = 0
         while True:
             try:
@@ -181,6 +193,8 @@ class AsyncClient:
                 wait = _backoff(attempt, base_delay, max_delay)
             else:
                 if response.status_code < 400:
+                    if on_headers is not None:
+                        on_headers(response.headers)
                     return response.json() if response.content else None
                 failure = _error_from_response(response)
                 wait = _wait_before_retry(failure, attempt, base_delay, max_delay, max_retry_after, only_unprocessed)

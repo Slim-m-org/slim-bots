@@ -86,6 +86,27 @@ def test_status_text_lists_up_down_players_map_and_last_checked():
     assert text.endswith("last checked 03:04:05 UTC")
 
 
+def test_server_supplied_text_is_clipped_and_posts_with_no_live_mention():
+    status = queries.Status(up=True, players=1, max_players=2, map="@everyone " + "m" * 500, detail="@[Admins]\n" + "d" * 5000)
+    text = core.status_text([(VALHEIM, status)], STAMP)
+    assert "map \\@everyone mmm" in text and " - \\@[Admins] ddd" in text
+    assert len(text) < 3 * core.MAX_FIELD + 100
+    field = core.status_embed([(VALHEIM, status)], STAMP).fields[0]["value"]
+    assert len(field) < 2 * core.MAX_FIELD + 40 and "\n" not in field
+
+
+def test_player_counts_that_are_not_whole_numbers_are_left_out():
+    for players, max_players in (("9" * 5000, 10), ("@everyone", None), (1.5, 2), (True, 4), ([1], 2)):
+        assert core.players_text(queries.Status(up=True, players=players, max_players=max_players)) is None
+    assert core.players_text(queries.Status(up=True, players=3, max_players="@here")) == "3"
+    assert core.players_text(queries.Status(up=True, players=3, max_players=10)) == "3/10"
+
+
+def test_whole_number_takes_plain_ints_only():
+    assert [core.whole_number(v) for v in (0, 7, 10**9 - 1)] == [0, 7, 10**9 - 1]
+    assert [core.whole_number(v) for v in (True, False, -1, 10**9, 2.0, "3", None)] == [None] * 7
+
+
 def test_embed_has_a_field_per_server_and_a_colour_for_mixed_state():
     setup()
     wire = core.status_embed(rows_for(), STAMP).to_wire()

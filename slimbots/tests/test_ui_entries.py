@@ -204,7 +204,7 @@ async def test_a_button_press_without_a_kind_still_reaches_button_handlers():
     assert seen == ["button"]
 
 
-@pytest.mark.parametrize("hidden", ["\u200b", "‮", "ㅤ", "⠀", "­", "﻿", "\x00", "⁠", "\U000e0041"])
+@pytest.mark.parametrize("hidden", ["\u200b", "\u202e", "\u3164", "\u2800", "\u00ad", "\ufeff", "\x00", "\u2060", "\U000e0041"])
 def test_a_label_holding_an_invisible_character_is_refused_before_it_is_sent(hidden):
     with pytest.raises(ValueError, match="invisible"):
         UiEntry("pause", f"Pa{hidden}use")
@@ -212,7 +212,7 @@ def test_a_label_holding_an_invisible_character_is_refused_before_it_is_sent(hid
 
 def test_a_label_made_only_of_invisible_characters_is_refused():
     with pytest.raises(ValueError):
-        UiEntry("pause", "ㅤ")
+        UiEntry("pause", "\u3164")
 
 
 def test_a_variation_selector_stays_legal_because_it_makes_a_heart_an_emoji():
@@ -253,7 +253,7 @@ async def test_a_call_control_reaches_a_channel_scoped_bot_without_listening_to_
     assert heard == ["voice-1"]
 
 
-async def test_a_message_menu_use_in_an_unscoped_channel_is_still_dropped(monkeypatch):
+async def test_a_message_menu_use_outside_the_bots_channels_is_still_dispatched(monkeypatch):
     monkeypatch.delenv("SLIMM_LISTEN_VOICE_CHATS", raising=False)
     bot = make_bot()
     bot.channels = {"text"}
@@ -264,7 +264,7 @@ async def test_a_message_menu_use_in_an_unscoped_channel_is_still_dropped(monkey
         heard.append(interaction.channel_id)
 
     await deliver(bot, frame("message_menu", "translate", channel_id="elsewhere"))
-    assert heard == []
+    assert heard == ["elsewhere"]
 
 
 async def test_updating_a_call_control_resends_the_whole_set_and_skips_an_unchanged_one():

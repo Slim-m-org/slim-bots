@@ -38,5 +38,15 @@ def test_a_mention_the_author_already_escaped_stays_escaped():
     assert body.count("@") == 3
 
 
+def test_the_digest_is_defanged():
+    setup()
+    starboard.bot.space.members["u2"] = starboard.bot.space.members["u1"].__class__(member("u2", "evil", display_name="@everyone"), base_permissions=0)
+    starboard.bot.space.channels["c1"].name = "@here"
+    rows = [("m1", "c1", "u2", "@everyone free pizza, also @[Admins] and @nick look", 3)]
+    body = starboard.render_digest(rows, 7)
+    assert live_mentions(body) == [], body
+    assert "\\@everyone free pizza" in body
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

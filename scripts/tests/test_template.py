@@ -47,5 +47,5 @@ def test_the_hygiene_gate_catches_what_it_claims_to(tmp_path):
     assert "a.md:1: em dash" in found
     assert "b.py:3: plain comment" in found
     assert "c.py:1: emoji" in found
-    assert "d.py:1: zero-width" in found
+    assert "d.py:1: invisible character U+200B" in found
     assert "ok.py" not in found

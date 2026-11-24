@@ -57,6 +57,8 @@ class Server:
     silent_since: float | None = None
     last_progress_at: float = 0.0
     last_progress_pct: float = -1.0
+    stop_failures: int = 0
+    stop_retry_at: float = 0.0
 
 
 def configure(bot):

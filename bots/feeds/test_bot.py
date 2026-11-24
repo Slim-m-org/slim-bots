@@ -2,6 +2,7 @@
 """Commands and the poll loop against FakeAsyncClient and a scripted transport; run directly: python3 test_bot.py."""
 
 import asyncio
+import re
 
 import bot as feeds
 import db
@@ -20,7 +21,10 @@ class Rig:
 
     def __init__(self):
         self.client = FakeAsyncClient(me_id="bot-1")
-        self.client.respond("GET", "/channels", [{"id": "c1", "name": "news", "kind": "text", "category_id": None, "created_at": 0}])
+        self.client.respond("GET", "/channels", [
+            {"id": "c1", "name": "news", "kind": "text", "category_id": None, "created_at": 0},
+            {"id": "c2", "name": "staff", "kind": "text", "category_id": None, "created_at": 0},
+        ])
         self.client.respond("GET", "/categories", [])
         feeds.bot.channels = None
         wire_bot(feeds.bot, self.client, db_name="feeds.db")
@@ -274,6 +278,81 @@ def test_a_feed_that_names_itself_with_a_mention_cannot_ping_on_add_or_list():
     assert "\\@everyone news" in rig.last_reply() and "**@everyone" not in rig.last_reply()
     rig.say("!feed list")
     assert "\\@everyone news" in rig.last_reply()
+
+
+UNESCAPED_AT = re.compile(r"(?<!\\)@")
+MASTODON = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>nick on mastodon</title>
+<item><guid>https://mastodon.social/@nick/1</guid><title>A toot</title><link>https://mastodon.social/@nick/1</link></item>
+</channel></rss>"""
+
+
+def test_an_item_link_naming_a_handle_mentions_no_one_and_stays_on_the_card():
+    rig = Rig()
+    feed_url = "https://mastodon.social/@nick.rss"
+    rig.serve(MASTODON, url=feed_url)
+    rig.say("!feed add https://mastodon.social/@nick")
+    sent = rig.client.sent[0]
+    assert sent["embeds"][0]["url"] == "https://mastodon.social/@nick/1"
+    assert sent["content"] == "A toot", sent["content"]
+
+
+def test_an_older_server_that_refuses_the_card_gets_a_working_link_without_a_mention():
+    rig = Rig()
+    answers = iter([ApiError(400, {"error": "unknown field embeds"}), {"id": "m", "seq": 2}])
+
+    def refuse_the_card_once():
+        answer = next(answers)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    rig.client.respond("POST", "/channels/c1/messages", refuse_the_card_once)
+    entry = parsemod.Entry("k1", "A toot", "https://mastodon.social/@nick/1")
+    asyncio.run(feeds.post_entry({"id": 1, "channel_id": "c1"}, entry, "Src"))
+    plain = rig.client.sent[-1]
+    assert "embeds" not in plain and not UNESCAPED_AT.search(plain["content"]), plain["content"]
+    assert plain["content"] == "A toot\nhttps://mastodon.social/%40nick/1"
+
+
+def test_a_safe_link_keeps_userinfo_and_host_and_encodes_only_the_rest():
+    assert feeds.mention_safe_link("https://u@h.example/@a/b?c=@d#@e") == "https://u@h.example/%40a/b?c=%40d#%40e"
+    assert feeds.mention_safe_link("") == ""
+
+
+def two_channel_feeds(rig):
+    asyncio.run(feeds.bot.space.refresh_channels())
+    rig.sql(db.add_feed, "c1", URL, "Public news", "", 600, "u")
+    rig.sql(db.add_feed, "c2", "https://intranet.lan/releases.rss", "Internal releases", "secret", 600, "u")
+
+
+def test_list_shows_only_this_channel_feeds_to_a_member():
+    rig = Rig()
+    two_channel_feeds(rig)
+    rig.say("!feed list", permissions=0)
+    reply = rig.last_reply()
+    assert "Public news" in reply
+    assert "Internal releases" not in reply and "intranet.lan" not in reply and "#staff" not in reply
+    rig.say("!feed list", permissions=0, channel="c2")
+    assert "Public news" not in rig.last_reply() and "Internal releases" in rig.last_reply()
+
+
+def test_list_in_a_channel_without_feeds_says_so_without_naming_others():
+    rig = Rig()
+    rig.sql(db.add_feed, "c2", "https://intranet.lan/releases.rss", "Internal releases", "", 600, "u")
+    rig.say("!feed list", permissions=0)
+    assert "no feeds yet" in rig.last_reply() and "Internal" not in rig.last_reply()
+
+
+def test_list_all_needs_manage_server_and_answers_privately():
+    rig = Rig()
+    two_channel_feeds(rig)
+    rig.say("!feed list all", permissions=0)
+    assert "Manage Server" in rig.client.ephemerals[-1]["content"]
+    assert "Internal releases" not in rig.client.ephemerals[-1]["content"]
+    rig.say("!feed list all")
+    assert rig.client.sent == [], "the cross-channel list is never posted publicly"
+    private = rig.client.ephemerals[-1]["content"]
+    assert "Public news" in private and "Internal releases" in private and "#staff" in private
 
 
 if __name__ == "__main__":

@@ -25,13 +25,15 @@ def setup(**config):
     for name, value in {**DEFAULTS, **config}.items():
         setattr(automod, name, value)
     automod._recent.clear()
+    automod._exempt_cache.clear()
     automod._log_channel_id = None
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/channels", CHANNELS)
     client.respond("GET", "/categories", [{"id": "cat-1", "name": "general"}])
     for user in (USER, MOD):
         client.respond("GET", f"/users/{user['id']}", user)
-    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": []})
+    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": [], "top_role_position": 3})
+    client.respond("GET", "/users/u1", {**USER, "top_role_position": None})
     automod.bot.channels = None
     automod.bot.me_id = "bot-1"
     wire_bot(automod.bot, client, db_name="automod.db")
@@ -229,6 +231,27 @@ def test_lift_needs_kick_members_and_calls_the_route():
     assert ("DELETE", "/members/u1/timeout") in [(m, p) for m, p, _, _ in client.calls]
 
 
+def test_lift_refuses_a_member_at_or_above_the_invoker_on_the_ladder():
+    client = setup()
+    automod.bot.space.members["u1"] = automod.bot.space._make_member(USER)
+    mod = automod.bot.space._make_member({**MOD, "role_ids": []})
+    mod._base_permissions = Permissions.KICK_MEMBERS
+    automod.bot.space.members["u-mod"] = mod
+    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": [], "top_role_position": 3})
+    msg = {"id": "cmd", "channel_id": "c-chat", "author_id": "u-mod", "content": "!automod lift @spammer", "seq": 1}
+    for position in (3, 8):
+        client.respond("GET", "/users/u1", {**USER, "top_role_position": position})
+        asyncio.run(automod.bot.process_message(msg))
+        assert "outranks" in client.sent[-1]["content"]
+    client.respond("GET", "/users/u1", USER)
+    asyncio.run(automod.bot.process_message(msg))
+    assert "cannot read" in client.sent[-1]["content"]
+    assert ("DELETE", "/members/u1/timeout") not in [(m, p) for m, p, _, _ in client.calls]
+    client.respond("GET", "/users/u1", {**USER, "top_role_position": 2})
+    asyncio.run(automod.bot.process_message(msg))
+    assert ("DELETE", "/members/u1/timeout") in [(m, p) for m, p, _, _ in client.calls]
+
+
 def test_the_log_and_usage_hint_name_the_configured_prefix():
     client = setup(FLOOD_MESSAGES=3, LOG_CHANNEL="general/modlog")
     original, automod.bot.prefix = automod.bot.prefix, "?"
@@ -255,6 +278,46 @@ def test_a_message_from_an_author_the_server_cannot_resolve_is_left_alone():
     assert deleted(client) == []
     say("damn")
     assert len(deleted(client)) == 1
+
+
+def permission_reads(client, user_id):
+    return [p for m, p, _, _ in client.calls if m == "GET" and p == f"/members/{user_id}/permissions"]
+
+
+def without_role_read(client, user_id, bits):
+    automod.bot.space.roles_readable = False
+    automod.bot.permissions_readable = True
+    client.respond("GET", f"/members/{user_id}/permissions", {"user_id": user_id, "permissions": int(bits)})
+
+
+def test_a_moderator_stays_exempt_when_the_bot_cannot_read_roles():
+    client = setup(MENTION_LIMIT=1)
+    without_role_read(client, "u-mod", Permissions.MANAGE_MESSAGES)
+    say("@a @b @c", user_id="u-mod")
+    assert deleted(client) == [], "a moderator was moderated because the role table was unreadable"
+    without_role_read(client, "u1", 0)
+    say("@a @b @c")
+    assert len(deleted(client)) == 1
+
+
+def test_the_exemption_read_is_reused_until_a_role_frame_says_it_changed():
+    client = setup(MENTION_LIMIT=1)
+    without_role_read(client, "u-mod", Permissions.MANAGE_MESSAGES)
+    say("hi", user_id="u-mod")
+    say("hi again", user_id="u-mod")
+    assert len(permission_reads(client, "u-mod")) == 1, "every message re-read the permissions route"
+    client.respond("GET", "/members/u-mod/permissions", {"user_id": "u-mod", "permissions": 0})
+    handle_frame(automod.bot, {"type": "member.role_changed", "user_id": "u-mod", "role_id": "mods"})
+    say("@a @b @c", user_id="u-mod")
+    assert len(deleted(client)) == 1, "a demoted moderator kept the exemption"
+
+
+def test_the_space_owner_is_never_moderated_whatever_their_roles():
+    client = setup(MENTION_LIMIT=1)
+    client.respond("GET", "/users/u-own", human("u-own", "own", "Own", role_ids=[], is_owner=True))
+    automod.bot.space.roles_readable = True
+    say("@a @b @c", user_id="u-own")
+    assert deleted(client) == [] and timed_out(client) == []
 
 
 CLIENT_LINKIFIED = (
@@ -289,6 +352,66 @@ def test_a_hidden_character_inside_a_listed_word_does_not_hide_it():
     say("that is bad\u200bword")
     say("bad\u2060word.")
     assert len(deleted(client)) == 2
+
+
+
+def edit(message_id, text, user_id="u1", channel="c-chat"):
+    _counter[0] += 1
+    frame = {"id": message_id, "channel_id": channel, "author_id": user_id, "content": text, "seq": _counter[0]}
+    handle_frame(automod.bot, {"type": "message.edited", "channel_id": channel, "seq": _counter[0], "message": frame})
+
+
+def test_glued_and_role_mentions_count_toward_the_limit_like_the_server_reads_them():
+    for text in ("@ann@bob@cal", "@ann,@bob,@cal", "(@ann)(@bob)(@cal)", "@ann @[Core Team] @[mods]"):
+        client = setup(MENTION_LIMIT=2)
+        say(text)
+        assert len(deleted(client)) == 1, f"not caught: {text!r} counted {automod.mention_count(text)}"
+
+
+def test_mentions_inside_code_or_escaped_do_not_count():
+    fenced = "```python\n@dataclass\n@property\n@staticmethod\n@override\n```"
+    for text in (fenced, "use `@a` `@b` `@c` here", "\\@ann \\@bob \\@cal", "@ @ @ @é @-x"):
+        client = setup(MENTION_LIMIT=2)
+        say(text)
+        assert deleted(client) == [], f"false positive: {text!r} counted {automod.mention_count(text)}"
+        assert timed_out(client) == []
+
+
+def test_an_unclosed_fence_or_backtick_is_prose_so_its_mentions_count():
+    assert automod.mention_count("```\n@a @b @c") == 3
+    assert automod.mention_count("a ` @a @b @c") == 3
+    assert automod.mention_count("``` \n@a\n```\n@b `@c` @d") == 2
+
+
+def test_editing_a_clean_message_into_a_blocked_link_removes_it():
+    client = setup(LINK_POLICY="allow", LINK_DOMAINS=["good.example"])
+    message_id = say("hi")
+    assert deleted(client) == []
+    edit(message_id, "now https://evil.example/login")
+    assert deleted(client) == [f"/channels/c-chat/messages/{message_id}"]
+    assert any("removed by automod (link)" in s["content"] for s in client.sent)
+
+
+def test_editing_in_a_listed_word_or_a_mention_wall_is_caught():
+    client = setup(WORDS=["damn"], MENTION_LIMIT=2)
+    edit(say("fine"), "well damn")
+    assert len(deleted(client)) == 1
+    edit(say("fine"), "@a@b@c")
+    assert len(deleted(client)) == 2
+    assert timed_out(client) == ["/members/u1/timeout"]
+
+
+def test_an_edit_never_counts_toward_flood_and_moderators_may_edit_freely():
+    client = setup(FLOOD_MESSAGES=1, MENTION_LIMIT=1)
+    message_id = say("hi")
+    for n in range(5):
+        edit(message_id, f"hi again {n}")
+    assert deleted(client) == []
+    member = automod.bot.space._make_member({**MOD, "role_ids": []})
+    member._base_permissions = Permissions.MANAGE_MESSAGES
+    automod.bot.space.members["u-mod"] = member
+    edit("m-mod", "@a @b @c", user_id="u-mod")
+    assert deleted(client) == []
 
 
 if __name__ == "__main__":

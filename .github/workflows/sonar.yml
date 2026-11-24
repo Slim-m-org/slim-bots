@@ -17,8 +17,8 @@ concurrency:
 jobs:
   scan:
     name: sonarqube scan
-    # A fork's PR gets no secrets, so the scan would only fail on a missing token.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # Fork and Dependabot PRs get no repository secrets, so the scan would only fail on a missing token.
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

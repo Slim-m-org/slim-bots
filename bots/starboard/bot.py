@@ -2,6 +2,7 @@
 """bot-starboard: reposts well-reacted messages to a highlights channel and posts a weekly digest; see README.md."""
 
 import asyncio
+import contextlib
 import time
 import uuid
 
@@ -42,6 +43,7 @@ def init_db(conn):
     conn.commit()
     for table in ("seen", "starred"):
         ensure_columns(conn, table, {"attachment_ids": "TEXT NOT NULL DEFAULT ''"})
+    ensure_columns(conn, "starred", {"pending_delete": "INTEGER NOT NULL DEFAULT 0"})
 
 
 bot = Bot(prefix="!", require_channels=True, default_data_path="starboard.db", store_migrate=init_db, ordered_events=True)
@@ -55,8 +57,10 @@ LINK_TEMPLATE = bot.setting("STARBOARD_LINK_TEMPLATE", None)
 SEEN_RETENTION_DAYS = bot.setting("STARBOARD_SEEN_RETENTION_DAYS", 14, type=int)
 
 MAX_QUOTE_LEN = 1500
+_DELETE_SEEN = "DELETE FROM seen WHERE message_id = ?"
 DIGEST_SNIPPET_LEN = 80
 MAINTENANCE_SECONDS = 3600
+RECHECK_LIMIT = 40
 DAY = 86400
 
 
@@ -99,7 +103,7 @@ def split_ids(joined):
 
 def render_highlight(message_id, channel_id, author_id, content, attachments, attachment_ids, count):
     """One highlight's whole body; an edit only carries `content`, so the count and the quote live together."""
-    header = f"{EMOJI} {count} - {escape_mentions(author_label(author_id))} in {channel_label(channel_id)}"
+    header = f"{EMOJI} {count} - {escape_mentions(author_label(author_id))} in {escape_mentions(channel_label(channel_id))}"
     link = link_for(channel_id, message_id)
     if link:
         header += f" - {link}"
@@ -135,12 +139,30 @@ def seen_row(conn, message_id):
     ).fetchone()
 
 
+STARRED_COLUMNS = "message_id, channel_id, author_id, content, attachments, attachment_ids, highlight_id, count"
+
+
 def starred_row(conn, message_id):
+    """A highlight still standing; one whose original is deleted is only waiting for its own delete."""
     return conn.execute(
-        "SELECT message_id, channel_id, author_id, content, attachments, attachment_ids, highlight_id, count "
-        "FROM starred WHERE message_id = ?",
-        (message_id,),
+        f"SELECT {STARRED_COLUMNS} FROM starred WHERE message_id = ? AND pending_delete = 0", (message_id,)
     ).fetchone()
+
+
+def recent_starred(conn, since, limit):
+    return conn.execute(
+        f"SELECT {STARRED_COLUMNS} FROM starred WHERE starred_at >= ? AND pending_delete = 0 "
+        "ORDER BY starred_at DESC LIMIT ?",
+        (since, limit),
+    ).fetchall()
+
+
+def is_pending_delete(conn, message_id):
+    return conn.execute("SELECT 1 FROM starred WHERE message_id = ? AND pending_delete = 1", (message_id,)).fetchone() is not None
+
+
+def pending_deletes(conn):
+    return conn.execute("SELECT message_id, highlight_id FROM starred WHERE pending_delete = 1").fetchall()
 
 
 def add_starred(conn, seen, hl_id, count):
@@ -158,8 +180,21 @@ def set_count(conn, message_id, count):
     conn.commit()
 
 
+def forget_seen(conn, message_id):
+    """Leaves a starred row alone: one waiting for its highlight's delete must outlive a repeated delete event."""
+    conn.execute(_DELETE_SEEN, (message_id,))
+    conn.commit()
+
+
+def mark_deleted(conn, message_id):
+    """Drops the deleted text now and keeps only what the highlight's delete still needs, so a failed delete can be retried."""
+    conn.execute(_DELETE_SEEN, (message_id,))
+    conn.execute("UPDATE starred SET pending_delete = 1, content = '', author_id = '' WHERE message_id = ?", (message_id,))
+    conn.commit()
+
+
 def forget_message(conn, message_id):
-    conn.execute("DELETE FROM seen WHERE message_id = ?", (message_id,))
+    conn.execute(_DELETE_SEEN, (message_id,))
     conn.execute("DELETE FROM starred WHERE message_id = ?", (message_id,))
     conn.commit()
 
@@ -170,11 +205,11 @@ def prune_seen(conn, cutoff):
     conn.commit()
 
 
-def top_starred(conn, since, limit):
+def top_starred(conn, since):
     return conn.execute(
-        "SELECT message_id, channel_id, author_id, content, count FROM starred WHERE starred_at >= ? "
-        "ORDER BY count DESC, starred_at ASC LIMIT ?",
-        (since, limit),
+        "SELECT message_id, channel_id, author_id, content, count FROM starred WHERE starred_at >= ? AND pending_delete = 0 "
+        "ORDER BY count DESC, starred_at ASC",
+        (since,),
     ).fetchall()
 
 
@@ -190,11 +225,28 @@ def meta_set(conn, key, value):
 
 # --- events ---
 
+
+class _Holder:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.users = 0
+
+
 _locks = {}
 
 
-def _lock_for(message_id):
-    return _locks.setdefault(message_id, asyncio.Lock())
+@contextlib.asynccontextmanager
+async def _lock_for(message_id):
+    """Serializes the live handlers and the reconnect recheck per message, and drops the lock once nobody holds or awaits it."""
+    holder = _locks.setdefault(message_id, _Holder())
+    holder.users += 1
+    try:
+        async with holder.lock:
+            yield
+    finally:
+        holder.users -= 1
+        if holder.users == 0:
+            del _locks[message_id]
 
 
 def is_source(channel_id):
@@ -208,7 +260,8 @@ async def is_automated(author_id):
 
 
 def leaks(origin_id):
-    """True unless the origin is known public or the highlights channel is known restricted; the @everyone-wide flag only."""
+    """True unless the origin is known public or the highlights channel is known restricted; the @everyone-wide flag only.
+    Checked on every write, not just the first post, so a channel that turns private stops feeding its highlights and the digest."""
     channels = bot.space.channels
     origin, target = channels.get(origin_id), channels.get(STARBOARD_CHANNEL)
     origin_public = origin is not None and origin.restricted is False
@@ -242,7 +295,7 @@ async def on_reactions_changed(event):
         existing = await bot.store.run(starred_row, event.message_id)
         if existing is not None:
             await refresh_highlight(existing, count)
-        elif count >= THRESHOLD:
+        elif count >= THRESHOLD and not await bot.store.run(is_pending_delete, event.message_id):
             await post_highlight(event.channel_id, event.message_id, count)
 
 
@@ -289,7 +342,7 @@ async def post_highlight(channel_id, message_id, count):
 
 async def refresh_highlight(existing, count):
     *message, hl_id, old_count = existing
-    if count == old_count:
+    if count == old_count or leaks(message[1]):
         return
     await bot.client.edit_message(STARBOARD_CHANNEL, hl_id, render_highlight(*message, count))
     await bot.store.run(set_count, message[0], count)
@@ -301,11 +354,15 @@ async def on_message_edited(event):
         return
     message_id = event.message["id"]
     async with _lock_for(message_id):
-        await bot.store.run(update_content, message_id, event.message.get("content") or "")
-        existing = await bot.store.run(starred_row, message_id)
-        if existing is not None:
-            *message, hl_id, count = existing
-            await bot.client.edit_message(STARBOARD_CHANNEL, hl_id, render_highlight(*message, count))
+        await apply_edit(message_id, event.message.get("content") or "")
+
+
+async def apply_edit(message_id, content):
+    await bot.store.run(update_content, message_id, content)
+    existing = await bot.store.run(starred_row, message_id)
+    if existing is not None and not leaks(existing[1]):
+        *message, hl_id, count = existing
+        await bot.client.edit_message(STARBOARD_CHANNEL, hl_id, render_highlight(*message, count))
 
 
 @bot.event
@@ -313,10 +370,62 @@ async def on_message_deleted(event):
     if not is_source(event.channel_id):
         return
     async with _lock_for(event.message_id):
-        existing = await bot.store.run(starred_row, event.message_id)
-        await bot.store.run(forget_message, event.message_id)
-        if existing is not None:
-            await bot.client.delete_message(STARBOARD_CHANNEL, existing[6])
+        await apply_delete(event.message_id)
+
+
+async def apply_delete(message_id):
+    existing = await bot.store.run(starred_row, message_id)
+    if existing is None:
+        await bot.store.run(forget_seen, message_id)
+        return
+    await bot.store.run(mark_deleted, message_id)
+    await remove_highlight(message_id, existing[6])
+
+
+async def remove_highlight(message_id, hl_id):
+    """Forgets the original only once its highlight is gone; a 404 means someone already removed it."""
+    try:
+        await bot.client.delete_message(STARBOARD_CHANNEL, hl_id)
+    except ApiError as err:
+        if err.status != 404:
+            raise
+    await bot.store.run(forget_message, message_id)
+
+
+async def retry_pending_deletes():
+    for message_id, hl_id in await bot.store.run(pending_deletes):
+        async with _lock_for(message_id):
+            await guard_dispatch(remove_highlight, message_id, hl_id)
+
+
+# --- reconnect ---
+
+
+async def recheck_one(row):
+    message_id, channel_id = row[0], row[1]
+    async with _lock_for(message_id):
+        try:
+            message = await bot.client.get_message(channel_id, message_id)
+        except ApiError as err:
+            if err.status != 404:
+                raise
+            await apply_delete(message_id)
+            return
+        content = message.content or ""
+        if content != row[3]:
+            await apply_edit(message_id, content)
+
+
+@bot.event
+async def on_ready():
+    """Edits and deletes are not replayed after a disconnect, so recent highlights are compared with their originals."""
+    await recheck_starred()
+
+
+async def recheck_starred():
+    since = int(time.time()) - SEEN_RETENTION_DAYS * DAY
+    for row in await bot.store.run(recent_starred, since, RECHECK_LIMIT):
+        await guard_dispatch(recheck_one, row)
 
 
 # --- weekly digest ---
@@ -325,8 +434,9 @@ async def on_message_deleted(event):
 def render_digest(rows, days):
     lines = [f"Top highlights from the last {days} day{'s' if days != 1 else ''}:"]
     for i, (message_id, channel_id, author_id, content, count) in enumerate(rows, 1):
-        text = clip(one_line(content), DIGEST_SNIPPET_LEN) or "(no text)"
-        line = f"{i}. {EMOJI} {count} - {author_label(author_id)} in {channel_label(channel_id)}: {text}"
+        text = escape_mentions(clip(one_line(content), DIGEST_SNIPPET_LEN)) or "(no text)"
+        author, channel = escape_mentions(author_label(author_id)), escape_mentions(channel_label(channel_id))
+        line = f"{i}. {EMOJI} {count} - {author} in {channel}: {text}"
         link = link_for(channel_id, message_id)
         lines.append(f"{line} - {link}" if link else line)
     return "\n".join(lines)
@@ -342,7 +452,7 @@ async def post_digest_if_due(now):
         return
     if now - last < DIGEST_DAYS * DAY:
         return
-    rows = await bot.store.run(top_starred, last, DIGEST_TOP)
+    rows = [row for row in await bot.store.run(top_starred, last) if not leaks(row[1])][:DIGEST_TOP]
     if rows:
         await bot.client.send(STARBOARD_CHANNEL, render_digest(rows, DIGEST_DAYS), message_id=digest_id(last))
     await bot.store.run(meta_set, "last_digest", now)
@@ -352,6 +462,7 @@ async def post_digest_if_due(now):
 async def maintenance():
     now = int(time.time())
     await guard_dispatch(bot.store.run, prune_seen, now - SEEN_RETENTION_DAYS * DAY)
+    await guard_dispatch(retry_pending_deletes)
     await guard_dispatch(post_digest_if_due, now)
 
 

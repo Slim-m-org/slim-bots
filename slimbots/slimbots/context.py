@@ -115,7 +115,7 @@ class Context:
                 attachment_ids=attachment_ids, embeds=[embed.to_wire()] if embed else None,
             )
         except ApiError as err:
-            if public_fallback and err.status in (404, 405):
+            if public_fallback and _predates_ephemeral(err):
                 return await self.reply(content, embed=embed)
             raise
 
@@ -136,3 +136,8 @@ class Context:
         except asyncio.TimeoutError:
             return False
         return message.get("content", "").strip().lower() in ("yes", "y")
+
+
+def _predates_ephemeral(err: ApiError) -> bool:
+    """An older server's missing route, never today's 404 for a command message deleted before the answer."""
+    return err.status == 405 or (err.status == 404 and err.reason != "message not found")
