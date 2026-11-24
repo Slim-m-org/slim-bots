@@ -114,6 +114,26 @@ def test_a_member_sees_their_own_warns_but_not_others():
     assert "Kick Members" in client.ephemerals[-1]["content"]
 
 
+def warn_ann_then_fail_ephemeral(status, body):
+    client = setup()
+    seed_member(client)
+    say("!warn @ann shared a private address")
+    client.respond("POST", "/channels/c1/ephemeral-messages", ApiError(status, body))
+    return client
+
+
+def test_a_warns_listing_is_never_posted_publicly_when_the_command_was_deleted():
+    client = warn_ann_then_fail_ephemeral(404, {"error": "message not found"})
+    say("!warns @ann")
+    assert not [m for m in client.sent if "private address" in m["content"]]
+
+
+def test_a_warns_listing_is_never_posted_publicly_on_a_server_without_private_replies():
+    client = warn_ann_then_fail_ephemeral(405, None)
+    say("!warns @ann")
+    assert not [m for m in client.sent if "private address" in m["content"]]
+
+
 def test_expired_warns_stop_counting():
     client = setup(EXPIRE_DAYS=1)
     seed_member(client)

@@ -681,26 +681,35 @@ class Bot:
             for global_check in self._global_checks:
                 refusal = await global_check(ctx)
                 if refusal:
-                    await ctx.reply_ephemeral(refusal, public_fallback=True)
+                    await self._reply_refusal(ctx, refusal)
                     return
             await command.invoke(ctx)
         except MissingPermissions as err:
-            await ctx.reply_ephemeral(str(err), public_fallback=True)
+            await self._reply_refusal(ctx, str(err))
             await self._dispatch_event("on_command_error", ctx, err)
         except CommandError as err:
-            await ctx.reply_ephemeral(self._permission_refusal(err) or str(err), public_fallback=True)
+            await self._reply_refusal(ctx, self._permission_refusal(err) or str(err))
             await self._dispatch_event("on_command_error", ctx, err)
         except ApiError as err:
             if is_token_revoked(err):
                 raise
             reply = f"I can't do that: {err.reason or 'missing permission'}" if is_forbidden(err) \
                 else UNEXPECTED_ERROR_REPLY
-            await ctx.reply_ephemeral(reply, public_fallback=True)
+            await self._reply_refusal(ctx, reply)
             await self._dispatch_event("on_command_error", ctx, err)
         except Exception as err:
             log.error("unhandled error in command `%s`", command.name, exc_info=err)
             await self._reply_unexpected(ctx)
             await self._dispatch_event("on_command_error", ctx, err)
+
+    async def _reply_refusal(self, ctx: Context, text: str) -> None:
+        """Tells the invoker why a command did nothing; a reply the server refuses, such as to a deleted command, is only logged."""
+        try:
+            await ctx.reply_ephemeral(text, public_fallback=True)
+        except ApiError as err:
+            if is_token_revoked(err):
+                raise
+            log_failure(log, err, "could not tell the invoker why `%s` did nothing", ctx.invoked_with)
 
     async def _reply_unexpected(self, ctx: Context) -> None:
         """Tells the invoker something broke, with no detail: the traceback stays in the log, never the chat."""

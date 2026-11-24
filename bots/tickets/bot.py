@@ -90,7 +90,7 @@ async def ticket_transcript(ctx, number: int, page: int = 1):
     start = (page - 1) * PAGE_SIZE
     note = " (cut at the size limit when saved)" if truncated else ""
     head = f"ticket {number} from {opener}, page {page} of {pages}{note}"
-    await ctx.reply_ephemeral(f"{head}\n{body[start:start + PAGE_SIZE] or '(empty)'}", public_fallback=True)
+    await ctx.reply_ephemeral(f"{head}\n{body[start:start + PAGE_SIZE] or '(empty)'}")
 
 
 @ticket.command(name="reason", help="Say what this ticket is about", usage="<text>")
