@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import answers
+from slimbots import Permissions
 
 _sessions = {}
 
@@ -38,9 +39,17 @@ def _names(bot, channel_ids):
     return ", ".join(bot.space.channel_label(channel_id) for channel_id in channel_ids)
 
 
+def _invoker_can_view(ctx, channel_id):
+    """A stopgap until slimbots can check a member's view in one channel: public, the channel typed in, or an administrator."""
+    if channel_id == ctx.channel_id or ctx.author.has_permission(Permissions.ADMINISTRATOR):
+        return True
+    channel = ctx.bot.space.channels.get(channel_id)
+    return channel is not None and channel.restricted is False
+
+
 async def resolve_session(ctx):
     """The party in the voice channel the invoker is in; replies and returns None when there isn't one.
-    A person in no call gets the only party if exactly one runs, so `!np` still works from a phone."""
+    A person in no call gets the only party they can see, so `!np` still works from a phone; a party they cannot see is never named."""
     live = live_sessions()
     if not live:
         await answers.tell(ctx, "nothing is playing.")
@@ -48,11 +57,13 @@ async def resolve_session(ctx):
     channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if channel_id in live:
         return live[channel_id]
-    if channel_id is None and len(live) == 1:
-        return next(iter(live.values()))
-    running = _names(ctx.bot, live)
+    visible = [cid for cid in live if _invoker_can_view(ctx, cid)]
+    if channel_id is None and len(visible) == 1:
+        return live[visible[0]]
+    running = _names(ctx.bot, visible)
     if channel_id is None:
-        await answers.tell(ctx, f"streams are playing in {running} - join the voice channel you mean, then try again.")
+        await answers.tell(ctx, f"streams are playing in {running} - join the voice channel you mean, then try again." if visible else "nothing is playing.")
     else:
-        await answers.tell(ctx, f"nothing is playing in {ctx.bot.space.channel_label(channel_id)} (streaming in {running}).")
+        here = ctx.bot.space.channel_label(channel_id)
+        await answers.tell(ctx, f"nothing is playing in {here} (streaming in {running})." if visible else f"nothing is playing in {here}.")
     return None

@@ -58,12 +58,25 @@ async def on_member_join(member):
     await bot.client.send(channel_id, welcome_text(member))
 
 
+def invoker_can_view(ctx, channel):
+    """A stopgap until slimbots can check a member's view in one channel: public, the channel typed in, or an administrator."""
+    return channel.restricted is False or channel.id == ctx.channel_id or ctx.author.has_permission(Permissions.ADMINISTRATOR)
+
+
+def welcome_where_text(ctx, channel):
+    if channel is None:
+        return "no welcome channel set - run `!welcome here`."
+    if not invoker_can_view(ctx, channel):
+        return "welcomes go to a channel you cannot see."
+    return f"welcomes go to #{channel.name}."
+
+
 @bot.command(name="welcome", help="where welcomes go; `here` moves them to this channel", usage="[here]")
 async def welcome(ctx, arg: str = ""):
     if arg != "here":
         channel_id = await welcome_channel()
         channel = bot.space.get_channel(channel_id) if channel_id else None
-        await ctx.reply(f"welcomes go to #{channel.name}." if channel else "no welcome channel set - run `!welcome here`.")
+        await ctx.reply(welcome_where_text(ctx, channel))
         return
     if not ctx.author.has_permission(Permissions.MANAGE_SERVER):
         await ctx.reply_ephemeral("only someone with Manage Server can move the welcome channel.", public_fallback=True)

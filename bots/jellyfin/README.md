@@ -97,8 +97,9 @@ that already has one is refused, since two shares from one participant would
 read as a single share). The control commands
 (`!pause`/`!resume`/`!seek`/`!np`/`!subs`/`!audio`/`!quality`/`!stop`) work from any
 channel this bot listens on and act on the call the person who typed them
-is in. Someone in no call reaches the party if only one is running, and is
-asked to join the call they mean if several are.
+is in. Someone in no call reaches the party if only one they can see is running, and is
+asked to join the call they mean if several are. A party in a private call is never
+named or shown to someone who cannot see that call.
 
 Their answers ("paused.", "subtitles off.", a refusal) go only to the person
 who typed the command, so a run of commands leaves nothing for the room to
