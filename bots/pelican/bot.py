@@ -3,11 +3,10 @@
 See README.md; this is the entry point and the status loop, pelican_core.py and pelican_panel.py hold the rest."""
 
 import asyncio
-import os
 import uuid
 
 from slimbots import ApiError, Bot, KeyValueTable, Run, RunError
-from slimbots.bot import DEFAULT_CURSOR_DB
+from slimbots.bot import env_cursor_path
 from slimbots.http import is_not_found, is_token_revoked
 
 import pelican_core as core
@@ -27,7 +26,7 @@ def init_db(conn):
 
 bot = Bot(
     prefix="!", default_data_path="pelican.db", store_migrate=init_db,
-    cursor_path=os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB,
+    cursor_path=env_cursor_path(),
 )
 core.configure(bot)
 _last_status_text = None

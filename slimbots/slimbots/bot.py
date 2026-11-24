@@ -50,6 +50,11 @@ DEFAULT_USER_AGENT = f"slimbots/{library_version()}"
 DEFAULT_CURSOR_DB = "slimbots-cursor.db"
 DEFAULT_MAX_REPLAY_AGE = 300.0
 
+
+def env_cursor_path() -> str:
+    """The cursor db a bot with no store of its own uses: SLIMM_CURSOR_DB, else the default file."""
+    return os.environ.get("SLIMM_CURSOR_DB") or DEFAULT_CURSOR_DB
+
 # Seconds a noted message seq waits to be written with its neighbours, and before a failed write is tried again.
 CURSOR_FLUSH_SECONDS = 0.1
 CURSOR_RETRY_SECONDS = 1.0
