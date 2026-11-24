@@ -32,6 +32,12 @@ Per-role and per-member overwrites are not compared, so `SLIMM_CHANNELS` stays t
 The check runs on every write, not only the first post: once a mirrored channel turns private, its highlights stop following edits and counts, and the digest leaves them out.
 The highlights channel itself is never a source, even if it is listed.
 
+## Blocks
+
+A highlight names the member it quotes (`repost_of_author_id`), so a member who blocked them does not see the highlight, and gets no push for it, just as they do not see that member's own messages.
+This needs a slim-m server newer than 0.117; an older server ignores the field and shows the highlight to everyone.
+The weekly digest quotes several members in one post and is not covered by blocks.
+
 ## Settings
 
 - `STARBOARD_CHANNEL` (required) - the channel id highlights and digests are posted to.

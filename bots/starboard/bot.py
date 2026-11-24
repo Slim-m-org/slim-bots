@@ -327,12 +327,12 @@ async def send_highlight(seen, hl_id, count):
     ids = split_ids(seen[5])
     body = render_highlight(*seen, count)
     try:
-        await bot.client.send(STARBOARD_CHANNEL, body, message_id=hl_id, attachment_ids=ids or None)
+        await bot.client.send(STARBOARD_CHANNEL, body, message_id=hl_id, attachment_ids=ids or None, repost_of_author_id=seen[2])
     except ApiError as err:
         if not ids:
             raise
         print(f"starboard: sending {seen[0]} with its attachments failed ({err}); sending text only", flush=True)
-        await bot.client.send(STARBOARD_CHANNEL, body, message_id=hl_id)
+        await bot.client.send(STARBOARD_CHANNEL, body, message_id=hl_id, repost_of_author_id=seen[2])
 
 
 async def post_highlight(channel_id, message_id, count):

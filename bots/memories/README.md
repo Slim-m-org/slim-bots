@@ -43,3 +43,9 @@ A channel with more messages inside the window than the page limit allows is rea
 | `MEMORIES_AGES` | `1y,6m,3m,1m` | how far back to look, in order |
 | `MEMORIES_CHANNELS` | empty | channel ids or names to treat as public |
 | `MEMORIES_QUOTE_PAGES`, `MEMORIES_RECAP_PAGES` | `40`, `150` | the most pages of 100 messages read per channel |
+
+## Blocks
+
+A memory names the member it quotes (`repost_of_author_id`), so a member who blocked them does not see it, and gets no push for it, just as they do not see that member's own messages.
+This needs a slim-m server newer than 0.117 and the slim-m library 0.26.0; an older server ignores the field and shows the memory to everyone.
+The monthly recap quotes one reacted message and is not covered by blocks.

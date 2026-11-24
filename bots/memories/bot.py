@@ -129,7 +129,10 @@ def parse_month(text, today):
 async def onthisday(ctx):
     async with ctx.typing():
         found, cut_short = await find_memory(datetime.now(timezone.utc).date())
-    await ctx.reply(memory_text(found) if found else nothing_text(cut_short))
+    if found:
+        await ctx.reply(memory_text(found), repost_of_author_id=found[2]["author_id"])
+    else:
+        await ctx.reply(nothing_text(cut_short))
 
 
 @bot.command(name="recap", help="A month in the public channels, with no ranking of people: defaults to last month", usage="[YYYY-MM]", cooldown=20, cooldown_bucket="deployment")
@@ -145,13 +148,14 @@ async def recap(ctx, month: str = ""):
 
 
 async def post_once(kv, key, text_for):
-    """Posts to the configured channel at most once per `key`, even when nothing was found."""
+    """Posts to the configured channel at most once per `key`, even when nothing was found; `text_for` returns the text, or the text and the member it quotes."""
     if await kv.get(key):
         return
     await kv.set(key, "1")
     text = await text_for()
+    text, quoted = text if isinstance(text, tuple) else (text, None)
     if text:
-        await bot.client.send(POST_CHANNEL, text)
+        await bot.client.send(POST_CHANNEL, text, **({"repost_of_author_id": quoted} if quoted else {}))
 
 
 @bot.every(300, name="memories", on="ready", enabled=lambda: bool(POST_CHANNEL))
@@ -164,7 +168,7 @@ async def daily():
 
     async def memory():
         found, _ = await find_memory(today)
-        return memory_text(found) if found else ""
+        return (memory_text(found), found[2]["author_id"]) if found else ""
 
     try:
         await post_once(kv, f"day:{today.isoformat()}", memory)

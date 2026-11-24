@@ -210,6 +210,15 @@ def test_an_empty_month_says_so():
     assert "nothing was said" in client.sent[-1]["content"]
 
 
+def test_a_quoted_member_is_named_so_their_blockers_do_not_see_the_quote():
+    client = setup({"c-gen": [msg(ms(2025, 11, 4), "a message worth bringing back again")]})
+    say("!onthisday")
+    assert client.sent[-1]["repost_of_author_id"] == "u-ann"
+    memories.POST_CHANNEL, memories.POST_HOUR, memories.MONTHLY = "c-gen", 0, False
+    asyncio.run(memories.daily())
+    assert [s for s in client.sent if "On this day" in s["content"]][-1]["repost_of_author_id"] == "u-ann"
+
+
 def test_the_daily_post_goes_out_once():
     client = setup({"c-gen": [msg(ms(2025, 11, 4), "a message worth bringing back again")]})
     memories.POST_CHANNEL, memories.POST_HOUR, memories.MONTHLY = "c-gen", 0, False

@@ -276,9 +276,10 @@ class AsyncClient:
     async def send(
         self, channel_id: str, content: str, *, message_id: str | None = None, reply_to_id: str | None = None,
         attachment_ids: list[str] | None = None, embeds: list[dict[str, Any]] | None = None,
-        fallback_content: str | None = None, components: Rows | None = None,
+        fallback_content: str | None = None, components: Rows | None = None, repost_of_author_id: str | None = None,
     ) -> Message:
-        """Posts a message under a stable id; a 400 with `embeds` set retries once as plain `fallback_content`, buttons kept."""
+        """Posts a message under a stable id; a 400 with `embeds` set retries once as plain `fallback_content`, buttons kept.
+        `repost_of_author_id` marks the message as quoting that member, so members who blocked them do not see it; an older server ignores it."""
         message_id = message_id or str(uuid.uuid4())
         body: dict[str, Any] = {"id": message_id, "content": content}
         if reply_to_id:
@@ -289,6 +290,8 @@ class AsyncClient:
             body["embeds"] = embeds
         if components:
             body["components"] = components_to_wire(components)
+        if repost_of_author_id:
+            body["repost_of_author_id"] = repost_of_author_id
         try:
             data = await self.call("POST", f"/channels/{_seg(channel_id)}/messages", body)
         except ApiError as err:

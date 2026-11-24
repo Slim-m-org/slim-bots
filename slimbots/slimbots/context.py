@@ -93,12 +93,13 @@ class Context:
         body_content, embeds, fallback = self._prepare(content, embed)
         return await self.bot.client.send(target, body_content, embeds=embeds, fallback_content=fallback)
 
-    async def reply(self, content: str | None = None, *, embed: Embed | None = None) -> Any:
+    async def reply(self, content: str | None = None, *, embed: Embed | None = None, repost_of_author_id: str | None = None) -> Any:
         assert self.bot.client is not None
         assert self.channel_id is not None, "reply() needs a channel_id - this message's own channel_id was missing"
         body_content, embeds, fallback = self._prepare(content, embed)
         return await self.bot.client.send(
-            self.channel_id, body_content, reply_to_id=self.message.get("id"), embeds=embeds, fallback_content=fallback
+            self.channel_id, body_content, reply_to_id=self.message.get("id"), embeds=embeds, fallback_content=fallback,
+            repost_of_author_id=repost_of_author_id,
         )
 
     async def reply_ephemeral(
