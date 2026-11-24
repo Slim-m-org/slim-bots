@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """bot-memories: `!onthisday` quotes a public message from months or years ago, `!recap` is a monthly "wrapped"; see README.md."""
 
+import sys
 from datetime import datetime, timezone
 
 import history
@@ -20,12 +21,30 @@ RECAP_PAGES = bot.setting("MEMORIES_RECAP_PAGES", 150, type=int)
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
 
 
+def listed(channel):
+    """MEMORIES_CHANNELS names a channel by id outright, or by name only when the server does not call it restricted."""
+    return channel.id in EXTRA_PUBLIC or (channel.name in EXTRA_PUBLIC and channel.restricted is not True)
+
+
 def public_channels():
     """Text channels everyone can read; a channel the server does not call public is skipped unless listed in MEMORIES_CHANNELS."""
-    return [
-        c for c in bot.space.channels.values()
-        if c.kind == "text" and (c.restricted is False or c.id in EXTRA_PUBLIC or c.name in EXTRA_PUBLIC)
-    ]
+    return [c for c in bot.space.channels.values() if c.kind == "text" and (c.restricted is False or listed(c))]
+
+
+def channel_list_warnings():
+    """A line per MEMORIES_CHANNELS name that matches several channels or a restricted one, which a name never unlocks."""
+    text_channels = [c for c in bot.space.channels.values() if c.kind == "text"]
+    ids = {c.id for c in text_channels}
+    warnings = []
+    for entry in EXTRA_PUBLIC:
+        named = [c for c in text_channels if c.name == entry]
+        if entry in ids or not named:
+            continue
+        if len(named) > 1:
+            warnings.append(f"MEMORIES_CHANNELS name {entry!r} matches {len(named)} channels; list ids to pick one")
+        if any(c.restricted is True for c in named):
+            warnings.append(f"MEMORIES_CHANNELS name {entry!r} matches a restricted channel, which is skipped; list its id to include it")
+    return warnings
 
 
 def age_label(months):
@@ -154,6 +173,12 @@ async def daily():
             await post_once(kv, f"month:{year}-{month}", lambda: recap_text(year, month))
     except ApiError as err:
         print(f"memories: the post channel refused a message (http {err.status})")
+
+
+@bot.event
+async def on_connect():
+    for warning in channel_list_warnings():
+        print(f"warning: {warning}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
