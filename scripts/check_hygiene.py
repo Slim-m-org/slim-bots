@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import re
 import sys
@@ -14,8 +15,19 @@ EXCLUDE_DIRS = {".git", "__pycache__", "node_modules", "smoke-transcripts", "LIC
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".yml", ".yaml", ".toml"}
 EM_DASH = chr(0x2014)
 GLYPH_RANGES = ((0x2190, 0x21FF), (0x2300, 0x23FF), (0x25A0, 0x27BF), (0x2B00, 0x2BFF), (0xFE0F, 0xFE0F), (0x1F000, 0x1FAFF))
-ZERO_WIDTH = range(0x200B, 0x2010)
 LOCKFILE = re.compile(r".*\.lock\.txt")
+ALLOWED_CONTROLS = {"\t", "\n"}
+
+
+def _load_hidden_chars():
+    """Loads slimbots/hidden_chars.py by path so the gate needs neither slimbots installed nor its runtime deps."""
+    spec = importlib.util.spec_from_file_location("_hidden_chars", ROOT / "slimbots" / "slimbots" / "hidden_chars.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+is_hidden_char = _load_hidden_chars().is_hidden_char
 
 
 def tracked_text_files(root: Path = ROOT) -> list[Path]:
@@ -31,13 +43,23 @@ def tracked_text_files(root: Path = ROOT) -> list[Path]:
 
 def character_problems(path: Path, text: str) -> list[str]:
     problems = []
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(text.split("\n"), 1):
         if EM_DASH in line:
             problems.append(f"{path}:{number}: em dash, use a plain hyphen")
         if any(lo <= ord(ch) <= hi for ch in line for lo, hi in GLYPH_RANGES):
             problems.append(f"{path}:{number}: emoji or decorative glyph")
-        if any(ord(ch) in ZERO_WIDTH for ch in line):
-            problems.append(f"{path}:{number}: zero-width character, write it as a \\u escape")
+    return problems + hidden_char_problems(path, text)
+
+
+def hidden_char_problems(path: Path, text: str) -> list[str]:
+    """Walks the raw text, since splitlines() would treat U+2028 and U+2029 as line breaks and hide them."""
+    problems = []
+    number = 1
+    for ch in text:
+        if ch == "\n":
+            number += 1
+        elif ch not in ALLOWED_CONTROLS and is_hidden_char(ch):
+            problems.append(f"{path}:{number}: invisible character U+{ord(ch):04X}, write it as a \\u escape")
     return problems
 
 
