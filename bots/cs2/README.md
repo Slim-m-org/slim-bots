@@ -38,7 +38,7 @@ Every Steam command says plainly when `STEAM_API_KEY` is missing instead of fail
 | --- | --- | --- |
 | `STEAM_API_KEY` | empty | a [Steam Web API key](https://steamcommunity.com/dev/apikey); without it the presence features are off |
 | `CS2_CHANNEL` | empty | the channel id announcements go to; unset turns announcements off |
-| `CS2_ROLE` | empty | a role name to ping for `lfg`, written as `@name`; unset pings the free members themselves |
+| `CS2_ROLE` | empty | a role name to ping for `lfg`, written as `@[name]`; the role must allow mentions, or the bot must hold the mention-everyone permission, or nobody is notified. Unset pings the free members themselves |
 | `CS2_LFG_MIN` | `3` | how many free linked members `lfg` needs before it pings |
 | `CS2_SERVER` | empty | `host:port` of the group's CS2 server |
 | `CS2_POLL` | `90` | seconds between presence checks, at least 60 |
