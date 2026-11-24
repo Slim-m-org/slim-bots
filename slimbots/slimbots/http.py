@@ -7,7 +7,7 @@ import logging
 import math
 import urllib.parse
 import uuid
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import httpx
 
@@ -168,9 +168,10 @@ class AsyncClient:
         headers: dict[str, str] | None = None, raw_body: bytes | None = None,
         retries: int = 5, base_delay: float = 0.5, max_delay: float = 8.0, max_retry_after: float = MAX_RETRY_AFTER,
         only_unprocessed: bool = False, sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        on_headers: Callable[[Mapping[str, str]], None] | None = None,
     ) -> Any:
         """One authenticated call, retrying an uncertain outcome and a 429 that names a wait; `raw_body` sends bytes as-is.
-        `only_unprocessed` retries just that 429, for a write with no idempotency key, since the server answers it before acting."""
+        `only_unprocessed` retries just that 429, for a write with no idempotency key; `on_headers` gets the success response's headers."""
         attempt = 0
         while True:
             try:
@@ -181,6 +182,8 @@ class AsyncClient:
                 wait = _backoff(attempt, base_delay, max_delay)
             else:
                 if response.status_code < 400:
+                    if on_headers is not None:
+                        on_headers(response.headers)
                     return response.json() if response.content else None
                 failure = _error_from_response(response)
                 wait = _wait_before_retry(failure, attempt, base_delay, max_delay, max_retry_after, only_unprocessed)

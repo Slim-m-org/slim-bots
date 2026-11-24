@@ -176,6 +176,7 @@ class Bot:
         self._fatal_error: BaseException | None = None
         self._main_task: asyncio.Task[Any] | None = None
         self._gateway: Gateway | None = None
+        self._dropped_commands: set[str] = set()
         self._held_live: list[tuple[str | None, dict[str, Any]]] | None = None
         self._replayed_ids: set[str] = set()
         self.moderation_head: int | None = None
@@ -356,8 +357,9 @@ class Bot:
 
     def add_command(self, command: Command) -> None:
         for name in command.names:
-            if name in self.commands:
-                raise ValueError(f"command name/alias `{name}` is already registered")
+            clash = next((known for known in self.commands if known.lower() == name.lower()), None)
+            if clash is not None:
+                raise ValueError(f"command name/alias `{name}` is already registered (as `{clash}`; names compare case-insensitively)")
             self.commands[name] = command
         self._unique_commands.append(command)
 
@@ -483,10 +485,16 @@ class Bot:
         # A connector's commands are declared in its manifest, so it publishes none of its own.
         if self.connector:
             return
+        self._dropped_commands = set()
         try:
-            await register_commands(self.client, prefix=self.prefix, commands=self.unique_commands())
+            await register_commands(
+                self.client, prefix=self.prefix, commands=self.unique_commands(), on_dropped=self._note_dropped_commands,
+            )
         except RegistrationConflict as err:
             log.error("the server refused this bot's commands: %s", err.reason or err)
+
+    def _note_dropped_commands(self, names: list[str]) -> None:
+        self._dropped_commands = {name.lower() for name in names}
 
     async def process_message(self, message: dict[str, Any]) -> None:
         """One `message.created` payload: the bot-ignore default, command
@@ -505,6 +513,9 @@ class Bot:
 
         invoked_with, raw_args = split_first_word(invocation)
         command = self.commands.get(invoked_with)
+        if command is not None and self._is_dropped_by_prefix(message, invoked_with):
+            log.debug("ignored %s%s: the server gave that command to another bot", self.prefix, invoked_with)
+            return
         if command is None:
             if self._listeners.get("on_command_not_found"):
                 await self._dispatch_not_found(message, author_id, invoked_with, raw_args)
@@ -518,6 +529,10 @@ class Bot:
             command=command, invoked_with=invoked_with, raw_args=raw_args,
         )
         await self._invoke(ctx, command)
+
+    def _is_dropped_by_prefix(self, message: dict[str, Any], invoked_with: str) -> bool:
+        """A prefixed use of a command the server gave to another bot; an @mention still reaches this bot."""
+        return invoked_with.lower() in self._dropped_commands and (message.get("content") or "").startswith(self.prefix)
 
     def _strip_invocation(self, content: str) -> str | None:
         """The text after the prefix or an `@username` address, or None when `content` addresses this bot by neither."""
@@ -697,8 +712,8 @@ class Bot:
         if kind == "message.created":
             await self._route_message(frame)
         elif kind == "interaction.created":
-            # A call control is used on a call, which a channel-scoped bot is not scoped to, so scope never gates it.
-            if frame.get("kind") == "call_control" or await self._accepts_channel(frame.get("channel_id"), kind):
+            # A call control is used on a call, and the server offers a message menu in every channel the bot can view, so scope never gates either.
+            if frame.get("kind") in ("call_control", "message_menu") or await self._accepts_channel(frame.get("channel_id"), kind):
                 is_button = frame.get("kind", "button") == "button"
                 dispatch = dispatch_press(self, self._buttons, frame) if is_button else dispatch_ui(self, self._ui, frame)
                 self.background(dispatch, name=f"press-{frame.get('interaction_id', '?')}")
@@ -806,8 +821,7 @@ class Bot:
         pending = self._catch_up_channels()
         if not pending or self._cursor_conn is None:
             return
-        for channel_id in pending:
-            await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+        pending = await self._bootstrap_channels(pending)
         while pending:
             scopes = [{"channel_id": c, "after_seq": cursor.get(self._cursor_conn, c)} for c in pending]
             more, starved = [], []
@@ -822,6 +836,21 @@ class Bot:
                     (more if scope["messages"] else starved).append(channel_id)
             # A scope the shared response budget left empty can only get a page once another scope has used one.
             pending = more + (starved if more else [])
+
+    async def _bootstrap_channels(self, channels: list[str]) -> list[str]:
+        """Bootstraps each channel on its own; one the server refuses for good is logged by id and left out of this catch-up."""
+        assert self.client is not None and self._cursor_conn is not None
+        usable = []
+        for channel_id in channels:
+            try:
+                await catchup.bootstrap(self.client, self._cursor_conn, channel_id)
+            except ApiError as err:
+                if err.status not in (400, 403, 404):
+                    raise
+                log.error("skipping channel %s: the server answered HTTP %s (is it viewable by this bot?)", channel_id, err.status)
+                continue
+            usable.append(channel_id)
+        return usable
 
     async def _replay_page(self, channel_id: str, messages: list[dict[str, Any]]) -> None:
         assert self._cursor_conn is not None
