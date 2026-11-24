@@ -11,6 +11,7 @@ from slimbots import ApiError, Bot, Member, Permissions, style
 from slimbots.text import escape_mentions
 
 from link_rules import link_domains, strip_punctuation, visible_text
+from mention_rules import mention_count
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, rule TEXT NOT NULL)")
@@ -45,10 +46,6 @@ def domain_listed(host, listed):
     return any(host == d or host.endswith("." + d) for d in listed)
 
 
-def mention_count(text):
-    return sum(1 for token in text.split() if len(token) > 1 and token.startswith("@") and token[1].isalnum())
-
-
 def words_hit(text):
     """The first listed word that appears as a whole word, or None; punctuation around a word does not hide it."""
     tokens = {strip_punctuation(t) for t in visible_text(text).lower().split()}
@@ -80,12 +77,16 @@ def is_new_member(member, now):
 
 
 def verdict(message, member, channel_name, now):
-    """`(rule, reason, timeout_seconds)` for the first rule the message breaks, or None; checked cheapest first."""
-    text = message.get("content") or ""
+    """`(rule, reason, timeout_seconds)` for the first rule a new message breaks, or None; checked cheapest first."""
     user_id = message["author_id"]
     if flood_tripped(user_id, now):
         _recent[user_id].clear()
         return "flood", f"more than {FLOOD_MESSAGES} messages in {FLOOD_SECONDS}s", FLOOD_TIMEOUT
+    return content_verdict(message.get("content") or "", member, channel_name, now)
+
+
+def content_verdict(text, member, channel_name, now):
+    """The rules that read the text, so an edit is held to them too; flood counts sends, not edits."""
     if MENTION_LIMIT > 0 and mention_count(text) > MENTION_LIMIT:
         return "mention-spam", f"more than {MENTION_LIMIT} mentions in one message", MENTION_TIMEOUT
     hosts = link_domains(text)
@@ -181,21 +182,35 @@ async def on_role_changed(_frame):
     _exempt_cache.clear()
 
 
-@bot.event
-async def on_raw_message(message):
+async def _subject(message):
+    """`(member, channel_name)` when the rules apply to this message's author, else None."""
     author_id = message.get("author_id")
     if not author_id or author_id == bot.me_id or not message.get("id"):
-        return
+        return None
     if await bot.authors.is_automated(author_id):
-        return
+        return None
     member = await bot.space.find_member(author_id)
     if member is None or await is_exempt(member, time.monotonic()):
-        return
+        return None
     channel = bot.space.channels.get(message.get("channel_id"))
-    channel_name = channel.name.lower() if channel else ""
-    found = verdict(message, member, channel_name, time.time())
+    return member, channel.name.lower() if channel else ""
+
+
+@bot.event
+async def on_raw_message(message):
+    subject = await _subject(message)
+    found = subject and verdict(message, *subject, time.time())
     if found:
-        await enforce(message, member, channel_name, *found)
+        await enforce(message, *subject, *found)
+
+
+@bot.event
+async def on_message_edited(event):
+    message = event.message
+    subject = await _subject(message)
+    found = subject and content_verdict(message.get("content") or "", *subject, time.time())
+    if found:
+        await enforce(message, *subject, *found)
 
 
 def _count_actions(conn):

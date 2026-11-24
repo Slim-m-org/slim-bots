@@ -354,5 +354,65 @@ def test_a_hidden_character_inside_a_listed_word_does_not_hide_it():
     assert len(deleted(client)) == 2
 
 
+
+def edit(message_id, text, user_id="u1", channel="c-chat"):
+    _counter[0] += 1
+    frame = {"id": message_id, "channel_id": channel, "author_id": user_id, "content": text, "seq": _counter[0]}
+    handle_frame(automod.bot, {"type": "message.edited", "channel_id": channel, "seq": _counter[0], "message": frame})
+
+
+def test_glued_and_role_mentions_count_toward_the_limit_like_the_server_reads_them():
+    for text in ("@ann@bob@cal", "@ann,@bob,@cal", "(@ann)(@bob)(@cal)", "@ann @[Core Team] @[mods]"):
+        client = setup(MENTION_LIMIT=2)
+        say(text)
+        assert len(deleted(client)) == 1, f"not caught: {text!r} counted {automod.mention_count(text)}"
+
+
+def test_mentions_inside_code_or_escaped_do_not_count():
+    fenced = "```python\n@dataclass\n@property\n@staticmethod\n@override\n```"
+    for text in (fenced, "use `@a` `@b` `@c` here", "\\@ann \\@bob \\@cal", "@ @ @ @é @-x"):
+        client = setup(MENTION_LIMIT=2)
+        say(text)
+        assert deleted(client) == [], f"false positive: {text!r} counted {automod.mention_count(text)}"
+        assert timed_out(client) == []
+
+
+def test_an_unclosed_fence_or_backtick_is_prose_so_its_mentions_count():
+    assert automod.mention_count("```\n@a @b @c") == 3
+    assert automod.mention_count("a ` @a @b @c") == 3
+    assert automod.mention_count("``` \n@a\n```\n@b `@c` @d") == 2
+
+
+def test_editing_a_clean_message_into_a_blocked_link_removes_it():
+    client = setup(LINK_POLICY="allow", LINK_DOMAINS=["good.example"])
+    message_id = say("hi")
+    assert deleted(client) == []
+    edit(message_id, "now https://evil.example/login")
+    assert deleted(client) == [f"/channels/c-chat/messages/{message_id}"]
+    assert any("removed by automod (link)" in s["content"] for s in client.sent)
+
+
+def test_editing_in_a_listed_word_or_a_mention_wall_is_caught():
+    client = setup(WORDS=["damn"], MENTION_LIMIT=2)
+    edit(say("fine"), "well damn")
+    assert len(deleted(client)) == 1
+    edit(say("fine"), "@a@b@c")
+    assert len(deleted(client)) == 2
+    assert timed_out(client) == ["/members/u1/timeout"]
+
+
+def test_an_edit_never_counts_toward_flood_and_moderators_may_edit_freely():
+    client = setup(FLOOD_MESSAGES=1, MENTION_LIMIT=1)
+    message_id = say("hi")
+    for n in range(5):
+        edit(message_id, f"hi again {n}")
+    assert deleted(client) == []
+    member = automod.bot.space._make_member({**MOD, "role_ids": []})
+    member._base_permissions = Permissions.MANAGE_MESSAGES
+    automod.bot.space.members["u-mod"] = member
+    edit("m-mod", "@a @b @c", user_id="u-mod")
+    assert deleted(client) == []
+
+
 if __name__ == "__main__":
     run_module_tests(globals())
