@@ -107,20 +107,53 @@ def test_plaintext_to_anywhere_but_loopback_is_refused(url):
     assert "plaintext" in (service_url_problem("JELLYFIN_URL", url) or "")
 
 
+DNS = {"sonarr": ["172.18.0.4"], "nas": ["192.168.1.20"], "dual": ["172.18.0.4", "1.1.1.1"], "panel.example.com": ["1.1.1.1"],
+       "pve.home.example": ["10.0.0.7", "fd12::7"], "lan-and-public.example": ["10.0.0.7", "2001:4860::1"]}
+
+
+def fake_dns(host):
+    if host not in DNS:
+        raise OSError("no such host")
+    return DNS[host]
+
+
 @pytest.mark.parametrize("url, expected_none", [
     ("http://sonarr:8989", True), ("http://sonarr", True), ("http://sonarr.lan:8989", False), ("http://10.0.0.5:8989", False),
     ("http://sonarr.example.com", False), ("http://localhost:8989", True),
 ])
 def test_a_bare_docker_name_is_allowed_only_when_asked_for(url, expected_none):
-    assert (service_url_problem("SONARR_URL", url, bare_hostnames=True) is None) is expected_none
+    assert (service_url_problem("SONARR_URL", url, bare_hostnames=True, resolve=fake_dns) is None) is expected_none
     if "sonarr:" in url or url == "http://sonarr":
-        assert service_url_problem("SONARR_URL", url) is not None
+        assert service_url_problem("SONARR_URL", url, resolve=fake_dns) is not None
 
 
-def test_the_operator_opt_in_allows_plaintext_anywhere():
-    assert service_url_problem("PELICAN_URL", "http://10.0.0.5", allow_http=True, opt_in="PELICAN_ALLOW_HTTP") is None
+@pytest.mark.parametrize("url", ["http://nas:8989", "http://dual:8989", "http://unknown:8989"])
+def test_a_bare_name_that_resolves_off_the_docker_bridge_is_refused(url):
+    refusal = service_url_problem("SONARR_URL", url, bare_hostnames=True, opt_in="SONARR_ALLOW_HTTP", resolve=fake_dns)
+    assert refusal is not None and "Docker bridge" in refusal and "SONARR_ALLOW_HTTP=1" in refusal
+
+
+def test_the_bare_name_check_resolves_the_real_name_by_default(monkeypatch):
+    asked = []
+    monkeypatch.setattr(urlpolicy, "resolve_addresses", lambda host: asked.append(host) or ["192.168.1.20"])
+    assert service_url_problem("SONARR_URL", "http://sonarr:8989", bare_hostnames=True) is not None
+    assert asked == ["sonarr"]
+
+
+def test_the_operator_opt_in_allows_plaintext_to_a_lan_host():
+    for url in ("http://10.0.0.5", "http://nas:8989", "http://pve.home.example:8006", "http://[fe80::1]", "http://127.0.0.1"):
+        assert service_url_problem("PELICAN_URL", url, allow_http=True, loopback_http=False, resolve=fake_dns) is None, url
     refusal = service_url_problem("PELICAN_URL", "http://10.0.0.5", opt_in="PELICAN_ALLOW_HTTP")
     assert refusal is not None and "PELICAN_ALLOW_HTTP=1" in refusal
+
+
+@pytest.mark.parametrize("url", [
+    "http://panel.example.com", "http://1.1.1.1", "http://8.8.8.8:80", "http://lan-and-public.example", "http://dual",
+    "http://unknown.example", "http://[2001:4860::1]",
+])
+def test_the_operator_opt_in_still_refuses_plaintext_to_a_public_or_unknown_host(url):
+    refusal = service_url_problem("PELICAN_URL", url, allow_http=True, opt_in="PELICAN_ALLOW_HTTP", resolve=fake_dns)
+    assert refusal is not None and "covers only a host on your own network" in refusal and "PELICAN_ALLOW_HTTP" in refusal
 
 
 @pytest.mark.parametrize("url", ["ftp://host", "jf.example", "https://", "", "ws://host"])

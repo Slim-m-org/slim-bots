@@ -56,8 +56,9 @@ A poll where a send fails retries next cycle; what already landed is remembered.
 
 | Variable | Meaning |
 | --- | --- |
-| `SEERR_URL` | Seerr's base URL. Plaintext is accepted only for loopback or a bare docker service name; anything else must be https. |
+| `SEERR_URL` | Seerr's base URL. Plaintext is accepted only for loopback or a bare docker service name that resolves to a Docker bridge address; anything else must be https. |
 | `SEERR_API_KEY` | The key from Settings, General. It goes in an `X-Api-Key` header and is never logged. |
 | `SEERR_POLL_SECONDS` | Poll interval, default 60. |
+| `SEERR_ALLOW_HTTP` | `1` allows a plaintext `http` URL to a host on your own network (every address it resolves to is private); a public host still needs https. Default off. |
 | `SEERR_APPROVER_PERMISSION` | The slim-m permission that may approve and decline, default `MANAGE_SERVER`. |
 | `SEERR_DEFAULT_USER_ID` | Optional Seerr user id to request as for members who have not linked. |

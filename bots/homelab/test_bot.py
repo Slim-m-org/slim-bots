@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+from unittest import mock
 
 import httpx
 
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bot as homelab  # noqa: E402
 import sources  # noqa: E402
-from slimbots import Canvas  # noqa: E402
+from slimbots import Canvas, urlpolicy  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
 from slimbots.permissions import Permissions  # noqa: E402
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
@@ -245,22 +246,29 @@ def test_an_oversized_answer_and_a_dead_host_are_sentences_that_name_no_url():
     assert fetched("https://pve.lan:8006/x?token=SECRET") == "homelab could not be reached (ConnectError)"
 
 
+DNS = {"pve.lan": ["192.168.1.10"], "jellyfin": ["172.18.0.5"], "pve.example.com": ["1.1.1.1"]}
+
+
 def test_a_plaintext_lan_url_stops_the_bot_unless_the_operator_allows_it():
-    Rig(PROXMOX_URL="http://pve.lan:8006")
-    homelab.ALLOW_HTTP = False
-    assert "refusing a plaintext HOMELAB_PROXMOX_URL" in homelab.check_config() and "HOMELAB_ALLOW_HTTP" in homelab.check_config()
-    homelab.ALLOW_HTTP = True
-    assert homelab.check_config() is None
-    homelab.ALLOW_HTTP = False
-    Rig(JELLYFIN_URL="http://10.0.0.100:8096", JELLYFIN_KEY="k")
-    assert "HOMELAB_JELLYFIN_URL" in homelab.check_config()
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        Rig(PROXMOX_URL="http://pve.lan:8006")
+        homelab.ALLOW_HTTP = False
+        assert "refusing a plaintext HOMELAB_PROXMOX_URL" in homelab.check_config() and "HOMELAB_ALLOW_HTTP" in homelab.check_config()
+        homelab.ALLOW_HTTP = True
+        assert homelab.check_config() is None
+        Rig(PROXMOX_URL="http://pve.example.com:8006")
+        assert "covers only a host on your own network" in homelab.check_config()
+        homelab.ALLOW_HTTP = False
+        Rig(JELLYFIN_URL="http://10.0.0.100:8096", JELLYFIN_KEY="k")
+        assert "HOMELAB_JELLYFIN_URL" in homelab.check_config()
 
 
 def test_https_loopback_a_bare_docker_name_and_unset_sources_pass_the_url_check():
-    for urls in ({"PROXMOX_URL": "https://pve.lan:8006"}, {"PROXMOX_URL": "http://localhost:8006"}, {"JELLYFIN_URL": "http://jellyfin:8096", "JELLYFIN_KEY": "k"}, {"PROXMOX_URL": "", "PROXMOX_TOKEN": ""}):
-        Rig(**urls)
-        homelab.ALLOW_HTTP = False
-        assert homelab.check_config() is None, urls
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        for urls in ({"PROXMOX_URL": "https://pve.lan:8006"}, {"PROXMOX_URL": "http://localhost:8006"}, {"JELLYFIN_URL": "http://jellyfin:8096", "JELLYFIN_KEY": "k"}, {"PROXMOX_URL": "", "PROXMOX_TOKEN": ""}):
+            Rig(**urls)
+            homelab.ALLOW_HTTP = False
+            assert homelab.check_config() is None, urls
 
 
 def test_a_url_that_carries_credentials_is_refused():

@@ -5,7 +5,8 @@ It is not a bot: there is no `bot.py` here, and it is never run on its own.
 Each of those bots puts this directory's parent on `sys.path` and imports `arrkit`, so a bot copied out on its own needs `arrkit` copied with it.
 
 - `service.py` is one outside HTTP/JSON service over the library's `JsonService`: `<NAME>_URL`, `<NAME>_API_KEY` and `<NAME>_POLL_SECONDS` through `bot.setting()`, an `X-Api-Key` header, and the plaintext rule.
-  Plaintext is accepted only for loopback or a bare docker service name, so the key never crosses a real network unencrypted.
+  Plaintext is accepted only for loopback or a bare docker service name that resolves to Docker's bridge range, so the key never crosses a real network unencrypted.
+  `<NAME>_ALLOW_HTTP=1` lets it go to a private LAN host instead, never to a public one.
 - `store.py` is the sqlite side: a history cursor that only moves forward, and the `announced` dedupe keys.
 - `history.py` is Sonarr and Radarr history: paging to what is new, and `plan_events`, which decides what is worth announcing exactly once.
 - `poller.py` is the poll loops and the shared entry point: a rejected service key or revoked token ends the process, anything else retries next cycle.
