@@ -46,6 +46,21 @@ async def test_an_old_server_raises_unless_a_public_fallback_is_asked_for():
     assert client.sent[-1]["reply_to_id"] == "m1"
 
 
+async def test_an_old_server_405_still_falls_back_publicly():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/ephemeral-messages", ApiError(405, None))
+    await make_ctx(client).reply_ephemeral("refused", public_fallback=True)
+    assert client.sent[-1]["content"] == "refused"
+
+
+async def test_a_deleted_command_message_never_turns_the_private_answer_public():
+    client = FakeAsyncClient()
+    client.respond("POST", "/channels/c1/ephemeral-messages", ApiError(404, {"error": "message not found"}))
+    with pytest.raises(ApiError):
+        await make_ctx(client).reply_ephemeral("ticket transcript", public_fallback=True)
+    assert client.sent == []
+
+
 async def test_a_403_is_never_papered_over_by_the_public_fallback():
     client = FakeAsyncClient()
     client.respond("POST", "/channels/c1/ephemeral-messages", ApiError(403, {"error": "forbidden"}))

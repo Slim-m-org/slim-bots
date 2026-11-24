@@ -392,6 +392,7 @@ Nothing is stored: it has no seq, never shows in history, search or sync, is gon
 It may carry an `embed` and `attachment_ids`, but a private message cannot make a new file fetchable, so an attachment must already be visible to both the bot and the member (for example a file on a message in that channel) or the server answers 400. `content` may be empty when either is given, except on a server that predates this, which refuses an empty one.
 A member who blocked the bot still gets a 200 back, so a bot cannot tell.
 On a server that predates it the call is a 404 or 405 and raises `ApiError`; pass `public_fallback=True` to reply in the channel instead. Only do that for a refusal - never for anything private like a balance.
+A 404 `message not found` means the command message was deleted before the answer, and it always raises, fallback or not, so a private answer never lands in the channel.
 `FakeAsyncClient` records each one in `client.ephemerals`, separate from `client.sent`.
 
 ## Buttons

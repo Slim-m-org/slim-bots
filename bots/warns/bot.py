@@ -215,7 +215,7 @@ async def warns(ctx, member: Member = None):
         lines.append(f"- #{warn_id} {time.strftime('%Y-%m-%d', time.gmtime(created))}: {reason}")
     if len(rows) > MAX_SHOWN:
         lines.append(f"(the latest {MAX_SHOWN} of {len(rows)})")
-    await ctx.reply_ephemeral("\n".join(lines), public_fallback=True)
+    await ctx.reply_ephemeral("\n".join(lines))
 
 
 @bot.command(name="unwarn", help="Remove one warn by its number, or all of a member's with `clear @member`", usage="<number> | clear <@member>", requires=Permissions.KICK_MEMBERS, requires_message=NEEDS_KICK)
