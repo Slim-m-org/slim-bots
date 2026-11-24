@@ -40,7 +40,7 @@ Tokens and keys are read from the environment and are never printed, logged or s
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `!homelab` | anyone | which tiles are drawn, where, and the last problem per source (only you see the answer) |
+| `!homelab` | anyone | which tiles are drawn, where (named only when you can see that channel), and the last problem per source (only you see the answer) |
 | `!homelab redraw` | Manage Server | remove the tiles and draw them again |
 
 A source that cannot be reached shows `unreachable` on its tile, and the tile recovers on the next good poll; the bot keeps running.

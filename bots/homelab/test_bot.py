@@ -64,7 +64,6 @@ class Rig:
         asyncio.run(homelab.bot.open_store(migrate=homelab.init_db))
         homelab.get_url = self.get
         homelab.canvas = Canvas(self.client, "c1")
-        homelab.canvas_channel_name = "voice"
         homelab.status.clear()
 
     def get(self, url, headers, cafile=None):
@@ -80,11 +79,12 @@ class Rig:
     def tick(self):
         asyncio.run(homelab.refresh())
 
-    def say(self, text, permissions=Permissions.MANAGE_SERVER):
+    def say(self, text, permissions=Permissions.MANAGE_SERVER, channel_id="c1"):
         member = homelab.bot.space._make_member({**ADMIN, "role_ids": []})
         member._base_permissions = permissions
         homelab.bot.space.members["u-admin"] = member
-        asyncio.run(homelab.bot.process_message({"id": f"m{len(self.client.calls)}", "channel_id": "c1", "author_id": "u-admin", "content": text, "seq": 1}))
+        message = {"id": f"m{len(self.client.calls)}", "channel_id": channel_id, "author_id": "u-admin", "content": text, "seq": 1}
+        asyncio.run(homelab.bot.process_message(message))
         return self.client.ephemerals[-1]["content"] if self.client.ephemerals else ""
 
 
@@ -282,6 +282,27 @@ def test_a_non_voice_channel_is_refused_at_connect():
     else:
         raise AssertionError("a text channel was accepted")
     homelab.CANVAS_CHANNEL = None
+
+
+def test_status_names_a_public_canvas_channel_to_anyone():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = False
+    assert rig.say("!homelab", permissions=0, channel_id="c-text").startswith("drawing on #voice")
+
+
+def test_status_does_not_name_a_restricted_canvas_channel_to_a_member_elsewhere():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = True
+    reply = rig.say("!homelab", permissions=Permissions.MANAGE_SERVER, channel_id="c-text")
+    assert "#voice" not in reply
+    assert reply.startswith("drawing on a channel you cannot see")
+
+
+def test_status_names_a_restricted_canvas_channel_in_that_channel_or_to_an_administrator():
+    rig = Rig()
+    homelab.bot.space.channels["c1"].restricted = True
+    assert rig.say("!homelab", permissions=0, channel_id="c1").startswith("drawing on #voice")
+    assert rig.say("!homelab", permissions=Permissions.ADMINISTRATOR, channel_id="c-text").startswith("drawing on #voice")
 
 
 if __name__ == "__main__":

@@ -41,6 +41,10 @@ either the channel id or its name. The bot refuses to start if it does not
 name a real, visible, voice channel, or if that channel is missing from
 `SLIMM_CHANNELS`.
 
+A private canvas channel is kept private: `!board` typed outside it only works for
+someone who can see it (it is public, or they are an administrator), and anyone
+else is told the board is on a channel they cannot see.
+
 **Backward compatible:** if `CANVAS_CHANNEL` is not set and `SLIMM_CHANNELS`
 names exactly one channel, this bot behaves exactly like before 0.3.1 -
 that one channel is both where commands are typed and where the board is

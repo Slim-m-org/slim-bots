@@ -117,5 +117,31 @@ def test_an_unresolvable_join_posts_nothing():
     assert client.sent == []
 
 
+def serve_chat_as(client, *, restricted):
+    client.respond("GET", "/channels", [{**c, "restricted": restricted and c["id"] == "c-chat"} for c in CHANNELS])
+
+
+def test_welcome_names_a_public_welcome_channel():
+    client = setup()
+    serve_chat_as(client, restricted=False)
+    command(client, "!welcome", author_permissions=0)
+    assert client.sent[-1]["content"] == "welcomes go to #chat."
+
+
+def test_welcome_does_not_name_a_restricted_channel_to_a_member():
+    client = setup()
+    serve_chat_as(client, restricted=True)
+    command(client, "!welcome", author_permissions=Permissions.MANAGE_SERVER)
+    assert "#chat" not in client.sent[-1]["content"]
+    assert "a channel you cannot see" in client.sent[-1]["content"]
+
+
+def test_welcome_names_a_restricted_channel_to_an_administrator():
+    client = setup()
+    serve_chat_as(client, restricted=True)
+    command(client, "!welcome", author_permissions=Permissions.ADMINISTRATOR)
+    assert client.sent[-1]["content"] == "welcomes go to #chat."
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

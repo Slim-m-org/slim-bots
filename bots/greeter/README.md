@@ -34,7 +34,7 @@ First match wins:
 2. `!welcome here`, run in a channel by someone with Manage Server. The
    choice is stored in the bot's sqlite file (`SLIMM_DB_PATH`, default
    `greeter.db`), so it survives a restart. `!welcome` alone says where
-   welcomes currently go.
+   welcomes currently go, naming the channel only to someone who can see it.
 3. `GREETER_CHANNEL` (no default): a `category/channel` path, or a bare
    channel name, matched case-insensitively.
 
