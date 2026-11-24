@@ -99,7 +99,7 @@ class Context:
         body_content, embeds, fallback = self._prepare(content, embed)
         return await self.bot.client.send(
             self.channel_id, body_content, reply_to_id=self.message.get("id"), embeds=embeds, fallback_content=fallback,
-            **({"repost_of_author_id": repost_of_author_id} if repost_of_author_id else {}),
+            repost_of_author_id=repost_of_author_id,
         )
 
     async def reply_ephemeral(
