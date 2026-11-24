@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from collections import deque
 
 from slimbots import media, style
@@ -41,6 +42,15 @@ def build_ffmpeg_args(track, source=None):
         args += ["-i", source]
     args += ["-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
     return args
+
+
+async def start_ffmpeg(track, source=None):
+    """The decoder for `track`, without `http_proxy`: it only reads a pipe or the loopback relay, which a proxy elsewhere cannot reach."""
+    env = {name: value for name, value in os.environ.items() if name.lower() != "http_proxy"}
+    return await asyncio.create_subprocess_exec(
+        *build_ffmpeg_args(track, source), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env,
+    )
 
 
 class MusicSession:
@@ -145,10 +155,7 @@ class MusicSession:
     async def _decode(self, track, source=None):
         self._chunks_sent = 0
         self._interrupted = False
-        self._process = await asyncio.create_subprocess_exec(
-            *build_ffmpeg_args(track, source), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
+        self._process = await start_ffmpeg(track, source)
         feeder = stream_feed.start(track.url, self._process.stdin) if track.is_direct else None
         try:
             await self._pump(self._process.stdout)

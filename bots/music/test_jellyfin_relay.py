@@ -2,6 +2,7 @@
 """A Jellyfin track reaches ffmpeg through a loopback relay that holds the key; run directly: python3 test_jellyfin_relay.py."""
 
 import asyncio
+import os
 import re
 import shutil
 import subprocess
@@ -157,7 +158,7 @@ def make_m4a_with_the_index_last(directory):
         return handle.read()
 
 
-def test_a_real_ffmpeg_seeks_through_the_relay_into_an_m4a_whose_index_comes_last():
+def test_a_real_ffmpeg_seeks_through_the_relay_into_an_m4a_whose_index_comes_last_even_behind_a_proxy():
     with tempfile.TemporaryDirectory(prefix="music-relay-") as directory:
         audio = make_m4a_with_the_index_last(directory)
     if audio is None:
@@ -173,17 +174,19 @@ def test_a_real_ffmpeg_seeks_through_the_relay_into_an_m4a_whose_index_comes_las
 
     async def decode():
         async with jellyfin_relay.JellyfinRelay(track.url) as relay:
-            process = await asyncio.create_subprocess_exec(
-                *REAL_BUILD_ARGS(track, relay.url), stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            return await asyncio.wait_for(process.communicate(), timeout=60)
+            process = await player.start_ffmpeg(track, relay.url)
+            return (await asyncio.wait_for(process.communicate(), timeout=60))[0]
 
+    player.build_ffmpeg_args = REAL_BUILD_ARGS
+    # NO_PROXY in capitals lets the relay reach this server, while ffmpeg reads only the lowercase no_proxy.
+    os.environ.update(http_proxy="http://127.0.0.1:9", NO_PROXY="127.0.0.1")
     try:
-        pcm, err = asyncio.run(decode())
+        pcm = asyncio.run(decode())
     finally:
+        os.environ.pop("http_proxy")
+        os.environ.pop("NO_PROXY")
         server.shutdown()
-    assert len(pcm) >= 29 * player.AUDIO_SAMPLE_RATE * player.AUDIO_CHANNELS * 2, err
+    assert len(pcm) >= 29 * player.AUDIO_SAMPLE_RATE * player.AUDIO_CHANNELS * 2
     assert len(RangedFile.keys) > 1 and all(k == f'MediaBrowser Token="{KEY}"' for k in RangedFile.keys)
 
 

@@ -60,6 +60,8 @@ class JellyfinRelay:
                 await _reply(writer, 404, "Not Found")
             else:
                 await self._forward(writer, request[2].get("range", ""))
+        except ConnectionError:
+            pass  # ffmpeg hung up, from a skip, a stop or a seek
         except Exception as err:
             print(f"music jellyfin relay ended a request: {type(err).__name__}", file=sys.stderr)
         finally:
