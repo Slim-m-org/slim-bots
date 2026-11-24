@@ -111,7 +111,7 @@ def stream_answer(request):
     return httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=b"ID3" + b"\x00" * 600)
 
 
-def scripted_ffmpeg(track):
+def scripted_ffmpeg(track, source=None):
     """A stand-in decoder: `long` in the url never ends on its own, `echo` passes its stdin through, anything else emits 3 chunks and stops."""
     if "echo" in track.url:
         code = "import sys\nsys.stdout.buffer.write(sys.stdin.buffer.read())"
@@ -239,13 +239,13 @@ def test_play_replies_with_the_refusal_and_never_joins_the_call():
     assert not music.bot.voice.sessions
 
 
-def test_jellyfin_track_carries_the_auth_header_and_a_direct_url_does_not():
+def test_a_jellyfin_track_is_marked_as_one_and_a_direct_url_is_not():
     setup(jellyfin=True)
     track = music_core.track_from_item({"Id": "a1", "Name": "Song", "AlbumArtist": "Band", "RunTimeTicks": 1_800_000_000})
     assert track.title == "Band - Song" and track.duration_seconds == 180
     assert "/Audio/a1/stream" in track.url and "Static=true" in track.url
-    assert track.headers == 'Authorization: MediaBrowser Token="key"\r\n'
-    assert music_core.track_from_url(PUBLIC_URL).headers is None
+    assert track.jellyfin and not track.is_direct and "key" not in repr(track)
+    assert music_core.track_from_url(PUBLIC_URL).is_direct
 
 
 def test_a_direct_url_reaches_ffmpeg_on_stdin_and_ffmpeg_may_open_nothing_else():
@@ -256,11 +256,11 @@ def test_a_direct_url_reaches_ffmpeg_on_stdin_and_ffmpeg_may_open_nothing_else()
     assert not {"-headers", "-reconnect", "-max_redirects"} & set(args)
 
 
-def test_a_jellyfin_track_is_fetched_by_ffmpeg_with_the_key_header_and_only_the_http_protocols():
+def test_a_jellyfin_track_is_read_from_the_loopback_relay_over_plain_http_only():
     shutil.which = lambda name: "/usr/bin/ffmpeg"
-    args = REAL_BUILD_ARGS(music_core.Track("t", "https://jf.example/Audio/1/stream", headers="Authorization: x\r\n"))
-    assert args[args.index("-protocol_whitelist") + 1] == "http,https,tcp,tls,crypto"
-    assert args[args.index("-headers") + 1] == "Authorization: x\r\n" and args[args.index("-i") + 1] == "https://jf.example/Audio/1/stream"
+    args = REAL_BUILD_ARGS(music_core.Track("t", "https://jf.example/Audio/1/stream", jellyfin=True), "http://127.0.0.1:5000/nonce")
+    assert args[args.index("-protocol_whitelist") + 1] == "http,tcp" and args[args.index("-i") + 1] == "http://127.0.0.1:5000/nonce"
+    assert "-headers" not in args and "https://jf.example/Audio/1/stream" not in args
     assert args[args.index("-reconnect") + 1] == "1" and args[-1] == "pipe:1"
 
 

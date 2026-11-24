@@ -34,12 +34,12 @@ class Track:
     title: str
     url: str
     duration_seconds: float = 0.0
-    headers: str | None = None
+    jellyfin: bool = False
 
     @property
     def is_direct(self):
-        """A member-supplied stream URL, as opposed to a Jellyfin track that carries the key."""
-        return self.headers is None
+        """A member-supplied stream URL, as opposed to a Jellyfin track, which is fetched with the key."""
+        return not self.jellyfin
 
 
 def configure(bot):
@@ -81,7 +81,7 @@ def track_from_item(item):
         title=f"{artist} - {name}" if artist else name,
         url=f"{JELLYFIN_URL}/Audio/{item['Id']}/stream?Static=true",
         duration_seconds=(item.get("RunTimeTicks") or 0) / 10_000_000,
-        headers=f"Authorization: {jellyfin_auth_header()}\r\n",
+        jellyfin=True,
     )
 
 

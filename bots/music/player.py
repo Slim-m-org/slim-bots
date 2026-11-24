@@ -12,6 +12,7 @@ from slimbots.media import PCM_CHUNK_MS as AUDIO_CHUNK_MS
 from slimbots.media import PCM_SAMPLE_RATE as AUDIO_SAMPLE_RATE
 from slimbots.voice import publish_microphone, watch_empty
 
+import jellyfin_relay
 import music_core
 import stream_feed
 
@@ -29,15 +30,15 @@ def ffmpeg_binary():
     return media.ffmpeg_binary(PlayerError)
 
 
-def build_ffmpeg_args(track):
-    """Decodes to raw s16le on stdout.
-    A direct url reaches ffmpeg on stdin and ffmpeg may open nothing else; a Jellyfin track is fetched by ffmpeg, limited to the http protocols."""
+def build_ffmpeg_args(track, source=None):
+    """Decodes to raw s16le on stdout. A direct url reaches ffmpeg on stdin and ffmpeg may open nothing else;
+    a Jellyfin track is read over plain http from `source`, the loopback relay that holds the key, so the key is never an argument."""
     args = [ffmpeg_binary(), "-hide_banner", "-loglevel", "error"]
     if track.is_direct:
         args += ["-protocol_whitelist", "pipe", "-i", "pipe:0"]
     else:
-        args += ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
-        args += ["-headers", track.headers, "-i", track.url]
+        args += ["-protocol_whitelist", "http,tcp", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+        args += ["-i", source]
     args += ["-vn", "-ac", str(AUDIO_CHANNELS), "-ar", str(AUDIO_SAMPLE_RATE), "-f", "s16le", "pipe:1"]
     return args
 
@@ -135,10 +136,17 @@ class MusicSession:
             await self._leave()
 
     async def _play(self, track):
+        if track.is_direct:
+            await self._decode(track)
+            return
+        async with jellyfin_relay.JellyfinRelay(track.url) as relay:
+            await self._decode(track, relay.url)
+
+    async def _decode(self, track, source=None):
         self._chunks_sent = 0
         self._interrupted = False
         self._process = await asyncio.create_subprocess_exec(
-            *build_ffmpeg_args(track), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
+            *build_ffmpeg_args(track, source), stdin=asyncio.subprocess.PIPE if track.is_direct else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
         feeder = stream_feed.start(track.url, self._process.stdin) if track.is_direct else None
