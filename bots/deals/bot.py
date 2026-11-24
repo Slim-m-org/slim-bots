@@ -153,11 +153,33 @@ async def apply_quote(channel_id, watch, quote):
     await bot.store.run(db.record_price, watch["id"], price, quote.name or watch["name"], notified, sent)
 
 
+async def owner_gone(user_id):
+    """True after deleting the watches of an account the server no longer has; an outage keeps them."""
+    try:
+        gone = await bot.space.find_member(user_id) is None
+    except ApiError:
+        return False
+    if gone:
+        await bot.store.run(db.remove_watches_of, user_id)
+    return gone
+
+
+@bot.event
+async def on_member_removed(frame):
+    """A departed member can no longer run `pricewatch remove`, so their watches go with them."""
+    if frame.get("user_id"):
+        await bot.store.run(db.remove_watches_of, frame["user_id"])
+
+
 async def check_watches():
     """One appdetails lookup per distinct app, spaced out for Steam's rate limit; returns how many watches were checked."""
     channel_id = await configured_channel()
     watches = await bot.store.run(db.list_watches)
     if not channel_id or not watches:
+        return 0
+    departed = {user_id for user_id in {w["user_id"] for w in watches} if await owner_gone(user_id)}
+    watches = [w for w in watches if w["user_id"] not in departed]
+    if not watches:
         return 0
     quotes = {}
     for watch in watches:

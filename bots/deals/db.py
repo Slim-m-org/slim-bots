@@ -84,6 +84,11 @@ def remove_watch(conn, watch_id, user_id):
     return bool(removed)
 
 
+def remove_watches_of(conn, user_id):
+    conn.execute("DELETE FROM watches WHERE user_id = ?", (user_id,))
+    conn.commit()
+
+
 def record_price(conn, watch_id, price_cents, name, notified_cents, notified_now):
     """Stores the latest price; a price back above target clears the notified mark so the next drop pings again."""
     conn.execute(

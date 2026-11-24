@@ -5,9 +5,9 @@ import asyncio
 import time
 
 import bot as reminders
-from slimbots import ApiError, Store
+from slimbots import ApiError, Permissions, Store
 from slimbots.http import is_token_revoked
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, feed_frame, human, run_module_tests, wire_bot
 
 MEMBERS = [human("u1", "nick", "Nick", role_ids=[])]
 
@@ -391,6 +391,70 @@ def test_a_refused_recurring_reminder_skips_that_firing_and_stays_open():
     row = conn.execute("SELECT sent, due_at FROM reminders WHERE id = 'iv'").fetchone()
     assert row[0] == 0, "a refusal closed the recurring row for good"
     assert row[1] > int(time.time()), "the refused firing was not skipped"
+
+
+def open_count(user_id):
+    return reminders.bot.store.connection.execute(
+        "SELECT COUNT(*) FROM reminders WHERE user_id = ? AND sent = 0 AND cancelled = 0", (user_id,),
+    ).fetchone()[0]
+
+
+def every_hour(reminder_id, user_id, channel_id="c1"):
+    reminders.add_reminder(
+        reminders.bot.store.connection, reminder_id, channel_id, user_id, "m0", int(time.time()) - 5, "spam",
+        recur={"kind": "interval", "interval_seconds": 3600},
+    )
+
+
+def delivered(client):
+    return [s for s in client.sent if s["content"].startswith("reminder:")]
+
+
+def test_a_removed_members_reminders_are_cancelled_everywhere():
+    setup()
+    every_hour("a", "u1")
+    every_hour("b", "u1", channel_id="c2")
+    every_hour("c", "u2")
+    asyncio.run(feed_frame(reminders.bot, {"type": "member.removed", "user_id": "u1"}))
+    assert open_count("u1") == 0 and open_count("u2") == 1
+
+
+def test_a_deleted_accounts_recurring_reminder_is_closed_at_delivery_not_posted():
+    client = setup()
+    client.respond("GET", "/users/u-gone", ApiError(404, {"error": "no such user"}))
+    every_hour("g", "u-gone")
+    run_due_checker_briefly()
+    assert delivered(client) == [] and open_count("u-gone") == 0
+
+
+def test_a_timed_out_members_recurring_reminder_skips_its_firing_and_resumes_later():
+    client = setup()
+    reminders.bot.space.members["u1"].timed_out_until = int(time.time() * 1000) + 3_600_000
+    every_hour("t", "u1")
+    reminders.add_reminder(reminders.bot.store.connection, "once", "c1", "u1", "m0", int(time.time()) - 5, "one-off")
+    run_due_checker_briefly()
+    assert delivered(client) == []
+    row = reminders.bot.store.connection.execute("SELECT sent, cancelled, due_at FROM reminders WHERE id = 't'").fetchone()
+    assert row[0] == 0 and row[1] == 0 and row[2] > int(time.time()), "the recurring row stays open for after the timeout"
+    assert open_count("u1") == 1, "the one-off is closed unposted"
+
+
+def moderator_says(client, text, permissions):
+    member = reminders.bot.space._make_member({**human("u-mod", "mod", "Mod"), "role_ids": []})
+    member._base_permissions = permissions
+    reminders.bot.space.members["u-mod"] = member
+    process(client, {"id": "m9", "author_id": "u-mod", "channel_id": "c1", "content": text})
+    return client.ephemerals[-1]["content"]
+
+
+def test_a_moderator_can_clear_a_members_reminders_and_nobody_else_can():
+    client = setup()
+    every_hour("a", "u1")
+    every_hour("b", "u1", channel_id="c2")
+    assert "Manage Messages" in moderator_says(client, "!reminders clear @nick", 0)
+    assert open_count("u1") == 2
+    assert "cleared 2" in moderator_says(client, "!reminders clear @nick", Permissions.MANAGE_MESSAGES)
+    assert open_count("u1") == 0
 
 
 def test_due_checker_still_stops_on_a_revoked_token():

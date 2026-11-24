@@ -5,7 +5,7 @@ import sys
 import time
 import uuid
 
-from slimbots import Bot, Duration, RateLimiter, TimeOfDay, style
+from slimbots import Bot, Duration, Member, Permissions, RateLimiter, TimeOfDay, style
 from slimbots.http import ApiError, is_rate_limited, is_token_revoked
 from slimbots.lifecycle import guard_dispatch
 from slimbots.limits import ValidationError, require_len, require_range
@@ -117,6 +117,17 @@ def reschedule(conn, reminder_id, next_due_at):
     """Advances a recurring reminder's own row instead of marking it sent; see README.md."""
     conn.execute("UPDATE reminders SET due_at = ? WHERE id = ?", (next_due_at, reminder_id))
     conn.commit()
+
+
+def reminder_author(conn, reminder_id):
+    return conn.execute("SELECT user_id FROM reminders WHERE id = ?", (reminder_id,)).fetchone()[0]
+
+
+def cancel_all_for_user(conn, user_id):
+    """Cancels every pending reminder `user_id` set, in every channel; returns how many."""
+    count = conn.execute("UPDATE reminders SET cancelled = 1 WHERE user_id = ? AND sent = 0 AND cancelled = 0", (user_id,)).rowcount
+    conn.commit()
+    return count
 
 
 def prune_old_reminders(conn, cutoff):
@@ -336,7 +347,7 @@ async def reminders_group(ctx, rest: str = ""):
         await ctx.reply_ephemeral("\n".join(lines), public_fallback=True)
         return
     p = bot.prefix
-    await ctx.reply_ephemeral(style.usage_text(f"{p}reminders", f"{p}reminders cancel <n>", f"{p}reminders edit <n> <text>", f"{p}reminders snooze <n> <duration>"), public_fallback=True)
+    await ctx.reply_ephemeral(style.usage_text(f"{p}reminders", f"{p}reminders cancel <n>", f"{p}reminders edit <n> <text>", f"{p}reminders snooze <n> <duration>", f"{p}reminders clear <@member>"), public_fallback=True)
 
 
 @reminders_group.command(name="cancel", help="Cancel one by its listed number", usage="<n>")
@@ -364,6 +375,22 @@ async def reminders_snooze(ctx, n: int, duration: Duration):
     await ctx.reply_ephemeral(f"reminder {n} pushed to {recurrence.format_local(new_due, tz_name)}", public_fallback=True)
 
 
+@reminders_group.command(
+    name="clear", usage="<@member>", help="Cancel every reminder a member set, in every channel (needs Manage Messages)",
+    requires=Permissions.MANAGE_MESSAGES, requires_message="only someone with Manage Messages can clear another member's reminders.",
+)
+async def reminders_clear(ctx, member: Member):
+    count = await bot.store.run(cancel_all_for_user, member.id)
+    await ctx.reply_ephemeral(f"cleared {count} reminder{'s' if count != 1 else ''} set by {member.mention()}", public_fallback=True)
+
+
+@bot.event
+async def on_member_removed(frame):
+    """A removed or deleted member's reminders stop; a restore does not bring them back."""
+    if frame.get("user_id"):
+        await bot.store.run(cancel_all_for_user, frame["user_id"])
+
+
 @bot.command(name="timezone", help="Show or set the timezone `at`/`every ... at` and the listing are shown in", usage="[IANA name]")
 async def timezone_cmd(ctx, tz_name: str = None):
     if tz_name is None:
@@ -377,9 +404,22 @@ async def timezone_cmd(ctx, tz_name: str = None):
     await ctx.reply_ephemeral(f"timezone set to `{tz_name}`", public_fallback=True)
 
 
+async def author_may_post(reminder_id):
+    """False for an account the server no longer has (its reminders are cancelled) or a member who is timed out."""
+    user_id = await bot.store.run(reminder_author, reminder_id)
+    member = await bot.space.find_member(user_id)
+    if member is None:
+        await bot.store.run(cancel_all_for_user, user_id)
+        return False
+    return not member.timed_out_until or member.timed_out_until <= time.time() * 1000
+
+
 async def deliver_reminder(row):
     (reminder_id, channel_id, request_message_id, text, due_at,
      recur_kind, interval_seconds, weekday, hour, minute, tz_name) = row
+    if not await author_may_post(reminder_id):
+        await finish_firing(row)
+        return
     embed = style.card("info", title="Reminder", footer_text=format_recurrence(recur_kind, interval_seconds, weekday, hour, minute).strip() or None)
     await bot.client.send(
         channel_id, f"reminder: {render_reminder_text(text)}", message_id=delivery_id(reminder_id, due_at),

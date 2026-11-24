@@ -30,6 +30,7 @@ python3 bot.py
 
 Steam only shows a member's current game when their profile's game details are public.
 Nothing is announced for a member who is not linked or who ran `quiet`, and `forget` deletes the row.
+A member who is removed or whose account is deleted loses their row the same way, since they can no longer run `forget`.
 Every Steam command says plainly when `STEAM_API_KEY` is missing instead of failing, and the key is never printed, logged or sent to chat.
 
 ## Settings
