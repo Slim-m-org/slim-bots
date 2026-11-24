@@ -39,7 +39,7 @@ def watching():
         self._video_source, self._audio_source = FakeVideoSource(), FakeAudioSource()
 
     return Patched(
-        (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+        (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
         (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
         (stream_session.WatchSession, "start", fake_start),
     )

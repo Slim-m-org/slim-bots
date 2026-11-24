@@ -13,7 +13,7 @@ from test_resume import Patched, voice_client
 from slimbots.testing import human, run_module_tests
 
 FOUND = (
-    (jellyfin_core, "watch_search", asynced(lambda query, limit: [movie_for_watch()])),
+    (jellyfin_core, "watch_search", asynced(lambda query, limit, user_id=None: [movie_for_watch()])),
     (jellyfin_core, "fetch_item_for_playback", asynced(lambda item_id, user_id=None: movie_for_watch())),
 )
 

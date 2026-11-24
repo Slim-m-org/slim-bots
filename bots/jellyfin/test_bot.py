@@ -127,7 +127,7 @@ def message(content, msg_id="m1"):
 
 
 def setup():
-    playback_progress.JELLYFIN_USER_ID = "jf-user"
+    playback_progress.JELLYFIN_USER_ID = playback_progress._checked_user_id = "jf-user"
     jellyfin.bot.store = Store(":memory:", migrate=jellyfin.jellyfin_core.init_db)
     asyncio.run(jellyfin.bot.store.open())
     jellyfin.bot.channels = {"c1"}
@@ -155,7 +155,7 @@ def process(client, *messages):
 
 def _patch_search_items(items):
     original = jellyfin.jellyfin_core.search_items
-    jellyfin.jellyfin_core.search_items = asynced(lambda query, limit: items)
+    jellyfin.jellyfin_core.search_items = asynced(lambda query, limit, user_id=None: items)
     return original
 
 
@@ -425,7 +425,7 @@ def test_watch_passes_a_multi_word_title_whole_to_the_search():
     )
     queries = []
     original_search = jellyfin.jellyfin_core.watch_search
-    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: queries.append(query) or [])
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit, user_id=None: queries.append(query) or [])
     try:
         process(client, message("!watch two words"))
     finally:
@@ -440,7 +440,7 @@ def test_watch_streams_into_the_invokers_own_voice_channel_not_the_text_channel(
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit, user_id=None: [movie_for_watch()])
     jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     original_start = stream_session.WatchSession.start
     stream_session.WatchSession.start = _fake_start
@@ -466,7 +466,7 @@ def test_watch_refuses_when_the_bot_lacks_speak_in_the_invokers_channel():
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit, user_id=None: [movie_for_watch()])
     jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     try:
         process(client, message("!watch inception"))
@@ -485,7 +485,7 @@ def test_watch_names_the_missing_permission_when_the_bot_cannot_connect():
     )
     original_search = jellyfin.jellyfin_core.watch_search
     original_fetch = jellyfin.jellyfin_core.fetch_item_for_playback
-    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit: [movie_for_watch()])
+    jellyfin.jellyfin_core.watch_search = asynced(lambda query, limit, user_id=None: [movie_for_watch()])
     jellyfin.jellyfin_core.fetch_item_for_playback = asynced(lambda item_id, user_id=None: movie_for_watch())
     try:
         process(client, message("!watch inception"))

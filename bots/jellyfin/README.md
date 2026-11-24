@@ -48,7 +48,8 @@ tested here - there was only the one live server to test against.
 
 - `!jellyfin search <query>` - hits Jellyfin's own search directly, so it
   can answer for something added before this bot ever ran, not just what
-  it happened to post.
+  it happened to post. It searches as the asker's jellyfin account (their link, else the shared account), only inside
+  `JELLYFIN_LIBRARY_IDS`, and drops `JELLYFIN_EXCLUDE_GENRES`, as the announcements do. `!watch <title>` searches the same way.
 - `!jellyfin recent [days]` (default 7, max 30) - reuses the same
   `DateCreated` paging the poll loop uses, against a wall-clock cutoff
   instead of the stored cursor.
@@ -56,7 +57,8 @@ tested here - there was only the one live server to test against.
   Enter it in jellyfin (your profile, then Quick Connect); the bot then tells you which jellyfin user approved it, and
   `!jellyfin link confirm` links you to that user. `!jellyfin link cancel` drops a code you no longer want.
   Resume position, "continue watching" (`!watch` with no title) and the season and episode lists then use your account, and
-  progress from a stream you started is written to it. Everyone else keeps using the shared account.
+  progress from a stream you started is written to it. Everyone else keeps using the shared account, or, with
+  `JELLYFIN_USER_ID` unset, has to link before `!watch`.
 - `!jellyfin unlink` - removes the link. `!jellyfin account` - shows which account you are on, privately.
 - `!jellyfin help` (or any unrecognised `!jellyfin ...`) - the list.
 
@@ -73,6 +75,7 @@ not a safer credential store.
 
 A link made by typing a username, before Quick Connect, keeps working for resume and progress but is not verified:
 `!jellyfin account` says so, and `accounts.verified_link` - what direct play will check - ignores it.
+A member who proves that jellyfin user with Quick Connect takes it over from another member's name-only link.
 Progress goes to the account of whoever started the stream, not to everyone watching it.
 
 Both real commands share one `cooldown=` on the command itself, and their
@@ -210,7 +213,7 @@ what actually limits going past 720p; see below.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `JELLYFIN_DIRECT_URL` | unset | Where a viewer's own device reaches jellyfin. Set it to offer direct play: the party then lets viewers play the title themselves, and stops encoding once everyone on the call has. Unset means the shared stream only. |
-| `JELLYFIN_USER_ID` | first enabled user | The shared jellyfin account `!watch` reads and writes for a member who has not run `!jellyfin link`. |
+| `JELLYFIN_USER_ID` | unset (no shared account) | The shared jellyfin account `!watch` and search read and write for a member who has not run `!jellyfin link`; unset, such a member has to link first. The bot refuses to start when it names a jellyfin administrator, a disabled user or no user at all. Unlinked members get exactly this account's library access. |
 | `JELLYFIN_SUBTITLE_LANGUAGE` | `en` | The language members read captions in, as a code or a name (`en`, `eng`, `English`). A title whose audio is in another language starts with this language's dialogue track burned in. `off` never turns captions on by itself. |
 | `JELLYFIN_AUTOPLAY_NEXT` | off | When an episode ends, start the next one on its own instead of waiting for Next episode. |
 | `JELLYFIN_NEXT_WAIT_SECONDS` | `180` | How long the bot stays in the call after an episode ends, offering Next episode, before it leaves. |
@@ -228,10 +231,10 @@ what actually limits going past 720p; see below.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `JELLYFIN_ITEM_TYPES` | `Movie,Episode` | Comma-separated Jellyfin item types to watch. `Audio` is deliberately not in the default - see Batching. |
-| `JELLYFIN_LIBRARY_IDS` | unset (whole server) | Comma-separated library (`parentId`) UUIDs to scope to. |
+| `JELLYFIN_LIBRARY_IDS` | unset (whole server) | Comma-separated library (`parentId`) UUIDs to scope announcements, `!jellyfin search` and `!watch <title>` to. |
 | `JELLYFIN_POLL_SECONDS` | `300` | How often to check Jellyfin for anything new. |
 | `JELLYFIN_BATCH_THRESHOLD` | `3` | More than this many ungrouped items of the same type in one poll collapse into one summary message. |
-| `JELLYFIN_LIBRARY_ROUTES` | unset | `libraryId:channelId,...` - send one library's posts to its own channel instead of `bot.channel`. A library not listed still falls back to `bot.channel`. |
+| `JELLYFIN_LIBRARY_ROUTES` | unset | `libraryId:channelId,...` - send one library's posts to its own channel instead of `bot.channel`. A library not listed still falls back to `bot.channel`. A post slim-m refuses outright (a channel the bot cannot post in, or one that is gone) is logged and skipped, so later posts still go out; a server or network failure is retried next poll. |
 | `JELLYFIN_EXCLUDE_GENRES` | unset | Comma-separated, case-insensitive. An item carrying any of these genres is dropped before it is ever grouped into a post - still recorded in `posted_items` and still advances the cursor, so it is never re-considered on a later poll. |
 | `JELLYFIN_DEDUPE_DAYS` | `7` | A movie or episode is not announced again within this many days of its last announcement, even under a new item id. Episodes match on series, season and episode number. Movies match on tmdb or imdb id, else name and year. `0` turns it off. |
 | `JELLYFIN_REANNOUNCE_REPLACED` | off | Set to `true` to announce a replaced file as new again, the old behaviour. |
