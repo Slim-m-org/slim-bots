@@ -32,7 +32,7 @@ With no log channel configured, the power commands are off.
 | --- | --- | --- |
 | `PELICAN_URL` | required | Panel base URL. Must be `https`. |
 | `PELICAN_API_KEY` | required | A Client API key (an account key, `ptlc_...`). |
-| `PELICAN_ALLOW_HTTP` | off | `1` allows an `http` URL, for a panel on a trusted LAN only. |
+| `PELICAN_ALLOW_HTTP` | off | `1` allows an `http` URL, for a panel on a trusted LAN only; a host that resolves to a public address is still refused. |
 | `PELICAN_SERVERS` | all | Comma-separated server names or identifiers the bot may show and control. |
 | `PELICAN_CONTROL_ROLE` | none | A role id whose holders may use the power commands. |
 | `PELICAN_CONTROL_PERMISSION` | `MANAGE_SERVER` | A `slimbots` permission name that also grants control. `ADMINISTRATOR` always passes. |

@@ -29,11 +29,12 @@ This one is not, on purpose.
 It is meant to be the file that shows the whole protocol with nothing hidden behind an import, so it is still the right place to read first even after the rest of the repo grew a framework.
 If a future change makes this one look inconsistent with the others, that inconsistency is the point - please do not "fix" it by making this one depend on `slimbots` too.
 
-## Two things that are not corners cut
+## Three things that are not corners cut
 
-A bot answering `!ping` forever, or dying ugly on a container restart, is not a teaching point, it is a bug - so these two are handled in full, inline, rather than imported from `slimbots`:
+A bot answering `!ping` forever, leaking its token, or dying ugly on a container restart, is not a teaching point, it is a bug - so these three are handled in full, inline, rather than imported from `slimbots`:
 
 - **It never answers another bot or webhook.** `should_answer` checks the author against its own id, and against `GET /users/{id}`'s `is_bot`/`is_webhook` fields (cached per id). Several bots sharing one channel is exactly the setup where answering another bot's own output starts an infinite loop.
+- **The token only travels over https, or plain http to loopback.** `base_problem` checks `SLIMM_URL` before the first request, and a redirect is refused rather than followed, so the token never reaches a host it was not configured for.
 - **SIGTERM exits cleanly.** A container orchestrator stops a bot with SIGTERM, not by pulling the plug; this logs why, then exits 0.
 
 ## Deliberately minimal

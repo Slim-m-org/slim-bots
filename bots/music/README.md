@@ -53,11 +53,12 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
   A playlist or manifest (`.m3u8`, `.pls`, `.mpd`) is refused, because its entries would name hosts nobody checked.
   A server that answers in the old `ICY 200 OK` form instead of HTTP is refused too, since the bot cannot check what it cannot parse.
   A live stream, one that sends no `Content-Length`, is opened again when the connection drops; a file that is cut ends the track.
-  ffmpeg reads a direct URL as a pipe and cannot seek in it, so a container that needs that may not play; Jellyfin tracks are fetched by ffmpeg and are not affected.
+  ffmpeg reads a direct URL as a pipe and cannot seek in it, so a container that needs that may not play; Jellyfin tracks are read through the relay below and can seek as usual.
 - **The Jellyfin key only goes to Jellyfin.**
   It is sent as an `Authorization` header on Jellyfin tracks and never on a direct URL.
-  It is also an argument of the ffmpeg process (`-headers`), so anyone who can list processes on the bot host can read it.
-  The Jellyfin watch bot no longer has this exposure, since its transcode reaches ffmpeg on stdin; this bot still does, so run it in its own container.
+  It is never an argument of the ffmpeg process, so listing processes on the bot host does not show it.
+  ffmpeg instead reads each Jellyfin track from a relay the bot runs on loopback for as long as the track plays, at an unguessable path; the relay adds the key, passes Range requests through so ffmpeg can seek, and never follows a redirect.
+  A stdin pipe like the direct streams use would be simpler, but ffmpeg cannot seek in one, and an M4A with its index at the end of the file would not play.
 - **No volume command.**
   It would mean scaling PCM or restarting ffmpeg mid-track, and every listener already has a per-participant volume slider.
 - **No persistence.**
@@ -73,7 +74,9 @@ The bot leaves when the queue runs out, when someone runs `~stop`, or when it is
 - `music_core.py` - settings, the Jellyfin audio search, track model and URL vetting.
 - `player.py` - `MusicSession`: the queue, the ffmpeg decode and the LiveKit publish.
 - `stream_feed.py` - copies a direct stream into ffmpeg's stdin, and opens a live one again when it drops.
+- `jellyfin_relay.py` - the loopback relay a Jellyfin track is read through, which adds the key so ffmpeg never holds it.
 - `music_cog.py` - the commands and the per-voice-channel session registry.
 - `test_bot.py` - run with `python3 test_bot.py`.
   ffmpeg is replaced by a scripted decoder and LiveKit by a fake room, so CI needs neither.
 - `test_stream_feed.py` - the feed against fake servers, plus one run with a real ffmpeg that is skipped when there is none.
+- `test_jellyfin_relay.py` - the relay against a fake Jellyfin, plus a real ffmpeg seeking into an M4A, skipped when there is no ffmpeg.

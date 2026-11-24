@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import httpx
+from slimbots.client import base_url_problem
 from websockets.sync.client import connect
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +117,12 @@ def missing_env(env: dict[str, str]) -> list[str]:
     if env.get("SLIMM_SMOKE_PRIVATE") != "1":
         missing.append("SLIMM_SMOKE_PRIVATE=1")
     return missing
+
+
+def bot_env(environ: dict[str, str], channel: str, manifest_env: dict[str, str]) -> dict[str, str]:
+    """The bot's environment: the caller's, minus every SLIMM_SMOKE_* variable, so the code under test never holds the tester's token."""
+    env = {**environ, "SLIMM_CHANNELS": channel, **manifest_env}
+    return {k: v for k, v in env.items() if not k.startswith("SLIMM_SMOKE_")}
 
 
 def replies_after(messages: list[dict[str, Any]], sent_id: str, tester_id: str) -> list[dict[str, Any]]:
@@ -230,6 +237,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refusing to run: {err}", file=sys.stderr)
         return 2
     base, channel = os.environ["SLIMM_URL"].rstrip("/"), os.environ["SLIMM_SMOKE_CHANNEL"]
+    problem = base_url_problem(base)
+    if problem:
+        print(f"refusing to run: {problem}", file=sys.stderr)
+        return 2
     http = httpx.Client(base_url=base, timeout=20, headers={"authorization": f"Bearer {os.environ['SLIMM_SMOKE_TESTER_TOKEN']}"})
     tester_id = http.get("/me").raise_for_status().json()["id"]
 
@@ -242,8 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         return http.get(f"/channels/{channel}/messages", params={"limit": 50}).raise_for_status().json()
 
     private = PrivateReplies(base, os.environ["SLIMM_SMOKE_TESTER_TOKEN"])
-    env = {**os.environ, "SLIMM_CHANNELS": channel, **manifest.get("env", {})}
-    proc = subprocess.Popen([sys.executable, "bot.py"], cwd=bot_dir, env=env)
+    proc = subprocess.Popen([sys.executable, "bot.py"], cwd=bot_dir, env=bot_env(dict(os.environ), channel, manifest.get("env", {})))
     results: list[dict[str, Any]] = []
     try:
         bot_id = os.environ.get("SLIMM_SMOKE_BOT_ID")

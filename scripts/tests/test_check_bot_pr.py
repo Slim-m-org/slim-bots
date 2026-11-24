@@ -36,8 +36,8 @@ def test_missing_requirements_fails(tmp_path):
     assert c.check_bot(make_bot(tmp_path, "b", req=None)) == ["bots/b/requirements.txt is missing"]
 
 
-def test_ping_needs_no_test_bot(tmp_path):
-    assert c.check_bot(make_bot(tmp_path, "ping", files=("README.md",), req="websockets>=12\n")) == []
+def test_ping_needs_a_test_bot_like_every_other_bot(tmp_path):
+    assert c.check_bot(make_bot(tmp_path, "ping", files=("README.md",), req="websockets>=12\n")) == ["bots/ping/test_bot.py is missing"]
 
 
 def test_pin_below_feature_version_fails(tmp_path):

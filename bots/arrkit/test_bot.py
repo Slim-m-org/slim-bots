@@ -15,7 +15,7 @@ from arrkit import history, library, poller, service, store  # noqa: E402
 from slimbots.chooser import Chooser  # noqa: E402
 from arrkit.guard import Guard  # noqa: E402
 from arrkit.testkit import FakeApi, Harness, Patched, labels, newest_buttons  # noqa: E402
-from slimbots import ApiError, Bot  # noqa: E402
+from slimbots import ApiError, Bot, urlpolicy  # noqa: E402
 from slimbots.testing import run_module_tests  # noqa: E402
 
 SERVICE = service.Service("demo", "/api/v3")
@@ -122,11 +122,42 @@ def test_fetch_since_pages_back_only_while_a_page_is_all_new_and_returns_oldest_
     assert [r["id"] for r in got][:2] == [121, 122] and len(got) == 130
 
 
+DNS = {"sonarr": ["172.18.0.4"], "nas": ["192.168.1.20"], "x.example.com": ["1.1.1.1"]}
+
+
+def checked(url, allow_http=False):
+    svc = service.Service("demo", "/api")
+    svc.url, svc.allow_http = url, allow_http
+    with Patched(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        return svc.problem()
+
+
 def test_the_url_rule_allows_loopback_and_bare_service_names_and_refuses_public_plaintext():
     for url, ok in (("http://sonarr:8989", True), ("http://127.0.0.1:1", True), ("http://x.example.com", False), ("https://x.example.com", True)):
+        assert (checked(url) is None) is ok, url
+
+
+def test_a_bare_name_that_resolves_to_a_lan_host_needs_the_opt_in():
+    refusal = checked("http://nas:8989")
+    assert "Docker bridge" in refusal and "DEMO_ALLOW_HTTP=1" in refusal
+    assert checked("http://nas:8989", allow_http=True) is None
+    assert checked("http://192.168.1.20:8989", allow_http=True) is None
+
+
+def test_the_opt_in_never_covers_a_public_plaintext_host():
+    for url in ("http://x.example.com", "http://1.1.1.1:8989"):
+        assert "covers only a host on your own network" in checked(url, allow_http=True), url
+
+
+def test_the_opt_in_is_read_from_the_environment():
+    os.environ["DEMO_URL"], os.environ["DEMO_API_KEY"], os.environ["DEMO_ALLOW_HTTP"] = "http://nas:8989", "k", "1"
+    try:
         svc = service.Service("demo", "/api")
-        svc.url = url
-        assert (svc.problem() is None) is ok, url
+        svc.configure(Bot(prefix="!"))
+        assert svc.allow_http is True
+    finally:
+        for name in ("DEMO_URL", "DEMO_API_KEY", "DEMO_ALLOW_HTTP"):
+            os.environ.pop(name, None)
 
 
 def test_the_api_key_goes_in_a_header_never_the_url_and_a_401_is_an_auth_error():

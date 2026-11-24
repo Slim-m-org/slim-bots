@@ -15,7 +15,7 @@ os.environ["PELICAN_STATUS_CHANNEL"] = "status1"
 
 import bot as pelican
 import pelican_core as core
-from slimbots import ApiError
+from slimbots import ApiError, urlpolicy
 from slimbots.context import Context
 from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot
 
@@ -304,13 +304,24 @@ def test_allow_http_reads_as_a_bool_setting():
     core.configure(pelican.bot)
 
 
+DNS = {"panel.lan": ["192.168.1.30"], "panel.example.com": ["1.1.1.1"]}
+
+
 def test_url_must_be_https_unless_lan_http_is_allowed():
-    assert core.url_problem("http://panel.lan", False) and not core.url_problem("http://panel.lan", True)
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        assert core.url_problem("http://panel.lan", False) and not core.url_problem("http://panel.lan", True)
     assert not core.url_problem("https://panel.example", False)
     assert core.url_problem("https://user:pw@panel.example", True)
     assert core.url_problem("ftp://panel.example", True)
     assert core.permission_problem("NOPE") and core.permission_problem("NONE")
     assert core.permission_problem("MANAGE_SERVER") is None
+
+
+def test_allow_http_never_covers_a_public_panel():
+    with mock.patch.object(urlpolicy, "resolve_addresses", lambda host: DNS[host]):
+        for url in ("http://panel.example.com", "http://1.1.1.1:8080"):
+            problem = core.url_problem(url, True)
+            assert problem and "covers only a host on your own network" in problem, url
 
 
 def test_status_message_is_created_then_edited_in_place_without_spam():

@@ -17,10 +17,11 @@ One `<bot>.json` per bot, read by `scripts/smoke_bot.py <bot>`.
 - `register_wait` is how many seconds to wait for the bot to register its commands before typing at it; `0` skips the wait for a bot that registers none, and `ready_seconds` is then the plain wait. `smoke_all.py` sets `SLIMM_SMOKE_BOT_ID` so the wait can look.
 - `pause` waits that many seconds before the step is typed, for a command with a cooldown.
 - `expect_contains` lists substrings the replies must contain; leave it out to only require some reply.
-- `env` is passed to the bot process on top of the caller's environment.
+- `env` is passed to the bot process on top of the caller's environment, which never includes a `SLIMM_SMOKE_*` variable, so the bot under test cannot read the tester's token.
 - List every documented command of the bot, including one bad-input case per command.
 
 A bot PR adds its own manifest here (not under `bots/<name>/`).
+`SLIMM_URL` must be https unless it is loopback; the script refuses anything else before the first request, since both tokens would travel in plaintext.
 Voice bots need a real LiveKit reachable from where the script runs.
 
 Replies only the tester sees (a bot's private answers) are read off the tester's own websocket, so a manifest can assert on them like any other reply.

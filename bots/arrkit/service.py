@@ -15,20 +15,25 @@ class Service:
         self.url = ""
         self.key = ""
         self.poll_seconds = 60
+        self.allow_http = False
         self.transport = None
 
     def configure(self, bot):
-        """Reads `<NAME>_URL`, `<NAME>_API_KEY` and `<NAME>_POLL_SECONDS` through `bot.setting()`."""
+        """Reads `<NAME>_URL`, `<NAME>_API_KEY`, `<NAME>_POLL_SECONDS` and `<NAME>_ALLOW_HTTP` through `bot.setting()`."""
         prefix = self.name.upper()
         self.url = (bot.setting(f"{prefix}_URL", required=True) or "").rstrip("/")
         self.key = bot.setting(f"{prefix}_API_KEY", required=True) or ""
         self.poll_seconds = bot.setting(f"{prefix}_POLL_SECONDS", 60, type=int)
+        self.allow_http = bot.setting(f"{prefix}_ALLOW_HTTP", False, type=bool)
 
     def problem(self):
-        """Plaintext is fine on loopback or to a bare docker service name, which never leaves the host's bridge."""
+        """Plaintext is fine on loopback, to a bare docker service name on the host's bridge, or to a LAN host the operator opted into."""
         if not self.url:
             return None
-        return service_url_problem(f"{self.name.upper()}_URL", self.url, bare_hostnames=True)
+        prefix = self.name.upper()
+        return service_url_problem(
+            f"{prefix}_URL", self.url, allow_http=self.allow_http, bare_hostnames=True, opt_in=f"{prefix}_ALLOW_HTTP", key_setting=f"{prefix}_API_KEY",
+        )
 
     async def call(self, method, path, params=None, body=None):
         """One authenticated call returning parsed JSON; a rejected key raises `AuthError`."""
