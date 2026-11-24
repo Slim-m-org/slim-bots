@@ -12,6 +12,7 @@ import music_core
 import player
 from slimbots import Store
 from slimbots.models import Channel
+from slimbots.permissions import Permissions
 from slimbots.testing import FakeAsyncClient, FakeAudioSource, FakeVoice, FakeVoiceSession, run_module_tests, wire_bot
 from slimbots.voice import VoiceError
 
@@ -139,6 +140,9 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     for channel in VOICE_CHANNELS:
         music.bot.space.channels[channel.id] = channel
     channels = {"u1": "v1"} if member_channels is None else member_channels
+    for user_id in ("u1", "u2"):
+        for channel in VOICE_CHANNELS:
+            grant_in(client, user_id, channel.id, Permissions.VIEW_CHANNEL | Permissions.CONNECT | Permissions.SPEAK)
     music.bot.voice = MusicVoice(can_publish=can_publish, member_channels=channels, join_error=join_error)
     music_cog.active_sessions().clear()
     music_core.JELLYFIN_URL = "https://jf.example" if jellyfin else ""
@@ -146,6 +150,12 @@ def setup(*, member_channels=None, can_publish=True, join_error=None, jellyfin=F
     player.build_ffmpeg_args = scripted_ffmpeg
     music_core.TRANSPORT = httpx.MockTransport(stream_answer)
     return client
+
+
+def grant_in(client, user_id, channel_id, bits):
+    """What the server answers for `user_id`'s bits in `channel_id`."""
+    body = {"user_id": user_id, "permissions": bits, "channel_id": channel_id}
+    client.respond("GET", f"/members/{user_id}/permissions?channel_id={channel_id}", body)
 
 
 def scenario(client, *steps):
