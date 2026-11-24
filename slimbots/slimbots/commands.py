@@ -98,7 +98,9 @@ def _convert_time_of_day(token: str, name: str) -> TimeOfDay:
 async def _convert_member(ctx: Context, token: str) -> Member:
     assert ctx.bot.space is not None
     needle = token.lstrip("@")
-    member = await ctx.bot.space.get_member(needle)
+    member = await ctx.bot.space.get_member(needle, usernames_only=token.startswith("@"))
+    if member is None and not token.startswith("@") and len(ctx.bot.space.members_named(needle)) > 1:
+        raise BadArgument(f"more than one member is called `{token}` - use their @username")
     if member is None:
         try:
             member = await ctx.bot.space.fetch_member(needle)

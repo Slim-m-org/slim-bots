@@ -90,7 +90,7 @@ One line each way, by construction: neither name is spelled `id`, so a bot canno
 `bot.space` is `members`, `channels`, `roles` as live dicts, refreshed once per connect, kept current from the `channel.*`, `role.changed`, `member.role_changed`, `member.removed`, `member.restored`, `profile.changed`, `member.timeout`, `join_gate.changed` and `owner.changed` frames (a role change reloads the roles when the token may read them and re-derives every cached member's permissions; a member's role change refetches that member if it is cached, and one on the bot itself also reloads the roles, so gaining or losing role read takes effect without a restart; a timeout frame sets the cached `timed_out_until`; an ownership hand-off refetches the old and new owner), and reloadable on demand.
 The snapshot is taken after the gateway is open, so a change made while the bot connects arrives as a queued frame and is applied on top of it.
 
-- `space.get_member(id_or_name)`, `space.get_channel(...)`, `space.get_role(...)`
+- `space.get_member(id_or_name)` matches an id, then a username, then a display name only one member has, so a shared or copied display name never picks the wrong person; `space.get_channel(...)`, `space.get_role(...)`
 - `await space.find_channel_by_path("category/channel")` (or a bare `"channel"`) returns the channel id by name without case, or `None`
 - `await space.refresh_members()` / `refresh_channels()` / `refresh_roles()`
 - `await space.grant_role(member, role)` / `revoke_role(...)` - real calls, not stubs, so a ported bot-roles hands out roles through the library.
