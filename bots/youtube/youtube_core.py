@@ -3,11 +3,13 @@ Only public metadata is read (oEmbed, the watch page's own `itemprop` tags, or t
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
-from slimbots.web import JsonService, ServiceError
+from slimbots.web import JsonService, ServiceAuthError, ServiceError
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com"}
@@ -20,6 +22,9 @@ _LENGTH = re.compile(r'"lengthSeconds":"(\d+)"')
 MAX_START_SECONDS = 360_000
 MAX_DURATION_SECONDS = 7 * 24 * 3600
 WATCH_PAGE_BYTES = 1536 * 1024
+KEY_LOG_INTERVAL_SECONDS = 3600.0
+
+log = logging.getLogger("youtube.core")
 
 
 @dataclass(frozen=True)
@@ -126,14 +131,24 @@ class Lookup:
     def __init__(self, *, user_agent, api_key="", service=None):
         self.api_key = api_key
         self.service = service or JsonService("youtube", user_agent=user_agent, public_only=True)
+        self._key_logged_at = None
 
     async def video(self, video_id):
         """The video's details; raises EmbedRefused or NoSuchVideo, or ServiceError when YouTube cannot be reached."""
         if self.api_key:
-            return await self._from_data_api(video_id)
+            try:
+                return await self._from_data_api(video_id)
+            except ServiceAuthError as err:
+                self._note_key_refused(err)
         details = await self._oembed(video_id)
         duration = await self._page_duration(video_id)
         return Video(video_id, details["title"], details.get("author_name"), duration)
+
+    def _note_key_refused(self, err):
+        now = time.monotonic()
+        if self._key_logged_at is None or now - self._key_logged_at >= KEY_LOG_INTERVAL_SECONDS:
+            self._key_logged_at = now
+            log.warning("the YouTube Data API refused YOUTUBE_API_KEY (bad key or quota used up): %s; using oEmbed instead", err)
 
     async def _oembed(self, video_id):
         response = await self.service.send(

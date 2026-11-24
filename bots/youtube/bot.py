@@ -10,6 +10,7 @@ import logging
 
 from slimbots import ApiError, Bot, Permissions
 from slimbots.http import is_token_revoked
+from slimbots.limits import Cooldown
 from slimbots.media import format_hms, parse_hms
 from slimbots.registration import RegistrationRejected
 from slimbots.text import clip, escape_mentions, one_line
@@ -29,6 +30,7 @@ LINK_HINT = "give a YouTube link, like `{p}yt https://youtu.be/dQw4w9WgXcQ`."
 NOT_PLAYING = "nothing is playing."
 PLAYPAUSE_ID = "yt-playpause"
 _start_locks: dict[str, asyncio.Lock] = {}
+link_cooldown = Cooldown(5.0)
 
 
 async def tell(ctx, text):
@@ -147,25 +149,42 @@ async def start_or_queue(ctx, text):
     if voice_channel_id is None:
         await tell(ctx, f"join a voice channel first, then run `{bot.prefix}yt <link>` again.")
         return
+    slow_down = link_cooldown.check(ctx.author.id)
+    if slow_down:
+        await tell(ctx, slow_down)
+        return
     lock = _start_locks.setdefault(voice_channel_id, asyncio.Lock())
     async with lock:
         await _start_or_queue_in(ctx, link, voice_channel_id)
+
+
+async def _queue_in_live_party(ctx, video, voice_channel_id, name):
+    """Queues `video` and says so; False when no party is running, including one that ended while the video was looked up."""
+    party = parties.party_in(voice_channel_id)
+    if party is None:
+        return False
+    async with party.lock:
+        if party.finished:
+            return False
+        place = party.enqueue(video)
+    if place is None:
+        await tell(ctx, f"the queue is full ({parties.MAX_QUEUE} videos).")
+    else:
+        await tell(ctx, f"queued {describe(video)} in {name}, number {place} in line.")
+    return True
 
 
 async def _start_or_queue_in(ctx, link, voice_channel_id):
     """One at a time per call, so two members starting together get one party and a queue."""
     name = bot.space.channel_label(voice_channel_id)
     party = parties.party_in(voice_channel_id)
+    if party is not None and len(party.queue) >= parties.MAX_QUEUE:
+        await tell(ctx, f"the queue is full ({parties.MAX_QUEUE} videos).")
+        return
     video = await fetch(ctx, link, ctx.author)
     if video is None:
         return
-    if party is not None:
-        async with party.lock:
-            place = party.enqueue(video)
-        if place is None:
-            await tell(ctx, f"the queue is full ({parties.MAX_QUEUE} videos).")
-        else:
-            await tell(ctx, f"queued {describe(video)} in {name}, number {place} in line.")
+    if await _queue_in_live_party(ctx, video, voice_channel_id, name):
         return
     try:
         session = await bot.voice.join(voice_channel_id)

@@ -5,7 +5,7 @@ import asyncio
 
 import youtube_core
 from slimbots.testing import run_module_tests
-from slimbots.web import WebResponse
+from slimbots.web import ServiceAuthError, WebResponse
 
 
 def test_every_link_shape_gives_the_id_and_start():
@@ -68,6 +68,46 @@ def test_embedding_turned_off_and_a_missing_video_are_told_apart():
         except error:
             continue
         raise AssertionError(f"HTTP {status} did not raise {error.__name__}")
+
+
+class KeyRefusedService(FakeService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.data_api_calls = 0
+
+    async def get(self, url, **_kwargs):
+        self.data_api_calls += 1
+        raise ServiceAuthError("youtube answered HTTP 403", 403)
+
+
+def test_a_refused_api_key_logs_once_and_falls_back_to_oembed():
+    service = KeyRefusedService(page='<meta itemprop="duration" content="PT19S">')
+    lookup = youtube_core.Lookup(user_agent="t", api_key="bad", service=service)
+    with _captured_warnings() as records:
+        for _ in range(3):
+            video = asyncio.run(lookup.video("jNQXAC9IVRw"))
+            assert (video.title, video.duration_seconds) == ("A Clip", 19)
+    assert service.data_api_calls == 3
+    assert len(records) == 1 and "YOUTUBE_API_KEY" in records[0]
+
+
+class _captured_warnings:
+    def __enter__(self):
+        import logging
+        self.records = []
+        outer = self.records
+
+        class Collect(logging.Handler):
+            def emit(self, record):
+                outer.append(record.getMessage())
+
+        self.logger = logging.getLogger("youtube.core")
+        self.handler = Collect(logging.WARNING)
+        self.logger.addHandler(self.handler)
+        return self.records
+
+    def __exit__(self, *exc):
+        self.logger.removeHandler(self.handler)
 
 
 if __name__ == "__main__":

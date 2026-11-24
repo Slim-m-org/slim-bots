@@ -20,6 +20,7 @@ MAX_TITLE_CHARS = 200
 MAX_QUEUE = 50
 ROSTER_POLL_SECONDS = 5.0
 PROVIDER = "youtube"
+MAX_POSITION_SECONDS = 7 * 24 * 3600
 
 _parties = {}
 
@@ -71,6 +72,7 @@ class Party:
         self._dirty = True
         self._seeked = False
         self._gave_up = False
+        self._controller = started_by_id
         self._tasks = []
 
     @property
@@ -95,7 +97,7 @@ class Party:
         self._move(video.start_seconds)
 
     def _move(self, seconds):
-        self._anchor_seconds = max(0.0, float(seconds))
+        self._anchor_seconds = min(max(0.0, float(seconds)), float(MAX_POSITION_SECONDS))
         self._anchor_at = self.clock()
         self._changed(seeked=True)
 
@@ -216,7 +218,7 @@ class Party:
                     self.voice_channel_id, playing=not self.paused, position_ms=int(self.position_seconds * 1000),
                 )
         except ApiError as err:
-            self._refused(err, seeked)
+            await self._refused(err, seeked)
 
     async def _put(self, seeked):
         video = self.current
@@ -224,14 +226,21 @@ class Party:
             self.voice_channel_id, item_id=video.video_id, title=wire_title(video.title), playing=not self.paused,
             position_ms=int(self.position_seconds * 1000),
             duration_ms=video.duration_seconds * 1000 if video.duration_seconds else None,
-            seeked=seeked, controller_user_id=self.started_by_id, provider=PROVIDER,
+            seeked=seeked, controller_user_id=self._controller, provider=PROVIDER,
         )
 
-    def _refused(self, err, seeked):
-        """A tick's 404 means the session lapsed, so state it again; a 400 or 409 will not pass, so stop syncing."""
+    async def _refused(self, err, seeked):
+        """A tick's 404 means the session lapsed, so state it again; a 400 drops the controller once, and any refusal that stays ends the party."""
+        if err.status == 400 and self._controller is not None:
+            log.warning("the server refused controller_user_id in %s (%s); stating the session without one", self.voice_channel_id, err.reason)
+            self._controller = None
+            self._dirty = True
+            self._seeked = self._seeked or seeked
+            return
         if err.status in (400, 409):
             log.warning("not syncing the watch party in %s: %s", self.voice_channel_id, err)
             self._gave_up = True
+            await self.stop(reason=err.reason or "the server refused the watch session")
             return
         log.warning("watch party write failed in %s: %s", self.voice_channel_id, err)
         self._dirty = True
