@@ -55,7 +55,7 @@ The highlights channel itself is never a source, even if it is listed.
 - Editing the original updates the quote.
   Deleting the original deletes the highlight and forgets it.
   The deleted text is dropped from the bot's store right away; if deleting the highlight fails, the hourly pass tries again until it is gone.
-- Edits and deletes made while the bot was disconnected are not replayed, so on every (re)connect it reads back the originals of up to 100 highlights starred in the last `STARBOARD_SEEN_RETENTION_DAYS` and applies what changed.
+- Edits and deletes made while the bot was disconnected are not replayed, so on every (re)connect it reads back the originals of up to 40 highlights (one burst of the server's read budget) starred in the last `STARBOARD_SEEN_RETENTION_DAYS` and applies what changed.
   An original the server no longer returns (deleted, or no longer visible to the bot) has its highlight deleted.
 - The digest lists the top highlights starred since the last digest, by count.
 - A digest that cannot be sent (a deleted channel, a lost permission) is logged and tried again on the next hourly pass; highlighting and pruning carry on, and only a revoked token stops the bot.
