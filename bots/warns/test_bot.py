@@ -22,13 +22,18 @@ def setup(**config):
     for name, value in {"LOG_CHANNEL": "", "EXPIRE_DAYS": 0, **config}.items():
         setattr(warns, name, value)
     client = FakeAsyncClient(me_id="bot-1")
-    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": []})
-    client.respond("GET", "/users/u-ann", {**ANN, "role_ids": []})
+    rank(client, MOD, 5)
+    rank(client, ANN, None)
     wire_bot(warns.bot, client, db_name="warns.db")
     asyncio.run(warns.bot.space.refresh_members())
     asyncio.run(warns.bot.open_store(migrate=warns.init_db))
     client.respond("PUT", "/members/u-ann/removal", None)
     return client
+
+
+def rank(client, user, position, *, owner=False):
+    """Serves `user` at `position` on the role ladder; None holds no role."""
+    client.respond("GET", f"/users/{user['id']}", {**user, "role_ids": [], "top_role_position": position, "is_owner": owner})
 
 
 FULL_MOD = Permissions.KICK_MEMBERS | Permissions.BAN_MEMBERS | Permissions.MANAGE_SERVER
@@ -157,6 +162,10 @@ def test_a_reason_cannot_ping():
     assert logged.count("@everyone") == 1, "only the escaped one, never a live one"
 
 
+def forget_warns():
+    asyncio.run(warns.bot.store.run(warns.clear_warns, "u-ann"))
+
+
 def refused_reply(client):
     return client.ephemerals[-1]["content"]
 
@@ -189,16 +198,58 @@ def test_a_rule_does_not_run_on_someone_who_holds_more_than_the_moderator():
     assert not calls(client, "PUT", "/members/u-ann/timeout")
 
 
-def test_a_rule_does_not_run_on_an_equal_peer_unless_the_moderator_is_an_administrator():
+def test_equal_bits_are_no_bar_and_an_administrator_follows_the_ladder_like_anyone():
     client = setup()
     seed_member(client, permissions=Permissions.KICK_MEMBERS)
     say("!warnrule add 1 timeout 1h")
     say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
-    assert "outranks" in refused_reply(client)
-    assert not calls(client, "PUT", "/members/u-ann/timeout")
+    assert len(calls(client, "PUT", "/members/u-ann/timeout")) == 1, "a peer in bits strictly below on the ladder is in reach"
+    forget_warns()
     seed_member(client, permissions=Permissions.ADMINISTRATOR)
+    rank(client, ANN, 5)
     say("!warn @ann bad", permissions=Permissions.ADMINISTRATOR)
+    assert "outranks" in refused_reply(client)
+    assert len(calls(client, "PUT", "/members/u-ann/timeout")) == 1
+    rank(client, ANN, 4)
+    say("!warn @ann bad", permissions=Permissions.ADMINISTRATOR)
+    assert len(calls(client, "PUT", "/members/u-ann/timeout")) == 2
+
+
+def test_a_rule_does_not_run_on_a_member_above_the_moderator_on_the_ladder():
+    client = setup()
+    seed_member(client, permissions=0)
+    rank(client, ANN, 7)
+    say("!warnrule add 1 timeout 1h")
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
+    assert "outranks" in refused_reply(client)
+    say("!warnrule add 1 kick")
+    say("!warn @ann bad")
+    assert "outranks" in refused_reply(client)
+    assert not calls(client, "PUT", "/members/u-ann/timeout") and not calls(client, "PUT", "/members/u-ann/removal")
+    say("!warns @ann")
+    assert "no active warns" in refused_reply(client), "a refused warn is not recorded"
+
+
+def test_the_owner_is_out_of_reach_and_reaches_everyone():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 timeout 1h")
+    rank(client, ANN, None, owner=True)
+    say("!warn @ann bad")
+    assert "outranks" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
+    rank(client, ANN, 9)
+    rank(client, MOD, None, owner=True)
+    say("!warn @ann bad", permissions=Permissions.KICK_MEMBERS)
     assert calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def test_a_rank_the_server_does_not_report_refuses_the_rule():
+    client = setup()
+    seed_member(client)
+    say("!warnrule add 1 timeout 1h")
+    client.respond("GET", "/users/u-ann", {**ANN, "role_ids": []})
+    say("!warn @ann bad")
+    assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
 
 
 def test_a_warn_that_triggers_no_rule_is_recorded_whatever_the_ranks():
@@ -224,11 +275,16 @@ def test_without_the_role_table_the_rank_is_read_from_the_permissions_route():
     serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS)
     serve_permissions(client, "u-ann", Permissions.KICK_MEMBERS)
     say("!warn @ann bad")
-    assert "outranks" in refused_reply(client), "an equal peer is still refused"
+    assert calls(client, "PUT", "/members/u-ann/timeout"), "equal bits strictly below on the ladder are in reach"
+    forget_warns()
+    rank(client, ANN, 5)
+    say("!warn @ann bad")
+    assert "outranks" in refused_reply(client), "an equal rank is still refused"
+    rank(client, ANN, None)
     serve_permissions(client, "u-ann", Permissions.SEND_MESSAGES)
     serve_permissions(client, "u-mod", Permissions.KICK_MEMBERS | Permissions.SEND_MESSAGES)
     say("!warn @ann bad")
-    assert calls(client, "PUT", "/members/u-ann/timeout")
+    assert len(calls(client, "PUT", "/members/u-ann/timeout")) == 2
 
 
 def test_a_timed_out_member_cannot_be_ranked_without_the_role_table():
@@ -241,6 +297,48 @@ def test_a_timed_out_member_cannot_be_ranked_without_the_role_table():
     serve_permissions(client, "u-ann", 0)
     say("!warn @ann bad")
     assert "cannot read" in refused_reply(client) and not calls(client, "PUT", "/members/u-ann/timeout")
+
+
+def seed_warn(user_id, moderator_id="u-admin"):
+    return asyncio.run(warns.bot.store.run(warns.add_warn, user_id, moderator_id, "seeded"))
+
+
+def test_a_moderator_cannot_remove_their_own_warns():
+    client = setup()
+    seed_member(client)
+    warn_id = seed_warn("u-mod")
+    say(f"!unwarn {warn_id}")
+    assert "your own" in refused_reply(client)
+    say("!unwarn clear @mod")
+    assert "your own" in refused_reply(client)
+    assert len(asyncio.run(warns.bot.store.run(warns.active_warns, "u-mod"))) == 1
+    rank(client, MOD, None, owner=True)
+    say(f"!unwarn {warn_id}")
+    assert f"removed warn #{warn_id}" in refused_reply(client), "the owner answers to nobody"
+
+
+def test_unwarn_reaches_only_members_below_the_moderator():
+    client = setup()
+    seed_member(client)
+    warn_id = seed_warn("u-ann")
+    rank(client, ANN, 5)
+    say(f"!unwarn {warn_id}")
+    assert "outranks" in refused_reply(client)
+    say("!unwarn clear @ann")
+    assert "outranks" in refused_reply(client)
+    assert len(asyncio.run(warns.bot.store.run(warns.active_warns, "u-ann"))) == 1
+    rank(client, ANN, 4)
+    say(f"!unwarn {warn_id}")
+    assert f"removed warn #{warn_id}" in refused_reply(client)
+
+
+def test_a_timeout_rule_longer_than_the_server_allows_is_refused_when_added():
+    client = setup()
+    say("!warnrule add 3 timeout 29d")
+    assert "28d" in refused_reply(client)
+    say("!warnrule add 3 timeout 28d")
+    say("!warnrule list")
+    assert "3 warns: time them out for 28d" in refused_reply(client)
 
 
 def test_the_log_channel_gets_a_line():
