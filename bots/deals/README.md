@@ -72,6 +72,7 @@ A watch mentions its owner in the deals channel when the price is at or below th
 The mark is only set after the post succeeded, so a refused post retries at the next check.
 A game Steam stops serving (removed, or not sold in the country) cannot be told apart from a region lock, so after three missed daily checks in a row the owner gets one notice and the watch stays until they remove it.
 A Steam outage leaves watches untouched.
+A member who is removed or whose account is deleted loses their watches.
 
 ## Configuration
 

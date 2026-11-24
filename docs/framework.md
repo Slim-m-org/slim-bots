@@ -98,6 +98,9 @@ The snapshot is taken after the gateway is open, so a change made while the bot 
   `space.refresh_roles()` needs the bot's own token to hold `MANAGE_ROLES` (the same gate `GET /roles` has).
   Without it, every `has_permission` check answers `False`, deny by default, same as an unresolvable role-gated command anywhere else.
   Losing it empties `space.roles`, so no cached bit comes from a table the bot can no longer read; a bot that checks permissions outside a command reads them with `space.refresh_permissions(member)` while `space.roles_readable` is False.
+- `await space.permissions_in(member_id, channel_id)` reads a member's effective bits in one channel from the bot-only `GET /members/{id}/permissions?channel_id=`, overwrites and timeouts applied, and zero unless both the member and the bot can view the channel.
+  `await ctx.author_can(Permissions.X, channel_id)` is the check a command makes before acting somewhere for its author, such as drawing on a call's canvas or speaking into it; it defaults to the command's own channel and answers False when the bits cannot be read.
+  It needs a slim-m server with the channel-scoped read (the first release after 0.117.0); an older server ignores `channel_id`, so the check falls back to deployment-wide bits and logs that once.
 - `Member.is_owner` marks the Space owner, who holds every permission whatever their roles, as the server rules.
 - `member.outranks(other)` answers the server's role ladder: True when `other`'s highest role sits strictly below this member's, the Space owner above everyone, and `None` when either rank is unknown.
   `member.top_role_position` and `member.is_owner` come from the member payload; an older server without them falls back to `Role.position` from the role table.
@@ -106,6 +109,10 @@ The snapshot is taken after the gateway is open, so a change made while the bot 
 `on_member_join(member)` fires on a real `member.joined` frame - registration, or an existing account spending an invite code, never a restore (`on_member_restored` already covers that).
 It is the one handler in this list that does not take a raw frame or an `events.py` payload: the frame carries only a `user_id`, so `Bot._handle_frame` resolves it to a live `Member` (`bot.space.resolve_member`, the same cache-then-fetch `_resolve_author` already does for a message's own author) before dispatching, which is why it lives as its own special case above `_GLOBAL_EVENT_FRAMES` rather than another entry in it.
 `bot-greeter` is the worked example: a configured welcome message posted to a configured channel.
+
+`on_member_removed(frame)` fires for every member who leaves, removed or deleted; a removal can be undone with `on_member_restored`, so stop acting for them there but keep what you store.
+`on_member_deleted(frame)` fires after it only when the account itself was deleted (`frame["deleted"]` is true), which cannot be undone: delete every row your bot keeps for `frame["user_id"]` there.
+An older server never sends `deleted`, so on one `on_member_deleted` never fires.
 
 ## Typed events
 

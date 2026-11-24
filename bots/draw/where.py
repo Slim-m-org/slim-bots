@@ -1,7 +1,6 @@
 """Where a drawing goes: the voice call the invoker is in, and whether the bot may use its canvas there."""
 
 from slimbots import ApiError, Permissions
-from slimbots.http import is_forbidden
 
 NEEDED = (("View channels", Permissions.VIEW_CHANNEL), ("Use the canvas", Permissions.USE_CANVAS))
 
@@ -26,12 +25,9 @@ async def missing_rights(bot, channel_id, name):
         absent = [label for label, bit in NEEDED if not Permissions.contains(bits, bit)]
         if absent:
             return f"I cannot draw in {name}: I am missing {' and '.join(absent)}. An admin can grant them to my role."
-    try:
-        await bot.canvas(channel_id).viewport(min_x=0, min_y=0, max_x=1, max_y=1, limit=1)
-    except ApiError as err:
-        if is_forbidden(err):
-            return f"I cannot draw in {name}: a setting on that channel stops me from viewing it or using its canvas."
-        raise
+    here = int((await bot.client.channel_permissions(channel_id))["permissions"])
+    if not all(Permissions.contains(here, bit) for _, bit in NEEDED):
+        return f"I cannot draw in {name}: a setting on that channel stops me from viewing it or using its canvas."
     return None
 
 
@@ -40,5 +36,7 @@ async def resolve(ctx):
     found = await find_call(ctx)
     if isinstance(found, str):
         return found
+    if not await ctx.author_can(Permissions.USE_CANVAS, found[0]):
+        return f"you cannot draw on the canvas in {found[1]}, so I will not draw there for you."
     problem = await missing_rights(ctx.bot, *found)
     return problem if problem else found

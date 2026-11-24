@@ -68,6 +68,12 @@ def ensure_account(conn, user_id):
     )
 
 
+def forget_player(conn, user_id):
+    conn.execute("DELETE FROM accounts WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM hands WHERE user_id = ?", (user_id,))
+    conn.commit()
+
+
 def get_balance(conn, user_id):
     ensure_account(conn, user_id)
     row = conn.execute("SELECT balance FROM accounts WHERE user_id = ?", (user_id,)).fetchone()

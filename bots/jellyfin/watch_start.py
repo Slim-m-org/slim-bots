@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 
 from slimbots.limits import ValidationError, require_len
-from slimbots.voice import VoiceError, join_to_speak, start_or_leave
+from slimbots.voice import VoiceError, join_to_speak, speak_refusal, start_or_leave
 
 import accounts
 import answers
@@ -89,13 +89,21 @@ async def begin(ctx, item):
     await picker.CHOOSER.open(ctx.bot, question, reply_to_id=ctx.message.get("id"))
 
 
+async def _refuse_a_listener(ctx, voice_channel_id):
+    """True, after telling them, when the invoker may not speak in their call themselves."""
+    refusal = await speak_refusal(ctx, voice_channel_id, label=ctx.bot.space.channel_label(voice_channel_id))
+    if refusal is not None:
+        await answers.tell(ctx, refusal)
+    return refusal is not None
+
+
 async def launch(ctx, full_item, start_seconds):
     """Joins the invoker's call as it is now and starts the stream, with the panel as the reply."""
     voice_channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if voice_channel_id is None:
         await answers.tell(ctx, f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
         return
-    if await _refuse_if_busy(ctx, voice_channel_id):
+    if await _refuse_a_listener(ctx, voice_channel_id) or await _refuse_if_busy(ctx, voice_channel_id):
         return
     _starting.add(voice_channel_id)
     try:
@@ -132,7 +140,7 @@ async def run_watch(ctx, query):
     if voice_channel_id is None:
         await answers.tell(ctx, f"join a voice channel first, then run `{ctx.bot.prefix}watch` again.")
         return
-    if await _refuse_if_busy(ctx, voice_channel_id):
+    if await _refuse_a_listener(ctx, voice_channel_id) or await _refuse_if_busy(ctx, voice_channel_id):
         return
     try:
         user_id = await accounts.user_for(ctx.bot, ctx.author.id)

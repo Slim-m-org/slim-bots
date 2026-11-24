@@ -78,6 +78,11 @@ def clear_warns(conn, user_id):
     return cur.rowcount
 
 
+@bot.event
+async def on_member_deleted(frame):
+    await bot.store.run(clear_warns, frame["user_id"])
+
+
 def rule_at(conn, warn_count):
     return conn.execute("SELECT action, seconds FROM rules WHERE warn_count = ?", (warn_count,)).fetchone()
 

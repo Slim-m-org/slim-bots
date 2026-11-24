@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from .http import ApiError, is_forbidden, is_not_found
@@ -10,6 +11,8 @@ from .permissions import Permissions
 
 if TYPE_CHECKING:
     from .http import AsyncClient
+
+log = logging.getLogger(__name__)
 
 ALL_PERMISSIONS = sum(bit for name, bit in vars(Permissions).items() if name.isupper() and isinstance(bit, int))
 
@@ -23,6 +26,7 @@ class Space:
         self.channels: dict[str, Channel] = {}
         self.roles: dict[str, Role] = {}
         self.roles_readable: bool | None = None
+        self._warned_unscoped = False
 
     def _base_permissions(self, role_ids: list[str], *, is_owner: bool = False) -> int:
         """The member's bits from the role table; the Space owner holds every bit whatever their roles, as the server rules."""
@@ -96,6 +100,16 @@ class Space:
             raise
         member._apply_roles(member.role_ids, int(data["permissions"]))
         return True
+
+    async def permissions_in(self, member_id: str, channel_id: str) -> int:
+        """`member_id`'s effective bits in `channel_id`, zero unless both they and the bot can view it; raises on a failed read.
+        A server older than this read ignores the channel and answers deployment-wide bits, logged once."""
+        data = await self._client.member_permissions(member_id, channel_id=channel_id)
+        bits = int(data["permissions"])
+        if "channel_id" not in data and not self._warned_unscoped:
+            self._warned_unscoped = True
+            log.warning("this slim-m server cannot scope permissions to a channel; checking deployment-wide bits instead")
+        return bits
 
     async def refresh_channels(self) -> dict[str, Channel]:
         channels = await self._client.list_channels()

@@ -68,6 +68,11 @@ DST-safe weekly recomputation via `zoneinfo`.
   deleted channel or one the bot may no longer post in (404 or 403) closes that
   reminder; any other failure leaves it due and it is tried again on the next
   pass. Only a revoked token stops the bot.
+- **Moderation reaches reminders.** A member who is removed, or whose account
+  is deleted, has every pending reminder cancelled. A timed-out member's
+  reminders are not posted: a one-off is closed and a recurring one skips
+  that firing. Someone with Manage Messages can cancel every reminder a member
+  set with `!reminders clear <@member>`.
 
 ## Output
 

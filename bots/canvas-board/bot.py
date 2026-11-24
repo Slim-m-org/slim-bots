@@ -19,6 +19,7 @@ VIEWPORT_LIMIT = 2000  # the server's ceiling; a busier rectangle answers has_mo
 # A note is a fixed 220x140 box; text past this overflows it regardless of what the canvas itself allows.
 MAX_TEXT_LENGTH = 240
 REPLY_BUDGET = 3900
+EDITS = ("add", "done", "move", "clear")
 
 def help_text():
     p = bot.prefix
@@ -104,7 +105,7 @@ def active_items(conn):
 
 
 def active_by_slot(conn, slot):
-    return conn.execute("SELECT id, text, seq FROM items WHERE active = 1 AND slot = ?", (slot,)).fetchone()
+    return conn.execute("SELECT id, text, seq, added_by FROM items WHERE active = 1 AND slot = ?", (slot,)).fetchone()
 
 
 def free_slot(conn):
@@ -170,12 +171,15 @@ def _deactivate_item(conn, item_id):
     conn.commit()
 
 
-async def done_item(ctx, n):
+async def done_item(ctx, n, bits):
     row = await bot.store.run(active_by_slot, n - 1)
     if row is None:
         await ctx.reply(f"no item #{n}")
         return
-    item_id, text, _ = row
+    item_id, text, _, added_by = row
+    if added_by != ctx.author.id and not Permissions.contains(bits, Permissions.MANAGE_CANVAS):
+        await ctx.reply(f"only whoever added #{n}, or someone with Manage Canvas there, can remove it.")
+        return
     await canvas.remove([item_id])
     await bot.store.run(_deactivate_item, item_id)
     await ctx.reply(f"done: {text}")
@@ -186,10 +190,14 @@ def _deactivate_items(conn, item_ids):
     conn.commit()
 
 
-async def clear_board(ctx):
+async def clear_board(ctx, bits):
     rows = await bot.store.run(active_items)
     if not rows:
         await ctx.reply("the board is already empty")
+        return
+    others = any(row[4] != ctx.author.id for row in rows)
+    if others and not Permissions.contains(bits, Permissions.MANAGE_CANVAS):
+        await ctx.reply("the board has notes other members added; only someone with Manage Canvas there can clear it.")
         return
     if not await ctx.confirm(f"This removes all {len(rows)} item(s) on the board."):
         await ctx.reply("cancelled")
@@ -207,7 +215,7 @@ def _check_move(conn, n, to):
         return f"no item #{n}"
     if active_by_slot(conn, to - 1) is not None:
         return f"#{to} is already taken"
-    item_id, text, _ = row
+    item_id, text = row[0], row[1]
     return item_id, text
 
 
@@ -233,11 +241,6 @@ async def move_item(ctx, n, to):
 
 def canvas_channel():
     return bot.space.channels.get(canvas.channel_id) if canvas is not None else None
-
-
-def invoker_can_view(ctx, channel):
-    """A stopgap until slimbots can check a member's view in one channel: public, the channel typed in, or an administrator."""
-    return channel.restricted is False or channel.id == ctx.channel_id or ctx.author.has_permission(Permissions.ADMINISTRATOR)
 
 
 async def list_items(ctx, channel):
@@ -268,10 +271,15 @@ def _chunks(lines):
 @bot.command(name="board", help="List, `add <text>`, `done <n>`, `move <n> <slot>`, or `clear` (asks to confirm)", usage="[add|done|move|clear|list ...]")
 async def board_cmd(ctx, sub: str = None, rest: str = None):
     channel = canvas_channel()
-    if channel is None or not invoker_can_view(ctx, channel):
+    bits = await ctx.author_permissions(channel.id) if channel is not None else Permissions.NONE
+    if not Permissions.contains(bits, Permissions.VIEW_CHANNEL):
         await ctx.reply("the board is on a channel you cannot see.")
         return
-    await _run_board_subcommand(ctx, channel, (sub or "list").lower(), rest)
+    sub = (sub or "list").lower()
+    if sub in EDITS and not Permissions.contains(bits, Permissions.USE_CANVAS):
+        await ctx.reply(f"you need Use the canvas in #{channel.name} to change the board.")
+        return
+    await _run_board_subcommand(ctx, channel, sub, rest, bits)
 
 
 async def _move_args(ctx, rest):
@@ -282,17 +290,17 @@ async def _move_args(ctx, rest):
         await ctx.reply(help_text())
 
 
-async def _run_board_subcommand(ctx, channel, sub, rest):
+async def _run_board_subcommand(ctx, channel, sub, rest, bits):
     if sub == "list":
         await list_items(ctx, channel)
     elif sub == "add" and rest:
         await add_item(ctx, rest)
     elif sub == "done" and rest and rest.isdigit():
-        await done_item(ctx, int(rest))
+        await done_item(ctx, int(rest), bits)
     elif sub == "move":
         await _move_args(ctx, rest)
     elif sub == "clear":
-        await clear_board(ctx)
+        await clear_board(ctx, bits)
     else:
         await ctx.reply(help_text())
 

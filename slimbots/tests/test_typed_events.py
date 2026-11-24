@@ -158,3 +158,20 @@ async def test_every_documented_frame_kind_has_a_registered_handler_name():
     }
     registered = set(_GLOBAL_EVENT_FRAMES) | set(_CHANNEL_EVENT_FRAMES)
     assert expected <= registered
+
+
+async def test_an_account_deletion_reaches_on_member_deleted_as_well_as_on_member_removed(bot):
+    removed, deleted = [], []
+
+    @bot.event
+    async def on_member_removed(frame):
+        removed.append(frame["user_id"])
+
+    @bot.event
+    async def on_member_deleted(frame):
+        deleted.append(frame["user_id"])
+
+    await feed_frame(bot, {"type": "member.removed", "user_id": "u1"})
+    await feed_frame(bot, {"type": "member.removed", "user_id": "u2", "deleted": True})
+    assert removed == ["u1", "u2"]
+    assert deleted == ["u2"]

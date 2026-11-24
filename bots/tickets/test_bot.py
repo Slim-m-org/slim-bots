@@ -8,7 +8,7 @@ import ticketdb
 from slimbots.http import ApiError
 from slimbots.models import Channel
 from slimbots.permissions import Permissions
-from slimbots.testing import FakeAsyncClient, run_module_tests, wire_bot
+from slimbots.testing import FakeAsyncClient, feed_frame, run_module_tests, wire_bot
 
 STAFF_ROLE = {"id": "r-staff", "name": "Support", "permissions": 0}
 PEOPLE = {
@@ -200,6 +200,21 @@ def test_close_saves_a_transcript_then_deletes_the_channel():
     assert lines[0].endswith("UTC] Sam: my printer is on fire")
     assert lines[1].endswith("UTC] Kai: line one") and lines[2] == "    line two"
     assert ("DELETE", "/channels/t-1") in [c[:2] for c in client.calls]
+
+
+def test_an_account_deletion_drops_the_tickets_it_opened_and_its_name_on_the_rest():
+    client = setup()
+    open_one(client)
+    client.respond("GET", "/channels/t-1/messages", list(reversed(history(("Sam", "my printer is on fire")))))
+    press("ticket:close", "s-1", "t-1")
+    asyncio.run(tickets.bot.store.run(lambda conn: conn.execute(
+        "INSERT INTO tickets (opener_id, opener_name, status, claimed_by, claimed_name, created_at) VALUES ('u-2', 'Ana', 'open', 'u-1', 'Sam', 1)"
+    )))
+    asyncio.run(feed_frame(tickets.bot, {"type": "member.removed", "user_id": "u-1"}))
+    assert len(rows_of("SELECT * FROM transcripts")) == 1, "a removal can be undone, so it keeps the rows"
+    asyncio.run(feed_frame(tickets.bot, {"type": "member.removed", "user_id": "u-1", "deleted": True}))
+    assert rows_of("SELECT * FROM transcripts") == []
+    assert rows_of("SELECT opener_id, claimed_by, claimed_name FROM tickets") == [("u-2", None, None)]
 
 
 def test_a_failed_history_read_keeps_the_ticket_open():

@@ -72,6 +72,9 @@ class Rig:
         draw.batch_state["available"] = None
         draw.bot.me_id = "bot-1"
         self.client.respond("GET", "/members/bot-1/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
+        self.client.respond("GET", "/channels/c-voice/permissions", {"permissions": Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS})
+        for user in (ANN, BOB):
+            self.grant_in_call(user, Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS | Permissions.MANAGE_CANVAS)
         draw.bot.space.channels = {"c-voice": Channel({"id": "c-voice", "name": "lounge", "kind": "voice"})}
         self.in_call(ANN)
         self.in_call(BOB)
@@ -89,6 +92,10 @@ class Rig:
             return None
 
         draw.bot.send_frame = no_gateway
+
+    def grant_in_call(self, user, bits, channel="c-voice"):
+        body = {"user_id": user["id"], "permissions": bits, "channel_id": channel}
+        self.client.respond("GET", f"/members/{user['id']}/permissions?channel_id={channel}", body)
 
     def in_call(self, user, channel="c-voice"):
         draw.bot.voice._note_joined(channel, user["id"])
@@ -152,8 +159,10 @@ def test_clear_needs_manage_canvas_and_removes_every_drawing():
     rig = Rig()
     rig.say("!draw cat")
     rig.say("!draw dog", user=BOB)
+    rig.grant_in_call(ANN, Permissions.VIEW_CHANNEL | Permissions.USE_CANVAS)
     assert "Manage Canvas" in rig.say("!draw clear")
-    assert "removed 2 drawings" in rig.say("!draw clear", permissions=Permissions.MANAGE_CANVAS)
+    rig.grant_in_call(ANN, Permissions.VIEW_CHANNEL | Permissions.MANAGE_CANVAS)
+    assert "removed 2 drawings" in rig.say("!draw clear")
     assert len([i for op in rig.client.ops for i in op["object_ids"]]) == len(rig.client.placed)
 
 

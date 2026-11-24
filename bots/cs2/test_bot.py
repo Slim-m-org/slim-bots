@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bot as cs2  # noqa: E402
 import steam  # noqa: E402
 from slimbots.http import ApiError  # noqa: E402
-from slimbots.testing import FakeAsyncClient, human, run_module_tests, wire_bot  # noqa: E402
+from slimbots.testing import FakeAsyncClient, feed_frame, human, run_module_tests, wire_bot  # noqa: E402
 
 ANN = human("u-ann", "ann", "Ann")
 BOB = human("u-bob", "bob", "Bob")
@@ -118,6 +118,27 @@ def test_forget_removes_the_member_and_they_are_no_longer_polled():
     assert "not linked" in rig.say("!cs2 forget", user=BOB)
     rig.poll()
     assert ID_BOB not in rig.urls[-1]
+
+
+def test_a_removed_member_is_unlinked_no_longer_polled_or_announced():
+    rig = Rig()
+    rig.link_all()
+    asyncio.run(feed_frame(cs2.bot, {"type": "member.removed", "user_id": BOB["id"]}))
+    rig.players[ID_BOB] = ("Bob", 1, steam.CS2_APP_ID)
+    rig.poll()
+    assert ID_BOB not in rig.urls[-1]
+    assert not rig.client.sent
+    assert BOB["id"] not in [p[0] for p in asyncio.run(cs2.bot.store.run(cs2.all_players))]
+
+
+def test_a_deleted_account_found_at_announce_time_is_unlinked_not_announced():
+    rig = Rig()
+    rig.link_all()
+    rig.client.respond("GET", f"/users/{BOB['id']}", ApiError(404, "not found"))
+    rig.players[ID_BOB] = ("Bob", 1, steam.CS2_APP_ID)
+    rig.poll()
+    assert not rig.client.sent
+    assert BOB["id"] not in [p[0] for p in asyncio.run(cs2.bot.store.run(cs2.all_players))]
 
 
 def test_lfg_pings_only_when_enough_linked_members_are_online_and_free():

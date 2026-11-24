@@ -89,6 +89,25 @@ async def name_of(user_id):
     return member.mention() if member else "someone"
 
 
+async def mention_or_forget(user_id):
+    """The linked member's mention, or None after dropping the link of an account the server no longer has."""
+    try:
+        member = await bot.space.find_member(user_id)
+    except ApiError:
+        return "someone"
+    if member is None:
+        await bot.store.run(forget, user_id)
+        return None
+    return member.mention()
+
+
+@bot.event
+async def on_member_removed(frame):
+    """A departed member can no longer run `forget`, so their link goes with them."""
+    if frame.get("user_id"):
+        await bot.store.run(forget, frame["user_id"])
+
+
 async def reply(ctx, text):
     await ctx.reply_ephemeral(text, public_fallback=True)
 
@@ -223,8 +242,9 @@ async def announce(players, found):
         if playing == bool(was_in):
             continue
         await bot.store.run(set_in_cs2, user_id, int(playing))
-        if playing and not quiet:
-            await bot.client.send(ANNOUNCE_CHANNEL, f"{await name_of(user_id)} just started CS2.")
+        mention = await mention_or_forget(user_id) if playing and not quiet else None
+        if mention:
+            await bot.client.send(ANNOUNCE_CHANNEL, f"{mention} just started CS2.")
 
 
 @bot.every(POLL_SECONDS, name="cs2", on="ready", enabled=lambda: bool(STEAM_API_KEY and ANNOUNCE_CHANNEL))

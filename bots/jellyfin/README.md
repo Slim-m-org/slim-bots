@@ -90,7 +90,9 @@ invoker's own* voice channel with `bot.voice.find_member()` (`slimbots`;
 see `docs/framework.md`), and joins that one through `bot.voice.join()`
 to stream the result in as a screen share. The bot needs `CONNECT` and
 `SPEAK` in the invoker's channel, the same grants a human sharing their
-screen needs, and says which one is missing if either is absent. Several
+screen needs, and says which one is missing if either is absent. It streams
+only for someone who may speak in that call themselves (`SPEAK` there, which
+needs slim-m with the channel-scoped member permissions read). Several
 matches post up to five buttons, and a series leads to season buttons and then
 episode buttons (ten to a page, with Back, Previous and Next page). Only the
 person who typed `!watch` can choose; anyone else gets a private reply saying so.

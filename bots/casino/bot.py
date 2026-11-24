@@ -30,6 +30,11 @@ bot.load_extension("economy")
 bot.load_extension("blackjack_cog")
 
 
+@bot.event
+async def on_member_deleted(frame):
+    await bot.store.run(casino_core.forget_player, frame["user_id"])
+
+
 @bot.every(lambda: casino_core.PRUNE_INTERVAL_SECONDS, name="casino-maintenance", delay_first=True, on="ready")
 async def prune_processed():
     """Prunes processed_requests hourly; the row only needs to survive one reconnect gap."""

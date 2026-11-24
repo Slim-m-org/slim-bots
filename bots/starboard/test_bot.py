@@ -254,6 +254,20 @@ def test_original_delete_removes_the_highlight():
     assert db("SELECT * FROM seen") == []
 
 
+def test_an_account_deletion_takes_down_its_highlights_and_forgets_its_text():
+    client = setup()
+    created()
+    react(3)
+    created(msg_id="m2", content="not starred yet")
+    hl_id = client.sent[0]["id"]
+    client.respond("DELETE", f"/channels/hl/messages/{hl_id}", None)
+    frame("member.removed", user_id="u1")
+    assert db("SELECT message_id FROM starred") == [("m1",)], "a removal can be undone, so it keeps the rows"
+    frame("member.removed", user_id="u1", deleted=True)
+    assert ("DELETE", f"/channels/hl/messages/{hl_id}", None, None) in client.calls
+    assert db("SELECT * FROM starred") == [] and db("SELECT * FROM seen") == []
+
+
 def test_the_highlight_channel_is_never_a_source():
     client = setup()
     starboard.bot.channels = {"c1", "hl"}
