@@ -413,5 +413,15 @@ def test_the_log_channel_gets_a_line():
     assert any(s["channel_id"] == "c-log" for s in client.sent)
 
 
+
+def test_an_account_deletion_drops_its_warns_and_a_removal_keeps_them():
+    seed_member(setup())
+    say("!warn @ann first")
+    handle_frame(warns.bot, {"type": "member.removed", "user_id": "u-ann"})
+    assert len(asyncio.run(warns.bot.store.run(warns.active_warns, "u-ann"))) == 1
+    handle_frame(warns.bot, {"type": "member.removed", "user_id": "u-ann", "deleted": True})
+    assert asyncio.run(warns.bot.store.run(warns.active_warns, "u-ann")) == []
+
+
 if __name__ == "__main__":
     run_module_tests(globals())

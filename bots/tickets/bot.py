@@ -112,6 +112,11 @@ async def ticket_reason(ctx, text: str):
     await ctx.reply_ephemeral("reason saved.", public_fallback=True)
 
 
+@bot.event
+async def on_member_deleted(frame):
+    await bot.store.run(ticketdb.forget_member, frame["user_id"])
+
+
 @bot.button(prefix="ticket:")
 async def on_ticket_button(interaction):
     action = interaction.custom_id.removeprefix("ticket:")
