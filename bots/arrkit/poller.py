@@ -15,7 +15,8 @@ async def send_history_post(bot, post):
     assert bot.client is not None, "send_history_post runs only once connected"
     text = history.render_text(post)
     embed = style.card(history.STYLES[post["kind"]], title=text)
-    await bot.client.send(bot.channel, "", message_id=post["message_id"], **style.send_kwargs(embed, escape_mentions(text)))
+    safe = escape_mentions(text)
+    await bot.client.send(bot.channel, safe, message_id=post["message_id"], **style.send_kwargs(embed, safe))
 
 
 async def history_poll_once(bot, core):

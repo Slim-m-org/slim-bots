@@ -103,6 +103,14 @@ def test_the_message_id_is_the_same_on_every_retry_and_differs_by_kind():
     assert first["message_id"] != history.make_post(ns, "failed", "x", group)["message_id"]
 
 
+def test_two_distinct_upgrades_of_one_item_get_different_ids_and_a_retry_keeps_its_id():
+    ns = uuid.UUID(int=1)
+    first = [{"key": "i|a", "detail": "HD", "id": 1}]
+    later = [{"key": "i|a", "detail": "4K", "id": 9}]
+    assert history.make_post(ns, "upgraded", "x", first)["message_id"] != history.make_post(ns, "upgraded", "x", later)["message_id"]
+    assert history.make_post(ns, "upgraded", "x", later)["message_id"] == history.make_post(ns, "upgraded", "x", list(later))["message_id"]
+
+
 def test_the_cursor_only_moves_forward():
     conn = fresh_db()
     store.advance_cursor(conn, 50)
@@ -384,6 +392,16 @@ def test_the_first_poll_starts_at_the_newest_record_and_a_later_one_posts_it_onc
     asyncio.run(poller.history_poll_once(bot, core))
     assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c1"
     assert client.sent[0]["embeds"][0]["title"] == "Downloaded: item 8 [HD]"
+
+
+def test_an_announcement_carries_its_text_as_content_beside_the_embed():
+    client = harness.setup()
+    records = [{"id": 1}]
+    core = history_core(records)
+    asyncio.run(poller.history_poll_once(bot, core))
+    records.append({"id": 2})
+    asyncio.run(poller.history_poll_once(bot, core))
+    assert client.sent[0]["content"] == "Downloaded: item 2 [HD]"
 
 
 def test_a_failed_send_keeps_the_cursor_and_retries_without_repeating_what_landed():

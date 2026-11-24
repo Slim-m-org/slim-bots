@@ -105,7 +105,7 @@ def test_the_live_poll_bootstraps_then_posts_a_new_import_once_as_an_embed_in_th
         asyncio.run(sonarr.poll_once())
     assert len(client.sent) == 1 and client.sent[0]["channel_id"] == "c1"
     assert client.sent[0]["embeds"][0]["title"].startswith("Downloaded: Show (2020) S01E02")
-    assert client.sent[0]["content"] == ""
+    assert client.sent[0]["content"].startswith("Downloaded: Show (2020) S01E02")
 
 
 def test_the_poll_asks_sonarr_for_the_series_and_episode_inline():
