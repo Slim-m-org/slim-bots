@@ -22,15 +22,25 @@ REPLY = "pong"
 USER_AGENT = "slimm-bot-ping/1.0"
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect becomes an HTTPError instead of a second request, which would carry the token somewhere new."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_RefuseRedirects)
+
+
 def call(method, path, body=None):
     """One authenticated REST call, returning parsed JSON or None for 204."""
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(f"{BASE}{path}", data=data, method=method)
-    request.add_header("authorization", f"Bearer {TOKEN}")
+    request.add_unredirected_header("authorization", f"Bearer {TOKEN}")
     request.add_header("user-agent", USER_AGENT)
     if data is not None:
         request.add_header("content-type", "application/json")
-    with urllib.request.urlopen(request, timeout=15) as response:
+    with _OPENER.open(request, timeout=15) as response:
         raw = response.read()
         return json.loads(raw) if raw else None
 
@@ -44,18 +54,24 @@ def send(channel_id, content):
     )
 
 
+def base_problem(base):
+    """Why the token may not travel to `base`, or None: only https, or plain http to loopback."""
+    parts = urllib.parse.urlsplit(base)
+    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1")):
+        return None
+    return f"refusing to send a bot token over {parts.scheme or 'no'} scheme to {parts.hostname or base}; use https"
+
+
 def socket_url(base):
     """The WebSocket URL for `base`, refusing to carry a token in plaintext outside loopback."""
+    problem = base_problem(base)
+    if problem is not None:
+        raise RuntimeError(problem)
     parts = urllib.parse.urlsplit(base)
     if parts.scheme == "https":
         return urllib.parse.urlunsplit(("wss", parts.netloc, "/ws", "", ""))
-    if parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1"):
-        print("warning: plaintext ws, loopback only", file=sys.stderr)
-        return urllib.parse.urlunsplit(("ws", parts.netloc, "/ws", "", ""))
-    raise RuntimeError(
-        f"refusing to send a bot token over {parts.scheme or 'no'} scheme to "
-        f"{parts.hostname or base}; use https"
-    )
+    print("warning: plaintext ws, loopback only", file=sys.stderr)
+    return urllib.parse.urlunsplit(("ws", parts.netloc, "/ws", "", ""))
 
 
 _is_bot_cache = {}
@@ -126,6 +142,11 @@ def _install_sigterm_handler():
 async def main():
     if not BASE or not TOKEN:
         print("set SLIMM_URL and SLIMM_BOT_TOKEN", file=sys.stderr)
+        return 2
+    # Checked before the first request: a retry loop would resend the token every few seconds.
+    problem = base_problem(BASE)
+    if problem is not None:
+        print(problem, file=sys.stderr)
         return 2
     _install_sigterm_handler()
     while True:

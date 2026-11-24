@@ -11,8 +11,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_FILES = ("test_bot.py", "README.md", "requirements.txt")
-# bots/ping stays library-free on purpose and has no test_bot.py.
-EXEMPT = {"ping": {"test_bot.py"}}
 
 # Feature pattern in bot source -> first slim-m release that provides it (see slimbots/CHANGELOG.md).
 FEATURES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
@@ -110,7 +108,7 @@ def check_bot(bot_dir: Path) -> list[str]:
     problems = [
         f"bots/{name}/{f} is missing"
         for f in REQUIRED_FILES
-        if f not in EXEMPT.get(name, set()) and not (bot_dir / f).is_file()
+        if not (bot_dir / f).is_file()
     ]
     req = bot_dir / "requirements.txt"
     if not req.is_file():

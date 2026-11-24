@@ -15,7 +15,7 @@ The release itself stays with the main session.
 
 ## 2. Tests in CI
 
-- The bot has `test_bot.py` (`bots/ping` is the one exception) and it runs in the `bot-templates` job.
+- The bot has `test_bot.py` and it runs in the `bot-templates` job.
 - A regression test fails on the old code before the fix goes in.
 - A bot that touches voice is covered by the real-livekit job (`slimbots/tests_livekit`), not only the fake; a new `rtc.<X>` the bot relies on is added to the conformance test.
 - `pyright` is no worse than main.
