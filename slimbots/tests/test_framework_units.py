@@ -22,6 +22,11 @@ def test_a_missing_bit_is_denied():
     assert not Permissions.contains(Permissions.SEND_MESSAGES, Permissions.MANAGE_ROLES)
 
 
+def test_a_zero_requirement_is_never_granted():
+    assert not Permissions.contains(Permissions.SEND_MESSAGES, Permissions.NONE)
+    assert not Permissions.contains(Permissions.ADMINISTRATOR, Permissions.NONE)
+
+
 def test_names_lists_every_set_bit():
     bits = Permissions.MANAGE_ROLES | Permissions.BAN_MEMBERS
     assert Permissions.names(bits) == ["BAN_MEMBERS", "MANAGE_ROLES"]
