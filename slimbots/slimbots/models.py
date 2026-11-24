@@ -10,6 +10,11 @@ if TYPE_CHECKING:
     from .http import AsyncClient
 
 
+def _ladder_key(position: int | None) -> float:
+    """Holding no role ranks below every role, `@everyone` included."""
+    return float("-inf") if position is None else position
+
+
 class Member:
     """A slim-m member. `.id` is the stable key to store against - see docs/framework.md."""
 
@@ -19,13 +24,26 @@ class Member:
         self.display_name: str = data["display_name"]
         self.is_bot = bool(data.get("is_bot"))
         self.is_webhook = bool(data.get("is_webhook"))
-        self.is_owner = bool(data.get("is_owner"))
         self.role_ids: list[str] = list(data.get("role_ids") or [])
         self.roles: list[str] = list(data.get("roles") or [])
         self.timed_out_until = data.get("timed_out_until")
         # The server's account creation time; one deployment is one community, so it is also the join time.
         self.joined_at: int | None = data.get("created_at")
         self._base_permissions = base_permissions
+        self.is_owner = False
+        self.rank_known = False
+        self.top_role_position: int | None = None
+        self._read_rank(data)
+
+    def _read_rank(self, data: dict[str, Any]) -> None:
+        """Takes the role-ladder fields from a member payload; an older server without them leaves the rank unknown."""
+        self.is_owner = bool(data.get("is_owner"))
+        self.rank_known = "top_role_position" in data
+        self.top_role_position = data.get("top_role_position")
+
+    def _set_top_role_position(self, position: int | None) -> None:
+        self.rank_known = True
+        self.top_role_position = position
 
     @property
     def storage_key(self) -> str:
@@ -35,6 +53,14 @@ class Member:
     def has_permission(self, permission: int) -> bool:
         """Whether this member's base (deployment-level) permissions grant `permission`."""
         return Permissions.contains(self._base_permissions, permission)
+
+    def outranks(self, other: Member) -> bool | None:
+        """Whether the role ladder puts `other` strictly below this member, the owner above everyone; None when either rank is unknown."""
+        if self.is_owner or other.is_owner:
+            return self.is_owner and not other.is_owner
+        if not (self.rank_known and other.rank_known):
+            return None
+        return _ladder_key(self.top_role_position) > _ladder_key(other.top_role_position)
 
     def _apply_roles(self, role_ids: list[str], base_permissions: int) -> None:
         """Updates the cached role set after a grant/revoke; `Space` owns calling this."""
@@ -71,6 +97,7 @@ class Role:
         self.name: str = data["name"]
         self.permissions: int = data.get("permissions", 0)
         self.is_everyone = bool(data.get("is_everyone"))
+        self.position: int | None = data.get("position")
 
     def __repr__(self) -> str:
         return f"Role(id={self.id!r}, name={self.name!r})"

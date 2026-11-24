@@ -4,7 +4,7 @@ A slim-m bot: rules a moderator writes (message flood, links, listed words, ment
 Every action is posted to a log channel when one is configured, and a timeout can be undone by a person with `!automod lift @member`.
 
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
-It needs `slim-m>=0.6.0`, which added `time_out_member` and `lift_member_timeout`.
+It needs `slim-m>=0.24.0`, which added `space.ladder_reach` for the lift command.
 
 ```bash
 pip install -r requirements.txt
@@ -42,7 +42,7 @@ Every rule is off by default.
 `AUTOMOD_LOG_CHANNEL` is a `category/channel` path or a bare channel name.
 With it unset, nothing is logged beyond the bot's own local counts.
 
-Commands: `!automod rules` (what is on), `!automod stats` (how often each rule fired), `!automod lift @member` (needs Kick Members).
+Commands: `!automod rules` (what is on), `!automod stats` (how often each rule fired), `!automod lift @member` (needs Kick Members, and the member's highest role must sit strictly below yours, as the server asks of a lift in the app).
 
 ## Permissions
 
