@@ -31,7 +31,8 @@ def setup(**config):
     client.respond("GET", "/categories", [{"id": "cat-1", "name": "general"}])
     for user in (USER, MOD):
         client.respond("GET", f"/users/{user['id']}", user)
-    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": []})
+    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": [], "top_role_position": 3})
+    client.respond("GET", "/users/u1", {**USER, "top_role_position": None})
     automod.bot.channels = None
     automod.bot.me_id = "bot-1"
     wire_bot(automod.bot, client, db_name="automod.db")
@@ -225,6 +226,27 @@ def test_lift_needs_kick_members_and_calls_the_route():
     assert "Kick Members" in client.sent[-1]["content"]
     assert timed_out(client) == []
     mod._base_permissions = Permissions.KICK_MEMBERS
+    asyncio.run(automod.bot.process_message(msg))
+    assert ("DELETE", "/members/u1/timeout") in [(m, p) for m, p, _, _ in client.calls]
+
+
+def test_lift_refuses_a_member_at_or_above_the_invoker_on_the_ladder():
+    client = setup()
+    automod.bot.space.members["u1"] = automod.bot.space._make_member(USER)
+    mod = automod.bot.space._make_member({**MOD, "role_ids": []})
+    mod._base_permissions = Permissions.KICK_MEMBERS
+    automod.bot.space.members["u-mod"] = mod
+    client.respond("GET", "/users/u-mod", {**MOD, "role_ids": [], "top_role_position": 3})
+    msg = {"id": "cmd", "channel_id": "c-chat", "author_id": "u-mod", "content": "!automod lift @spammer", "seq": 1}
+    for position in (3, 8):
+        client.respond("GET", "/users/u1", {**USER, "top_role_position": position})
+        asyncio.run(automod.bot.process_message(msg))
+        assert "outranks" in client.sent[-1]["content"]
+    client.respond("GET", "/users/u1", USER)
+    asyncio.run(automod.bot.process_message(msg))
+    assert "cannot read" in client.sent[-1]["content"]
+    assert ("DELETE", "/members/u1/timeout") not in [(m, p) for m, p, _, _ in client.calls]
+    client.respond("GET", "/users/u1", {**USER, "top_role_position": 2})
     asyncio.run(automod.bot.process_message(msg))
     assert ("DELETE", "/members/u1/timeout") in [(m, p) for m, p, _, _ in client.calls]
 

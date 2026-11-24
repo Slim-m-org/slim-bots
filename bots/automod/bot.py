@@ -8,6 +8,7 @@ import uuid
 from collections import defaultdict, deque
 
 from slimbots import ApiError, Bot, Member, Permissions, style
+from slimbots.text import escape_mentions
 
 from link_rules import link_domains, strip_punctuation, visible_text
 
@@ -186,6 +187,15 @@ def rules_summary():
     return lines
 
 
+async def lift_refusal(invoker, target):
+    """Why the role ladder keeps `invoker` from lifting `target`'s timeout, read fresh from the server; None when it does not."""
+    reach = await bot.space.ladder_reach(invoker, target)
+    name = escape_mentions(target.display_name)
+    if reach is None:
+        return f"I cannot read where {name} stands on the role ladder to check you may lift their timeout."
+    return None if reach else f"{name} ranks at or above you; ask someone who outranks them to lift it."
+
+
 @bot.command(name="automod", help="Show the rules that are on, what they did, or lift a timeout", usage="<rules|stats|lift @member>", choices={"sub": ("rules", "stats", "lift")})
 async def automod_cmd(ctx, sub: str, member: Member = None):
     sub = sub.lower()
@@ -198,6 +208,10 @@ async def automod_cmd(ctx, sub: str, member: Member = None):
     elif sub == "lift" and member is not None:
         if not ctx.author.has_permission(Permissions.KICK_MEMBERS):
             await ctx.reply("only someone with Kick Members can lift a timeout.")
+            return
+        refusal = await lift_refusal(ctx.author, member)
+        if refusal:
+            await ctx.reply(refusal)
             return
         await bot.client.lift_member_timeout(member.id)
         await write_modlog(f"automod: {ctx.author.mention()} lifted {member.mention()}'s timeout")
