@@ -53,6 +53,8 @@ def check_config():
         )
         if problem:
             return problem
+    if DOCKER_SOCKET and "://" in DOCKER_SOCKET and not sources.is_docker_proxy_url(DOCKER_SOCKET):
+        return "HOMELAB_DOCKER_SOCKET must be a unix socket path or the http(s) URL of a filtering socket proxy"
     return None
 
 

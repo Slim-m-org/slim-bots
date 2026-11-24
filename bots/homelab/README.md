@@ -31,10 +31,20 @@ A source with no settings is simply not drawn; with none set the bot says what t
 | `HOMELAB_PROXMOX_URL`, `HOMELAB_PROXMOX_TOKEN` | empty | the Proxmox API root and an API token as `user@realm!tokenid=secret`; a read-only role is enough |
 | `HOMELAB_PROXMOX_CA_FILE` | unset | path to the node's `pve-root-ca.pem`, for its self-signed certificate |
 | `HOMELAB_ALLOW_HTTP` | off | `1` allows a plaintext `http` Proxmox or Jellyfin URL on a trusted LAN; loopback and a bare Docker service name never need it |
-| `HOMELAB_DOCKER_SOCKET` | empty | the Docker socket path, for example `/var/run/docker.sock`, mounted read-only into the bot's container |
+| `HOMELAB_DOCKER_SOCKET` | empty | a filtering socket proxy, as its `http://` URL (`http://homelab-docker-proxy:2375`) or the path of the unix socket it serves; a raw Docker socket path also works but see Docker access below |
 | `HOMELAB_JELLYFIN_URL`, `HOMELAB_JELLYFIN_KEY` | empty | the server address and an API key |
 
 Tokens and keys are read from the environment and are never printed, logged or sent to chat.
+
+## Docker access
+
+The bot sends one request to Docker: `GET /containers/json?all=1`.
+Mounting `/var/run/docker.sock` into its container, even with `:ro`, gives it the whole Docker API: read-only applies to the file, not to the requests sent over the socket.
+Anything that runs in the bot's container, such as a compromised dependency, could then create a privileged container and take over the host.
+Put a filtering socket proxy in front of Docker that allows only `GET /containers/json`, and point `HOMELAB_DOCKER_SOCKET` at the proxy instead of the socket.
+[wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy) can express exactly that, with `-allowGET=(/v[0-9.]+)?/containers/json`, `-listenip=0.0.0.0` and `-allowfrom=` the bot's service name.
+Run it on a network only the proxy and the bot join, and pin its image by digest.
+Tecnativa's docker-socket-proxy with `CONTAINERS=1` is not enough here: it also lets through `/containers/{id}/json`, which returns every container's environment, and `/containers/{id}/archive`, which returns its files.
 
 ## Commands
 
