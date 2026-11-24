@@ -123,7 +123,7 @@ def setup(*, confirm=True):
     client = FakeAsyncClient(me_id="bot-1")
     client.respond("GET", "/members", MEMBERS)
     client.respond("GET", "/roles", ROLE_DEFS)
-    wire_bot(pelican.bot, client, me_id="bot-1")
+    wire_bot(pelican.bot, client, me_id="bot-1", db_name="pelican.db")
     asyncio.run(pelican.bot.space.refresh_roles())
     asyncio.run(pelican.bot.space.refresh_members())
     confirmations = []
@@ -319,8 +319,9 @@ def test_status_message_is_created_then_edited_in_place_without_spam():
     asyncio.run(pelican.status_once())
     created = [m for m in client.sent if m["channel_id"] == "status1"]
     assert len(created) == 1 and "**Game servers**" in created[0]["content"]
+    first_id = created[0]["id"]
     edits_before = len([c for c in client.calls if c[0] == "PATCH"])
-    client.respond("PATCH", f"/channels/status1/messages/{pelican.status_message_id()}", None)
+    client.respond("PATCH", f"/channels/status1/messages/{first_id}", None)
     asyncio.run(pelican.status_once())
     assert len([m for m in client.sent if m["channel_id"] == "status1"]) == 1
     assert len([c for c in client.calls if c[0] == "PATCH"]) == edits_before
@@ -332,7 +333,28 @@ def test_status_message_is_created_then_edited_in_place_without_spam():
         STATS["cccc3333"]["current_state"] = "running"
     patches = [c for c in client.calls if c[0] == "PATCH"]
     assert len(patches) == edits_before + 1 and "[down] **Valheim**" in patches[-1][2]["content"]
+    assert patches[-1][1].endswith(first_id)
     assert len([m for m in client.sent if m["channel_id"] == "status1"]) == 1
+
+
+def test_a_deleted_status_message_is_posted_again_under_a_fresh_id_that_a_restart_finds():
+    client = setup()
+    client.respond("PATCH", f"/channels/status1/messages/{pelican.status_message_id()}", ApiError(404, "not found"))
+    asyncio.run(pelican.status_once())
+    first_id = client.sent[-1]["id"]
+    client.respond("PATCH", f"/channels/status1/messages/{first_id}", ApiError(404, "not found"))
+    STATS["cccc3333"] = {**STATS["cccc3333"], "current_state": "offline"}
+    try:
+        asyncio.run(pelican.status_once())
+    finally:
+        STATS["cccc3333"]["current_state"] = "running"
+    posted = [m for m in client.sent if m["channel_id"] == "status1"]
+    assert len(posted) == 2 and posted[1]["id"] not in (first_id, pelican.status_message_id())
+    pelican._last_status_text = None
+    client.respond("PATCH", f"/channels/status1/messages/{posted[1]['id']}", None)
+    asyncio.run(pelican.status_once())
+    assert len([m for m in client.sent if m["channel_id"] == "status1"]) == 2
+    assert client.calls[-1][1].endswith(posted[1]["id"])
 
 
 def run_answer(client, command):

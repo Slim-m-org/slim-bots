@@ -6,6 +6,7 @@ import sys
 
 from slimbots import ApiError, Bot
 from slimbots.migrations import ensure_columns
+from slimbots.text import clip
 
 # A note's box is 220x140, the app's own quick-placement default, so a note this bot places renders identically to a hand-drawn one.
 BOARD_X = 0.0
@@ -17,6 +18,7 @@ MAX_SLOTS = 20
 VIEWPORT_LIMIT = 2000  # the server's ceiling; a busier rectangle answers has_more, which reconcile treats as incomplete
 # A note is a fixed 220x140 box; text past this overflows it regardless of what the canvas itself allows.
 MAX_TEXT_LENGTH = 240
+REPLY_BUDGET = 3900
 
 def help_text():
     p = bot.prefix
@@ -238,8 +240,21 @@ async def list_items(ctx):
     lines = [f"drawing on #{canvas_channel_name}:"]
     for _, slot, text, _, added_by in rows:
         name = await name_of(added_by) if added_by else None
-        lines.append(f"#{slot + 1}: {text} (added by {name})" if name else f"#{slot + 1}: {text}")
-    await ctx.reply("\n".join(lines))
+        line = f"#{slot + 1}: {text} (added by {clip(name, 40)})" if name else f"#{slot + 1}: {text}"
+        lines.append(clip(line, REPLY_BUDGET))
+    for chunk in _chunks(lines):
+        await ctx.reply(chunk)
+
+
+def _chunks(lines):
+    """Lines packed into messages that each stay under the server's message cap."""
+    chunk = []
+    for line in lines:
+        if chunk and len("\n".join([*chunk, line])) > REPLY_BUDGET:
+            yield "\n".join(chunk)
+            chunk = []
+        chunk.append(line)
+    yield "\n".join(chunk)
 
 
 @bot.command(name="board", help="List, `add <text>`, `done <n>`, `move <n> <slot>`, or `clear` (asks to confirm)", usage="[add|done|move|clear|list ...]")

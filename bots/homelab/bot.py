@@ -162,6 +162,8 @@ async def on_canvas_objects_removed(frame):
 
 @bot.event
 async def on_canvas_cleared(frame):
+    if canvas is None or frame.get("channel_id") != canvas.channel_id:
+        return
     await bot.store.run(forget_tiles)
 
 
