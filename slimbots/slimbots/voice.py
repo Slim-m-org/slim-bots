@@ -8,7 +8,7 @@ import importlib
 import logging
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-from .http import ApiError, is_forbidden, is_token_revoked
+from .http import ApiError, is_forbidden, is_token_revoked, is_unexplained_refusal
 from .lifecycle import log_failure
 
 if TYPE_CHECKING:
@@ -43,8 +43,10 @@ def load_rtc() -> Any:
 
 
 def _heartbeat_refused_for_good(err: ApiError) -> bool:
-    """A 501 (no voice configured) or a 4xx other than 429 will not change by retrying; a network error, 5xx or 429 might."""
+    """A 501 (no voice configured) or a 4xx other than 429 will not change by retrying; a network error, 5xx, 429 or a proxy's bodiless 4xx might."""
     status = err.status
+    if is_unexplained_refusal(err):
+        return False
     return status == 501 or (status is not None and 400 <= status < 500 and status != 429)
 
 
@@ -343,13 +345,31 @@ async def publish_microphone(
     return source
 
 
+ROSTER_REFUSALS_BEFORE_GIVING_UP = 3
+
+
+async def _roster_or_none(bot: "Bot", channel_id: str) -> tuple[list[dict[str, Any]] | None, bool]:
+    """The roster's participants, or None when the read failed; the flag is true when the server itself refused it (403/404 with its error body)."""
+    assert bot.client is not None
+    try:
+        roster = await bot.client.voice_roster(channel_id)
+    except ApiError as err:
+        if is_token_revoked(err):
+            raise
+        log.warning("voice roster for %s failed, polling again: %s", channel_id, err)
+        refused = err.status in (403, 404) and not is_unexplained_refusal(err)
+        return None, refused
+    return roster.get("participants", []), False
+
+
 async def watch_empty(
     bot: "Bot", channel_id: str, wake: asyncio.Event, on_empty: Callable[[], Awaitable[Any]], *, poll: float = 20.0,
     is_done: Callable[[], bool] = lambda: False, on_tick: Callable[[], Awaitable[Any]] | None = None,
 ) -> None:
-    """Checks the voice roster every `poll` seconds, or at once when `wake` is set, and awaits `on_empty` when only the bot is left.
-    Returns when `is_done()` turns true; `on_tick` runs each cycle before the roster check."""
+    """Polls the roster every `poll` seconds, or at once on `wake`, and awaits `on_empty` when only the bot is left; `on_tick` runs first each cycle.
+    A failed read or tick is logged and polled again; three 403/404s in a row carrying the server's error end the session via `on_empty`."""
     assert bot.client is not None, "watch_empty needs an open Bot connection"
+    refusals = 0
     while True:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(wake.wait(), timeout=poll)
@@ -357,8 +377,19 @@ async def watch_empty(
         if is_done():
             return
         if on_tick is not None:
-            await on_tick()
-        roster = await bot.client.voice_roster(channel_id)
-        if not [p for p in roster.get("participants", []) if p.get("user_id") != bot.me_id]:
+            try:
+                await on_tick()
+            except Exception as err:
+                if is_token_revoked(err):
+                    raise
+                log_failure(log, err, "voice watch tick for %s failed", channel_id)
+        participants, refused = await _roster_or_none(bot, channel_id)
+        refusals = refusals + 1 if refused else 0
+        if participants is None:
+            if refusals >= ROSTER_REFUSALS_BEFORE_GIVING_UP:
+                await on_empty()
+                return
+            continue
+        if not [p for p in participants if p.get("user_id") != bot.me_id]:
             await on_empty()
             return

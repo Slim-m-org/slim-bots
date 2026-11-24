@@ -195,3 +195,44 @@ async def test_only_unprocessed_still_raises_a_429_that_names_no_wait():
     with pytest.raises(ApiError) as caught:
         await client.call("POST", "/x", only_unprocessed=True, sleep=sleep)
     assert caught.value.status == 429 and delays == []
+
+
+@pytest.mark.parametrize("status", [501, 507])
+async def test_a_501_or_507_is_a_final_answer_and_is_never_retried(status):
+    client = _client(lambda request: httpx.Response(status, json={"error": "not configured"}))
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("GET", "/x", sleep=sleep)
+    assert caught.value.status == status
+    assert delays == []
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+async def test_a_transient_5xx_is_still_retried(status):
+    replies = iter([status, 200])
+    client = _client(lambda request: httpx.Response(next(replies), json={"ok": True}))
+    delays, sleep = _recorder()
+    assert await client.call("GET", "/x", sleep=sleep) == {"ok": True}
+    assert delays == [0.5]
+
+
+async def test_a_proxys_bodiless_404_is_retried_because_it_is_not_the_servers_answer():
+    replies = iter([(404, "404 page not found"), (404, "404 page not found"), (200, None)])
+
+    def handler(request):
+        status, text = next(replies)
+        return httpx.Response(status, text=text) if text else httpx.Response(status, json={"ok": True})
+
+    client = _client(handler)
+    delays, sleep = _recorder()
+    assert await client.call("GET", "/x", sleep=sleep) == {"ok": True}
+    assert delays == [0.5, 1.0]
+
+
+async def test_a_bodiless_404_on_a_keyless_write_is_not_retried():
+    client = _client(lambda request: httpx.Response(404, text="404 page not found"))
+    delays, sleep = _recorder()
+    with pytest.raises(ApiError) as caught:
+        await client.call("POST", "/x", {}, only_unprocessed=True, sleep=sleep)
+    assert caught.value.status == 404
+    assert delays == []

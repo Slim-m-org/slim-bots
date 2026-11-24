@@ -60,6 +60,26 @@ async def test_a_heartbeat_the_server_refuses_ends_only_that_session(monkeypatch
     assert bot._fatal_error is None
 
 
+async def test_a_heartbeat_answered_by_a_proxys_bodiless_404_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(voice_module, "HEARTBEAT_INTERVAL_SECONDS", 0.001)
+    bot, client, (room,) = make_bot(monkeypatch)
+    beats: list[int] = []
+    recovered = asyncio.Event()
+
+    def restarting() -> None:
+        beats.append(1)
+        if len(beats) <= 2:
+            raise ApiError(404, "404 page not found")
+        if len(beats) == 4:
+            recovered.set()
+
+    client.respond("POST", "/channels/c1/voice/heartbeat", restarting)
+    session = await bot.voice.join("c1")
+    await wait_for(recovered)
+    assert not session.lost and not room.disconnected and bot._fatal_error is None
+    await session.leave()
+
+
 async def test_a_heartbeat_that_fails_for_a_while_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(voice_module, "HEARTBEAT_INTERVAL_SECONDS", 0.001)
     bot, client, (room,) = make_bot(monkeypatch)
