@@ -73,7 +73,7 @@ class FakeAsyncClient(AsyncClient):
         self._record_ephemeral(method, path, body)
         if self._record_component_call(method, path, body):
             return self._component_response(method, body)
-        key = (method, path)
+        key = self._response_key(method, path, params)
         if key in self._responses:
             return self._queued(self._responses[key])
         if seq is not None:
@@ -82,6 +82,14 @@ class FakeAsyncClient(AsyncClient):
         if found:
             return default
         raise KeyError(f"FakeAsyncClient: no response queued for {method} {path} - call .respond() first")
+
+    def _response_key(self, method: str, path: str, params: Any) -> tuple[str, str]:
+        """A stub for `path?query` (keys in sorted order) wins over one for the bare `path`."""
+        if params:
+            query = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if v is not None)
+            if (method, f"{path}?{query}") in self._responses:
+                return method, f"{path}?{query}"
+        return method, path
 
     def _record_send(self, method: str, path: str, body: Any) -> int | None:
         """Numbers and records a message send; None for any other call."""

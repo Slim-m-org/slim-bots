@@ -98,6 +98,9 @@ The snapshot is taken after the gateway is open, so a change made while the bot 
   `space.refresh_roles()` needs the bot's own token to hold `MANAGE_ROLES` (the same gate `GET /roles` has).
   Without it, every `has_permission` check answers `False`, deny by default, same as an unresolvable role-gated command anywhere else.
   Losing it empties `space.roles`, so no cached bit comes from a table the bot can no longer read; a bot that checks permissions outside a command reads them with `space.refresh_permissions(member)` while `space.roles_readable` is False.
+- `await space.permissions_in(member_id, channel_id)` reads a member's effective bits in one channel from the bot-only `GET /members/{id}/permissions?channel_id=`, overwrites and timeouts applied, and zero unless both the member and the bot can view the channel.
+  `await ctx.author_can(Permissions.X, channel_id)` is the check a command makes before acting somewhere for its author, such as drawing on a call's canvas or speaking into it; it defaults to the command's own channel and answers False when the bits cannot be read.
+  It needs a slim-m server with the channel-scoped read (the first release after 0.117.0); an older server ignores `channel_id`, so the check falls back to deployment-wide bits and logs that once.
 - `Member.is_owner` marks the Space owner, who holds every permission whatever their roles, as the server rules.
 - `member.outranks(other)` answers the server's role ladder: True when `other`'s highest role sits strictly below this member's, the Space owner above everyone, and `None` when either rank is unknown.
   `member.top_role_position` and `member.is_owner` come from the member payload; an older server without them falls back to `Role.position` from the role table.

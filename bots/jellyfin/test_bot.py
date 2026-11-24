@@ -301,11 +301,20 @@ def setup_with_voice(*, can_publish=True, member_channels=None, voice_channels=N
     if member_channels is None:
         member_channels = {"u1": "c1"}
     jellyfin.bot.voice = FakeVoice(can_publish=can_publish, member_channels=member_channels, join_error=join_error)
+    for user_id in (f"u{n}" for n in range(1, 10)):
+        for channel_id in ("c1", "v1", "v2", "v3"):
+            grant_in(client, user_id, channel_id, Permissions.VIEW_CHANNEL | Permissions.CONNECT | Permissions.SPEAK)
     for channel in voice_channels or []:
         jellyfin.bot.space.channels[channel.id] = channel
     session_registry.clear()
     picker.CHOOSER._picks.clear()
     return client
+
+
+def grant_in(client, user_id, channel_id, bits):
+    """What the server answers for `user_id`'s bits in `channel_id`."""
+    body = {"user_id": user_id, "permissions": bits, "channel_id": channel_id}
+    client.respond("GET", f"/members/{user_id}/permissions?channel_id={channel_id}", body)
 
 
 def setup_with_manager():

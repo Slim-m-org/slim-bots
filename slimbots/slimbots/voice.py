@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from .http import ApiError, is_forbidden, is_token_revoked, is_unexplained_refusal
 from .lifecycle import log_failure
+from .permissions import Permissions
 
 if TYPE_CHECKING:
     from .bot import Bot
@@ -286,6 +287,13 @@ class Voice:
                 await asyncio.gather(*(s.leave() for s in sessions), return_exceptions=True)
         except TimeoutError:
             log.warning("gave up leaving %d voice session(s) after %.0fs", len(self._sessions), timeout)
+
+
+async def speak_refusal(ctx: Any, channel_id: str, *, label: str) -> str | None:
+    """The reply refusing to speak into `channel_id` for `ctx`'s author, or None when they hold SPEAK there themselves."""
+    if await ctx.author_can(Permissions.SPEAK, channel_id):
+        return None
+    return f"you cannot speak in {label}, so I will not speak there for you - that needs Speak."
 
 
 async def join_to_speak(voice: Any, channel_id: str, *, label: str, to: str) -> Any:

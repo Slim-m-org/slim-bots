@@ -3,7 +3,7 @@
 import asyncio
 
 from slimbots.limits import require_len
-from slimbots.voice import VoiceError, join_to_speak, start_or_leave
+from slimbots.voice import VoiceError, join_to_speak, speak_refusal, start_or_leave
 
 import music_core
 from player import MusicSession, PlayerError
@@ -65,6 +65,10 @@ async def run_play(ctx, query):
     voice_channel_id = await ctx.bot.voice.find_member(ctx.author.id)
     if voice_channel_id is None:
         await ctx.reply("join a voice channel first, then run `play` again.")
+        return
+    refusal = await speak_refusal(ctx, voice_channel_id, label=ctx.bot.space.channel_label(voice_channel_id))
+    if refusal is not None:
+        await ctx.reply(refusal)
         return
     track = await _resolve_track(ctx, query)
     if track is None:

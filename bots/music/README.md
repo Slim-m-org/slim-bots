@@ -35,6 +35,8 @@ Set `SLIMM_PREFIX=!` if it runs alone, or address it as `@<its username> play ..
 - `~np` - the current track, position, duration and how many are queued.
 
 Everything acts on the call the invoker is in right now, not on the channel the message was typed in.
+`~play` plays only for someone who may speak in that call themselves (`SPEAK` there); a listen-only member is told so, and nothing is played or queued.
+This needs slim-m with the channel-scoped member permissions read; an older server only checks deployment-wide rights.
 Anyone in that call can control it; someone outside it gets "nothing is playing in your call".
 The bot leaves when the queue runs out, when someone runs `~stop`, or when it is the only participant left.
 

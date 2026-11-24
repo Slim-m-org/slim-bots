@@ -7,7 +7,8 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .http import ApiError
+from .http import ApiError, is_token_revoked
+from .permissions import Permissions
 
 if TYPE_CHECKING:
     from .bot import Bot
@@ -118,6 +119,23 @@ class Context:
             if public_fallback and _predates_ephemeral(err):
                 return await self.reply(content, embed=embed)
             raise
+
+    async def author_permissions(self, channel_id: str | None = None) -> int:
+        """The author's effective bits in `channel_id` (default: this command's channel), zero when they cannot be read."""
+        target = channel_id or self.channel_id
+        if target is None or self.bot.space is None:
+            return Permissions.NONE
+        try:
+            return await self.bot.space.permissions_in(self.author.id, target)
+        except (ApiError, KeyError, TypeError, ValueError) as err:
+            if is_token_revoked(err):
+                raise
+            log.warning("could not read %s's permissions in %s: %s", self.author.id, target, err)
+            return Permissions.NONE
+
+    async def author_can(self, permission: int, channel_id: str | None = None) -> bool:
+        """Whether the author holds `permission` in `channel_id` (default: this command's channel); False when it cannot be checked."""
+        return Permissions.contains(await self.author_permissions(channel_id), permission)
 
     def typing(self) -> _Typing:
         """`async with ctx.typing():` shows a typing indicator for the block's whole duration, not just one refresh."""

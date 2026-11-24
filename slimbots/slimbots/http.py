@@ -242,9 +242,14 @@ class AsyncClient:
             params["after"] = after
         return await self.call("GET", "/members", params=params)
 
-    async def member_permissions(self, user_id: str) -> Any:
-        """A member's effective permission bits; a bot may read these without MANAGE_ROLES."""
-        return await self.call("GET", f"/members/{_seg(user_id)}/permissions")
+    async def member_permissions(self, user_id: str, *, channel_id: str | None = None) -> Any:
+        """A member's effective permission bits, deployment-wide or in `channel_id`; a bot may read these without MANAGE_ROLES."""
+        params = {"channel_id": channel_id} if channel_id is not None else None
+        return await self.call("GET", f"/members/{_seg(user_id)}/permissions", params=params)
+
+    async def channel_permissions(self, channel_id: str) -> Any:
+        """The bot's own effective permission bits in `channel_id`, all zero when it cannot view it."""
+        return await self.call("GET", f"/channels/{_seg(channel_id)}/permissions")
 
     async def list_channels(self) -> Any:
         return await self.call("GET", "/channels")
