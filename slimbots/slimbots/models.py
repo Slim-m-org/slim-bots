@@ -19,6 +19,7 @@ class Member:
         self.display_name: str = data["display_name"]
         self.is_bot = bool(data.get("is_bot"))
         self.is_webhook = bool(data.get("is_webhook"))
+        self.is_owner = bool(data.get("is_owner"))
         self.role_ids: list[str] = list(data.get("role_ids") or [])
         self.roles: list[str] = list(data.get("roles") or [])
         self.timed_out_until = data.get("timed_out_until")

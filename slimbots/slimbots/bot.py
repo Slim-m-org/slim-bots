@@ -579,22 +579,47 @@ class Bot:
             return
         if kind == "role.changed":
             await guard_dispatch(self._reload_roles)
-        elif kind == "member.role_changed" and frame.get("user_id") in self.space.members:
+            return
+        if kind != "member.role_changed":
+            return
+        if self.me_id is not None and frame.get("user_id") == self.me_id:
+            self.permissions_readable = None
+            await guard_dispatch(self._reload_roles)
+        if frame.get("user_id") in self.space.members:
             await guard_dispatch(self.space.fetch_member, frame["user_id"])
 
     async def _track_members(self, kind: str, frame: dict[str, Any]) -> None:
-        """Drops a removed member from `space.members` and refetches a restored or renamed one, so lookups are never stale."""
-        user_id = frame.get("user_id")
-        if self.space is None or not user_id:
+        """Keeps `space.members` current from removal, restore, profile, timeout, join gate and ownership frames."""
+        if self.space is None:
             return
+        user_id = frame.get("user_id")
+        if kind == "owner.changed":
+            await self._refetch_owners(user_id)
+            return
+        if not user_id:
+            return
+        cached = self.space.members.get(user_id)
         if kind == "member.removed":
             self.space.members.pop(user_id, None)
-        elif kind == "member.restored" or (kind == "profile.changed" and user_id in self.space.members):
+        elif kind == "member.timeout" and cached is not None:
+            until = frame.get("until")
+            cached.timed_out_until = until if isinstance(until, int) else None
+        elif kind == "member.restored" or (kind in ("profile.changed", "join_gate.changed") and cached is not None):
+            await guard_dispatch(self.space.fetch_member, user_id)
+
+    async def _refetch_owners(self, heir: str | None) -> None:
+        """Refetches the cached owner and the heir, so the owner's every-bit grant moves with ownership."""
+        assert self.space is not None
+        stale = {m.id for m in self.space.members.values() if m.is_owner}
+        for user_id in sorted(stale | ({heir} if heir else set())):
             await guard_dispatch(self.space.fetch_member, user_id)
 
     async def _reload_roles(self) -> None:
+        """Reloads the role table and recomputes every cached member, also when the table was just lost."""
         assert self.space is not None
-        if await self._load_roles():
+        try:
+            await self._load_roles()
+        finally:
             self.space.reapply_roles()
 
     async def _load_roles(self) -> bool:
@@ -851,16 +876,17 @@ class Bot:
         me = await self.client.me()
         self.me_id = me["id"]
         self.username = me.get("username")
-        await self.space.refresh_channels()
-        self.permissions_readable = None
-        await self._load_roles()
-        await self.space.refresh_members()
         await self._adopt_assigned_prefix(me)
         await self._register_commands()
         if self._ui:
             self._ui_registered = await register_ui(self.client, self._ui)
-        await self._dispatch_event("on_connect")
+        # Subscribed before the snapshot, so a change landing while the bot connects arrives as a queued frame.
         async with await Gateway.open(self.client) as gateway:
+            await self.space.refresh_channels()
+            self.permissions_readable = None
+            await self._load_roles()
+            await self.space.refresh_members()
+            await self._dispatch_event("on_connect")
             self._gateway = gateway
             self.voice.forget_members()
             head = gateway.hello.get("moderation_seq")

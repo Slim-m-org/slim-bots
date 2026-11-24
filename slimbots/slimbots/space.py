@@ -6,9 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from .http import ApiError, is_forbidden, is_not_found
 from .models import Channel, Member, Role
+from .permissions import Permissions
 
 if TYPE_CHECKING:
     from .http import AsyncClient
+
+ALL_PERMISSIONS = sum(bit for name, bit in vars(Permissions).items() if name.isupper() and isinstance(bit, int))
 
 
 class Space:
@@ -21,23 +24,31 @@ class Space:
         self.roles: dict[str, Role] = {}
         self.roles_readable: bool | None = None
 
-    def _base_permissions(self, role_ids: list[str]) -> int:
+    def _base_permissions(self, role_ids: list[str], *, is_owner: bool = False) -> int:
+        """The member's bits from the role table; the Space owner holds every bit whatever their roles, as the server rules."""
+        if is_owner:
+            return ALL_PERMISSIONS
         bits = 0
         for role in self.roles.values():
             if role.is_everyone or role.id in role_ids:
                 bits |= role.permissions
         return bits
 
+    def _member_permissions(self, member: Member, role_ids: list[str]) -> int:
+        return self._base_permissions(role_ids, is_owner=member.is_owner)
+
     def _make_member(self, data: dict[str, Any]) -> Member:
-        return Member(data, base_permissions=self._base_permissions(data.get("role_ids") or []))
+        role_ids = data.get("role_ids") or []
+        return Member(data, base_permissions=self._base_permissions(role_ids, is_owner=bool(data.get("is_owner"))))
 
     async def refresh_roles(self) -> dict[str, Role]:
-        """Reloads every role; needs the bot's own token to hold MANAGE_ROLES, else `roles_readable` goes False and the 403 is raised."""
+        """Reloads every role; needs MANAGE_ROLES, else the table is emptied, `roles_readable` goes False and the 403 is raised."""
         try:
             roles = await self._client.list_roles()
         except ApiError as err:
             if is_forbidden(err):
                 self.roles_readable = False
+                self.roles = {}
             raise
         self.roles_readable = True
         self.roles = {r["id"]: Role(r) for r in roles}
@@ -94,7 +105,7 @@ class Space:
     def reapply_roles(self) -> None:
         """Recomputes every cached member's permissions from the current `.roles`, after a role's bits changed."""
         for member in self.members.values():
-            member._apply_roles(member.role_ids, self._base_permissions(member.role_ids))
+            member._apply_roles(member.role_ids, self._member_permissions(member, member.role_ids))
 
     async def find_member(self, user_id: str) -> Member | None:
         """The cached member for `user_id`, else one fetched directly; None only when the server answers 404 for that user."""
@@ -163,7 +174,7 @@ class Space:
         await self._client.assign_role(member.id, role_id)
         if role_id not in member.role_ids:
             new_role_ids = member.role_ids + [role_id]
-            member._apply_roles(new_role_ids, self._base_permissions(new_role_ids))
+            member._apply_roles(new_role_ids, self._member_permissions(member, new_role_ids))
         return member
 
     async def revoke_role(self, member: Member, role: Role | str) -> Member:
@@ -171,7 +182,7 @@ class Space:
         role_id = role.id if isinstance(role, Role) else role
         await self._client.unassign_role(member.id, role_id)
         remaining = [r for r in member.role_ids if r != role_id]
-        member._apply_roles(remaining, self._base_permissions(remaining))
+        member._apply_roles(remaining, self._member_permissions(member, remaining))
         return member
 
     async def resolve_member(self, storage_key: str) -> Member:
