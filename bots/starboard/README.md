@@ -5,7 +5,7 @@ Once a week it posts a digest of the top highlights.
 
 Needs `slim-m>=0.13.0` (`slimbots.text`, `Space.channel_label`; `AsyncClient.get_message` and `Channel.restricted` arrived in 0.9.0), so do not deploy it before 0.13.0 is on PyPI.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
-It uses `on_raw_message`, `on_reactions_changed`, `on_message_edited` and `on_message_deleted`, and keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `starboard.db`).
+It uses `on_raw_message`, `on_reactions_changed`, `on_message_edited`, `on_message_deleted` and `on_ready`, and keeps its state in its own sqlite file (`SLIMM_DB_PATH`, default `starboard.db`).
 
 ```bash
 pip install -r requirements.txt
@@ -29,6 +29,7 @@ The bot also refuses one case itself: it never mirrors a channel that may be res
 That check reads only the `restricted` flag on each channel, which says whether `@everyone` can view it.
 It is coarse on purpose: two restricted channels always pass, even when their real audiences differ, and a channel whose flag the server did not send counts as possibly restricted.
 Per-role and per-member overwrites are not compared, so `SLIMM_CHANNELS` stays the boundary you own.
+The check runs on every write, not only the first post: once a mirrored channel turns private, its highlights stop following edits and counts, and the digest leaves them out.
 The highlights channel itself is never a source, even if it is listed.
 
 ## Settings
@@ -53,6 +54,9 @@ The highlights channel itself is never a source, even if it is listed.
   A highlight is not removed when the count later drops below the threshold.
 - Editing the original updates the quote.
   Deleting the original deletes the highlight and forgets it.
+  The deleted text is dropped from the bot's store right away; if deleting the highlight fails, the hourly pass tries again until it is gone.
+- Edits and deletes made while the bot was disconnected are not replayed, so on every (re)connect it reads back the originals of up to 100 highlights starred in the last `STARBOARD_SEEN_RETENTION_DAYS` and applies what changed.
+  An original the server no longer returns (deleted, or no longer visible to the bot) has its highlight deleted.
 - The digest lists the top highlights starred since the last digest, by count.
 - A digest that cannot be sent (a deleted channel, a lost permission) is logged and tried again on the next hourly pass; highlighting and pruning carry on, and only a revoked token stops the bot.
   The first run only starts the clock, and a week with no highlights posts nothing.
