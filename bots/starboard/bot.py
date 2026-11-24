@@ -57,6 +57,7 @@ LINK_TEMPLATE = bot.setting("STARBOARD_LINK_TEMPLATE", None)
 SEEN_RETENTION_DAYS = bot.setting("STARBOARD_SEEN_RETENTION_DAYS", 14, type=int)
 
 MAX_QUOTE_LEN = 1500
+_DELETE_SEEN = "DELETE FROM seen WHERE message_id = ?"
 DIGEST_SNIPPET_LEN = 80
 MAINTENANCE_SECONDS = 3600
 RECHECK_LIMIT = 40
@@ -181,19 +182,19 @@ def set_count(conn, message_id, count):
 
 def forget_seen(conn, message_id):
     """Leaves a starred row alone: one waiting for its highlight's delete must outlive a repeated delete event."""
-    conn.execute("DELETE FROM seen WHERE message_id = ?", (message_id,))
+    conn.execute(_DELETE_SEEN, (message_id,))
     conn.commit()
 
 
 def mark_deleted(conn, message_id):
     """Drops the deleted text now and keeps only what the highlight's delete still needs, so a failed delete can be retried."""
-    conn.execute("DELETE FROM seen WHERE message_id = ?", (message_id,))
+    conn.execute(_DELETE_SEEN, (message_id,))
     conn.execute("UPDATE starred SET pending_delete = 1, content = '', author_id = '' WHERE message_id = ?", (message_id,))
     conn.commit()
 
 
 def forget_message(conn, message_id):
-    conn.execute("DELETE FROM seen WHERE message_id = ?", (message_id,))
+    conn.execute(_DELETE_SEEN, (message_id,))
     conn.execute("DELETE FROM starred WHERE message_id = ?", (message_id,))
     conn.commit()
 

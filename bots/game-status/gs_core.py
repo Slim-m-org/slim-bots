@@ -126,7 +126,7 @@ def txn_list_boards(conn):
 
 def whole_number(value):
     """`value` when it is a plain non-negative int, else None: a game server can answer a count with any JSON."""
-    return value if type(value) is int and 0 <= value < 10**9 else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value < 10**9 else None
 
 
 def server_text(value):

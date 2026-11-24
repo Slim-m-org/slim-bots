@@ -271,7 +271,18 @@ async def board_cmd(ctx, sub: str = None, rest: str = None):
     if channel is None or not invoker_can_view(ctx, channel):
         await ctx.reply("the board is on a channel you cannot see.")
         return
-    sub = (sub or "list").lower()
+    await _run_board_subcommand(ctx, channel, (sub or "list").lower(), rest)
+
+
+async def _move_args(ctx, rest):
+    parts = (rest or "").split()
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        await move_item(ctx, int(parts[0]), int(parts[1]))
+    else:
+        await ctx.reply(help_text())
+
+
+async def _run_board_subcommand(ctx, channel, sub, rest):
     if sub == "list":
         await list_items(ctx, channel)
     elif sub == "add" and rest:
@@ -279,11 +290,7 @@ async def board_cmd(ctx, sub: str = None, rest: str = None):
     elif sub == "done" and rest and rest.isdigit():
         await done_item(ctx, int(rest))
     elif sub == "move":
-        parts = (rest or "").split()
-        if len(parts) == 2 and all(p.isdigit() for p in parts):
-            await move_item(ctx, int(parts[0]), int(parts[1]))
-        else:
-            await ctx.reply(help_text())
+        await _move_args(ctx, rest)
     elif sub == "clear":
         await clear_board(ctx)
     else:

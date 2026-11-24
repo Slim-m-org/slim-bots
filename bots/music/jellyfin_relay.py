@@ -42,7 +42,7 @@ class JellyfinRelay:
 
     async def __aexit__(self, *_exc):
         self._server.close()
-        for task in list(self._handlers):
+        for task in self._handlers:
             task.cancel()
         await asyncio.gather(*self._handlers, return_exceptions=True)
         with contextlib.suppress(Exception):

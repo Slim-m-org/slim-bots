@@ -102,6 +102,11 @@ def test_player_counts_that_are_not_whole_numbers_are_left_out():
     assert core.players_text(queries.Status(up=True, players=3, max_players=10)) == "3/10"
 
 
+def test_whole_number_takes_plain_ints_only():
+    assert [core.whole_number(v) for v in (0, 7, 10**9 - 1)] == [0, 7, 10**9 - 1]
+    assert [core.whole_number(v) for v in (True, False, -1, 10**9, 2.0, "3", None)] == [None] * 7
+
+
 def test_embed_has_a_field_per_server_and_a_colour_for_mixed_state():
     setup()
     wire = core.status_embed(rows_for(), STAMP).to_wire()

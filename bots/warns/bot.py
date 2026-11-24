@@ -200,7 +200,7 @@ async def refusal_for(invoker, target, rule):
     name = escape_mentions(target.display_name)
     if not await _rank_is_known(target):
         return f"{does}, but I cannot read {name}'s permissions to check you may."
-    if not _held(target) <= _held(invoker):
+    if not _held(target).issubset(_held(invoker)):
         return f"{does}, and {name} holds permissions you do not; ask someone who outranks them."
     return None
 

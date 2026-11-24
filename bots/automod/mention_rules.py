@@ -6,7 +6,7 @@ import re
 _FENCE_SPACE = frozenset("\t\n\x0b\x0c\r \xa0\u1680\u2028\u2029\u202f\u205f\u3000\ufeff" + "".join(map(chr, range(0x2000, 0x200B))))
 _FENCE_OPEN = re.compile(r"```[A-Za-z0-9_+#-]*")
 # An `@` that opens a user mention, or a role mention whose bracketed name is captured.
-_MENTION = re.compile(r"@(?=[A-Za-z0-9_]|(\[[^\]\n]*\]))")
+_MENTION = re.compile(r"@(?=\w|(\[[^\]\n]*\]))", re.ASCII)
 
 
 def _only_fence_space(rest):
