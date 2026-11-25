@@ -309,6 +309,43 @@ def test_a_url_that_carries_credentials_is_refused():
     assert "must not embed credentials" in problem and "hunter2" not in problem
 
 
+def resolve_with(channel):
+    homelab.CANVAS_CHANNEL = "c1"
+    rig = Rig()
+    rig.client.respond("GET", "/channels", [{"id": "c1", "name": "design", "category_id": None, "created_at": 0, **channel}])
+    asyncio.run(homelab.bot.space.refresh_channels())
+    try:
+        return homelab.resolve_channel()
+    finally:
+        homelab.CANVAS_CHANNEL = None
+
+
+def refusal_for(channel):
+    try:
+        resolve_with(channel)
+    except RuntimeError as err:
+        return str(err)
+    raise AssertionError(f"{channel} was accepted")
+
+
+def test_a_canvas_channel_and_a_voice_channel_with_the_canvas_on_are_accepted():
+    assert resolve_with({"kind": "canvas", "canvas_enabled": True, "voice_enabled": False}).id == "c1"
+    assert resolve_with({"kind": "voice", "canvas_enabled": True, "voice_enabled": True}).id == "c1"
+
+
+def test_a_voice_channel_from_an_older_server_is_accepted_as_before():
+    assert resolve_with({"kind": "voice"}).id == "c1"
+
+
+def test_a_voice_channel_with_the_canvas_off_is_refused_naming_the_setting():
+    assert refusal_for({"kind": "voice", "canvas_enabled": False, "voice_enabled": True}) == "The canvas is off in design; turn it on in that channel's settings."
+
+
+def test_a_thread_and_an_unknown_kind_are_refused():
+    assert "voice channel" in refusal_for({"kind": "voice", "parent_message_id": "m1"})
+    assert "voice channel" in refusal_for({"kind": "stage"})
+
+
 def test_a_non_voice_channel_is_refused_at_connect():
     homelab.CANVAS_CHANNEL = "voice"
     rig = Rig()

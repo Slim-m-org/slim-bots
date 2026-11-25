@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bot-homelab: keeps Proxmox, Docker and Jellyfin status tiles up to date on a voice channel's canvas; see README.md."""
+"""bot-homelab: keeps Proxmox, Docker and Jellyfin status tiles up to date on a voice or canvas channel's canvas; see README.md."""
 
 import asyncio
 import functools
@@ -172,9 +172,11 @@ def resolve_channel():
     wanted = CANVAS_CHANNEL or bot.channel
     channel = bot.space.get_channel(wanted) if wanted else None
     if channel is None:
-        raise RuntimeError("set HOMELAB_CHANNEL to the voice channel whose canvas shows the tiles")
-    if channel.kind != "voice":
-        raise RuntimeError(f"{wanted!r} is a {channel.kind} channel - the canvas belongs to a voice channel")
+        raise RuntimeError("set HOMELAB_CHANNEL to the voice or canvas channel whose canvas shows the tiles")
+    if channel.kind not in ("voice", "canvas") or channel.is_thread:
+        raise RuntimeError(f"{wanted!r} is a {channel.kind} channel - the canvas belongs to a voice channel or a canvas channel")
+    if not channel.has_canvas:
+        raise RuntimeError(f"The canvas is off in {channel.name}; turn it on in that channel's settings.")
     return channel
 
 

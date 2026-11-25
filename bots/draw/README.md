@@ -5,7 +5,7 @@ A slim-m bot (directory `bots/draw`, command `!draw`) that draws on the Voice Ca
 `!draw trace <word>` is the older picture tracer: it finds an openly licensed picture and redraws a simplified version as stroke objects, crediting the source.
 Without a model configured, `!draw <word>` does the tracing.
 
-Needs `slim-m>=0.21.0` and Pillow (to read the canvas and downloaded pictures); the model call uses the official `anthropic` package.
+Needs `slim-m>=0.27.0` and Pillow (to read the canvas and downloaded pictures); the model call uses the official `anthropic` package.
 Built on the `slimbots` `Bot` framework - see `../../docs/framework.md`.
 It keeps the ids of the objects it placed in its own sqlite file (`SLIMM_DB_PATH`, default `draw.db`) so undo works after a restart.
 
@@ -18,6 +18,7 @@ python3 bot.py
 ```
 
 The bot acts where you are: it finds the voice call you are in and draws on that call's canvas, wherever you typed the command (a voice call's own chat works).
+When that channel's canvas is turned off it says so instead of drawing; someone who manages channels can turn it on in the channel's settings.
 It needs `VIEW_CHANNEL` and `USE_CANVAS` there, and says exactly which one is missing when it lacks one.
 It also draws only for someone who may draw on that canvas themselves: a member without `USE_CANVAS` in the call (a spectator, by role or by a channel setting) is told so, and `!draw clear` needs Manage Canvas in that call.
 These checks need slim-m with the channel-scoped member permissions read; an older server only checks deployment-wide rights.
