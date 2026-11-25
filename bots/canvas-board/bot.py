@@ -54,12 +54,14 @@ CANVAS_CHANNEL = bot.setting("CANVAS_CHANNEL")
 canvas = None  # set once the canvas channel is resolved, in on_connect
 
 
-def _validated_voice_channel(id_or_name, *, source):
+def _validated_canvas_channel(id_or_name, *, source):
     channel = bot.space.get_channel(id_or_name)
     if channel is None:
         raise RuntimeError(f"{source}={id_or_name!r} does not name a channel this bot can see")
-    if channel.kind != "voice":
-        raise RuntimeError(f"{source}={id_or_name!r} names a {channel.kind} channel - the canvas needs a voice channel")
+    if channel.kind not in ("voice", "canvas") or channel.is_thread:
+        raise RuntimeError(f"{source}={id_or_name!r} names a {channel.kind} channel - the canvas needs a voice channel or a canvas channel")
+    if not channel.has_canvas:
+        raise RuntimeError(f"The canvas is off in {channel.name}; turn it on in that channel's settings.")
     if bot.channels is not None and channel.id not in bot.channels:
         raise RuntimeError(f"{source}={id_or_name!r} must also be in SLIMM_CHANNELS so its canvas events reach this bot")
     return channel
@@ -68,11 +70,11 @@ def _validated_voice_channel(id_or_name, *, source):
 def resolve_canvas_channel():
     """CANVAS_CHANNEL is the normal path; an unset one falls back to the single-channel 0.3.0 behaviour."""
     if CANVAS_CHANNEL:
-        return _validated_voice_channel(CANVAS_CHANNEL, source="CANVAS_CHANNEL")
+        return _validated_canvas_channel(CANVAS_CHANNEL, source="CANVAS_CHANNEL")
     fallback = bot.channel
     if fallback is None:
         raise RuntimeError(
-            "set CANVAS_CHANNEL to the voice channel this board draws on - SLIMM_CHANNELS names more "
+            "set CANVAS_CHANNEL to the voice or canvas channel this board draws on - SLIMM_CHANNELS names more "
             "than one channel here, so there is no single one to fall back to"
         )
     print(
@@ -80,7 +82,7 @@ def resolve_canvas_channel():
         "set CANVAS_CHANNEL to take commands from a separate text channel instead",
         file=sys.stderr,
     )
-    return _validated_voice_channel(fallback, source="SLIMM_CHANNELS")
+    return _validated_canvas_channel(fallback, source="SLIMM_CHANNELS")
 
 
 async def name_of(author_id):

@@ -2,6 +2,7 @@
 
 from slimbots import ApiError, Permissions
 
+CANVAS_OFF = "The canvas is off in this channel; someone who manages channels can turn it on in its settings."
 NEEDED = (("View channels", Permissions.VIEW_CHANNEL), ("Use the canvas", Permissions.USE_CANVAS))
 
 
@@ -12,7 +13,14 @@ async def find_call(ctx):
     if channel_id is None:
         return f"join a voice channel first, then run `{bot.prefix}draw` again; I draw on the canvas of the call you are in."
     channel = bot.space.channels.get(channel_id)
+    if channel is not None and not channel.has_canvas:
+        return CANVAS_OFF
     return channel_id, channel.name if channel else "your call"
+
+
+def is_canvas_off(err):
+    """Whether `err` is the server's refusal of a closed board, which a toggle can race past the channel check."""
+    return isinstance(err, ApiError) and err.status == 403 and isinstance(err.body, dict) and err.body.get("code") == "canvas_off"
 
 
 async def missing_rights(bot, channel_id, name):

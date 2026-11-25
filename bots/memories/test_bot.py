@@ -251,6 +251,23 @@ def test_a_listed_id_is_an_explicit_choice_and_is_honoured():
     assert [c.id for c in memories.public_channels()] == ["c-gen", "c-priv"]
 
 
+def test_a_public_canvas_channels_chat_is_archived_too():
+    canvas_chat = {**msg(ms(2025, 11, 4), "an old message from a canvas channel"), "channel_id": "c-canvas"}
+    client = setup({"c-canvas": [canvas_chat]})
+    for flags in ({}, {"canvas_enabled": True, "voice_enabled": False}):
+        memories.bot.space.channels["c-canvas"] = Channel({"id": "c-canvas", "name": "designs", "kind": "canvas", "restricted": False, **flags})
+        assert "c-canvas" in [c.id for c in memories.public_channels()]
+    say("!onthisday")
+    assert "in #designs" in client.sent[-1]["content"]
+
+
+def test_a_restricted_canvas_channel_is_not_archived_and_an_unknown_kind_is_ignored():
+    setup({})
+    memories.bot.space.channels["c-private"] = Channel({"id": "c-private", "name": "secret", "kind": "canvas", "restricted": True})
+    memories.bot.space.channels["c-odd"] = Channel({"id": "c-odd", "name": "odd", "kind": "stage", "restricted": False})
+    assert [c.id for c in memories.public_channels()] == ["c-gen"]
+
+
 def test_startup_warns_about_a_listed_name_that_is_ambiguous_or_restricted():
     setup({})
     memories.bot.space.channels["c-dup"] = Channel({"id": "c-dup", "name": "unknown", "kind": "text"})

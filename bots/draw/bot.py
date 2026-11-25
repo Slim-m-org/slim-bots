@@ -239,6 +239,26 @@ async def refuse(ctx, log, outcome, text):
     await ctx.reply_ephemeral(text, public_fallback=True)
 
 
+def outcome_of(reason):
+    if reason == where.CANVAS_OFF:
+        return "canvas off"
+    return "no call" if "join a voice channel" in reason else "refused: missing rights"
+
+
+async def failed_unexpectedly(ctx, log, err):
+    log.failed(err)
+    with contextlib.suppress(Exception):
+        await ctx.reply_ephemeral(f"something went wrong drawing that ({type(err).__name__}); it is in the bot's log.", public_fallback=True)
+
+
+async def canvas_failed(ctx, log, err, text):
+    """A canvas call that failed after part of a drawing: a closed board gets the off reply, anything else `text`."""
+    if where.is_canvas_off(err):
+        await refuse(ctx, log, "canvas off", where.CANVAS_OFF)
+    else:
+        await refuse(ctx, log, f"canvas error: http {err.status}", text)
+
+
 async def guarded(ctx, cooldown, run, *, command, prompt, ack):
     """Resolves the invoker's call, applies the cooldown and one-at-a-time rule, acks publicly, runs `run(channel_id, name, log)`; every path logs one line."""
     log = runlog.RunLog(command, ctx.channel_id, prompt)
@@ -246,7 +266,7 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
     try:
         found = await where.resolve(ctx)
         if isinstance(found, str):
-            await refuse(ctx, log, "no call" if "join a voice channel" in found else "refused: missing rights", found)
+            await refuse(ctx, log, outcome_of(found), found)
             return
         channel_id, name = found
         log.channel_id = channel_id
@@ -264,10 +284,13 @@ async def guarded(ctx, cooldown, run, *, command, prompt, ack):
         async with ctx.typing():
             await run(channel_id, name, log)
         log.done("finished")
+    except ApiError as err:
+        if where.is_canvas_off(err):
+            await refuse(ctx, log, "canvas off", where.CANVAS_OFF)
+        else:
+            await failed_unexpectedly(ctx, log, err)
     except Exception as err:  # a handler's own exception is swallowed by the framework, so it is logged here
-        log.failed(err)
-        with contextlib.suppress(Exception):
-            await ctx.reply_ephemeral(f"something went wrong drawing that ({type(err).__name__}); it is in the bot's log.", public_fallback=True)
+        await failed_unexpectedly(ctx, log, err)
     finally:
         if owned is not None:
             busy.discard(owned)
@@ -428,7 +451,7 @@ async def _ai_draw(ctx, prompt, channel_id, name, log):
         with log.stage("place"):
             done = await place_all(canvas, drawing_id, drawn)
     except ApiError as err:
-        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
+        await canvas_failed(ctx, log, err, f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     skipped = f" ({len(problems)} parts of the plan were skipped)" if problems else ""
     credited = f" Reference: {defuse(sources.credit_line(source))}" if source else ""
@@ -467,7 +490,7 @@ async def _trace(ctx, query, channel_id, log):
         with log.stage("place"):
             done = await place_all(bot.canvas(channel_id), drawing_id, pieces_to_objects(slot, pieces, width, height))
     except ApiError as err:
-        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
+        await canvas_failed(ctx, log, err, f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     log.done(f"drew {done}")
     await ctx.reply(credit(candidate, defuse(query), done))
@@ -533,7 +556,10 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun, focus="
         await refuse(ctx, log, f"refused: {err}", f"{err}.")
         return
     except ApiError as err:
-        await refuse(ctx, log, f"upload failed: http {err.status}", f"I could not upload the picture (http {err.status}).")
+        if where.is_canvas_off(err):
+            await refuse(ctx, log, "canvas off", where.CANVAS_OFF)
+        else:
+            await refuse(ctx, log, f"upload failed: http {err.status}", f"I could not upload the picture (http {err.status}).")
         return
     if not objects:
         await refuse(ctx, log, "nothing to draw", "I could not find anything to draw in that picture.")
@@ -543,7 +569,7 @@ async def _picture_job(ctx, subject, channel_id, name, log, build, noun, focus="
         with log.stage("place"):
             done = await place_all(canvas, drawing_id, objects)
     except ApiError as err:
-        await refuse(ctx, log, f"canvas error: http {err.status}", f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
+        await canvas_failed(ctx, log, err, f"the canvas stopped me after part of it (http {err.status}); `{bot.prefix}draw undo` removes what is there.")
         return
     credit_text = f" from {defuse(sources.credit_line(candidate))}" if candidate else ""
     log.done(f"drew {done}")
@@ -619,7 +645,13 @@ async def draw_undo(ctx):
     if row is None:
         await ctx.reply_ephemeral(f"you have no drawing to undo in {found[1]}.", public_fallback=True)
         return
-    await remove_strokes(bot.canvas(found[0]), await bot.store.run(stroke_ids, row[0]))
+    try:
+        await remove_strokes(bot.canvas(found[0]), await bot.store.run(stroke_ids, row[0]))
+    except ApiError as err:
+        if not where.is_canvas_off(err):
+            raise
+        await ctx.reply_ephemeral(where.CANVAS_OFF, public_fallback=True)
+        return
     await bot.store.run(retire, row[0])
     await ctx.reply_ephemeral(f"removed your drawing of \"{defuse(row[1])}\".", public_fallback=True)
 
@@ -642,7 +674,10 @@ async def draw_clear(ctx):
     for drawing_id in drawings:
         try:
             await remove_strokes(canvas, await bot.store.run(stroke_ids, drawing_id))
-        except ApiError:
+        except ApiError as err:
+            if where.is_canvas_off(err):
+                await ctx.reply_ephemeral(where.CANVAS_OFF, public_fallback=True)
+                return
             failed += 1
             continue
         await bot.store.run(retire, drawing_id)

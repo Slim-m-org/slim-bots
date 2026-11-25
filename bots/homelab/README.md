@@ -1,6 +1,6 @@
 # homelab
 
-A slim-m bot (directory `bots/homelab`, command `!homelab`) that keeps a few status tiles on a voice channel's Voice Canvas: Proxmox nodes and guests, Docker containers, and what Jellyfin is playing.
+A slim-m bot (directory `bots/homelab`, command `!homelab`) that keeps a few status tiles on a voice or canvas channel's canvas: Proxmox nodes and guests, Docker containers, and what Jellyfin is playing.
 Each tile is one canvas note that is edited in place every interval, never placed again, so the canvas stays at three notes.
 
 Needs `slim-m>=0.21.0`.
@@ -18,6 +18,7 @@ HOMELAB_PROXMOX_TOKEN='user@pam!tokenid=secret' \
 python3 bot.py
 ```
 
+It also works on a canvas channel; a voice channel whose canvas is off is refused at start with a message naming the setting.
 The bot needs `VIEW_CHANNEL` and `USE_CANVAS` in that voice channel, and `SLIMM_CHANNELS` should include it so a removed tile is noticed at once.
 A source with no settings is simply not drawn; with none set the bot says what to set when you type `!homelab`.
 

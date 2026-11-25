@@ -15,7 +15,7 @@ python3 bot.py
 ```
 
 The bot needs `VIEW_CHANNEL` in the channels it should read.
-Only text channels the server reports as readable by everyone are used; a private channel is never read.
+Only text and canvas channels the server reports as readable by everyone are used; a private channel is never read.
 If your server does not say which channels are public, list them in `MEMORIES_CHANNELS`.
 A name there never unlocks a channel the server marks private, since names are not unique; list its id to include one on purpose.
 

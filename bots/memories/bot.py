@@ -21,6 +21,9 @@ RECAP_PAGES = bot.setting("MEMORIES_RECAP_PAGES", 150, type=int)
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
 
 
+CHAT_KINDS = ("text", "canvas")
+
+
 def listed(channel):
     """MEMORIES_CHANNELS names a channel by id outright, or by name only when the server does not call it restricted."""
     return channel.id in EXTRA_PUBLIC or (channel.name in EXTRA_PUBLIC and channel.restricted is not True)
@@ -28,16 +31,16 @@ def listed(channel):
 
 def public_channels():
     """Text channels everyone can read; a channel the server does not call public is skipped unless listed in MEMORIES_CHANNELS."""
-    return [c for c in bot.space.channels.values() if c.kind == "text" and (c.restricted is False or listed(c))]
+    return [c for c in bot.space.channels.values() if c.kind in CHAT_KINDS and (c.restricted is False or listed(c))]
 
 
 def channel_list_warnings():
     """A line per MEMORIES_CHANNELS name that matches several channels or a restricted one, which a name never unlocks."""
-    text_channels = [c for c in bot.space.channels.values() if c.kind == "text"]
-    ids = {c.id for c in text_channels}
+    chat_channels = [c for c in bot.space.channels.values() if c.kind in CHAT_KINDS]
+    ids = {c.id for c in chat_channels}
     warnings = []
     for entry in EXTRA_PUBLIC:
-        named = [c for c in text_channels if c.name == entry]
+        named = [c for c in chat_channels if c.name == entry]
         if entry in ids or not named:
             continue
         if len(named) > 1:

@@ -1,6 +1,6 @@
 # canvas-board
 
-A slim-m bot that keeps a todo board on a voice channel's Voice Canvas:
+A slim-m bot that keeps a todo board on a voice or canvas channel's canvas:
 `!board add <text>` places a sticky note, `!board done <n>` removes it,
 `!board move <n> <slot>` repositions it, `!board clear` (asks to confirm)
 wipes the whole board, and `!board` (or `!board list`) shows what is up
@@ -17,7 +17,7 @@ script only opens its own tables at `bot.data_path` (from `SLIMM_DB_PATH`),
 never importing `os` itself. `bot-ping` stays free of the library on
 purpose; see its own README.
 
-## Commands in a text channel, drawing on a voice channel
+## Commands in a text channel, drawing on a voice or canvas channel
 
 Since 0.3.1, `!board` commands can come from an ordinary text channel while
 the board itself lives on a separate voice channel's canvas - `CANVAS_CHANNEL`

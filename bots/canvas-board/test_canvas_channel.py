@@ -92,5 +92,36 @@ def test_a_bad_canvas_channel_is_fatal_at_connect_not_swallowed():
     assert isinstance(board.bot._fatal_error, RuntimeError) and "voice channel" in str(board.bot._fatal_error)
 
 
+def kinded(kind, **flags):
+    return Channel({"id": "c1", "name": "design", "kind": kind, **flags})
+
+
+def resolves(channel):
+    setup(channels=[channel], watched_channel_ids={"c1"}, canvas_channel_setting="c1")
+    return board.resolve_canvas_channel().id == "c1"
+
+
+def test_a_canvas_channel_is_accepted_with_and_without_a_call():
+    assert resolves(kinded("canvas", canvas_enabled=True, voice_enabled=False))
+    assert resolves(kinded("canvas", canvas_enabled=True, voice_enabled=True))
+
+
+def test_a_voice_channel_is_accepted_with_the_canvas_on_or_the_flags_absent():
+    assert resolves(kinded("voice", canvas_enabled=True, voice_enabled=True))
+    assert resolves(kinded("voice"))
+
+
+def test_a_voice_channel_with_the_canvas_off_is_refused_naming_the_setting():
+    setup(channels=[kinded("voice", canvas_enabled=False, voice_enabled=True)], watched_channel_ids={"c1"}, canvas_channel_setting="c1")
+    expect_runtime_error("The canvas is off in design; turn it on in that channel's settings.")
+
+
+def test_a_thread_and_an_unknown_kind_are_refused():
+    setup(channels=[kinded("voice", parent_message_id="m1")], watched_channel_ids={"c1"}, canvas_channel_setting="c1")
+    expect_runtime_error("voice channel")
+    setup(channels=[kinded("stage")], watched_channel_ids={"c1"}, canvas_channel_setting="c1")
+    expect_runtime_error("voice channel")
+
+
 if __name__ == "__main__":
     run_module_tests(globals())
