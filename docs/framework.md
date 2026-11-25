@@ -126,6 +126,11 @@ Global versus channel-scoped follows the same test as before: an event about a c
 
 ## The Canvas model
 
+A channel's kind says little about what it offers, so ask the `Channel` instead of comparing `kind`.
+`channel.has_canvas` is whether there is a board there now, and `channel.hosts_call` is whether the channel can host a call.
+They read the server's `canvas_enabled` and `voice_enabled` flags, and when a server sends neither (before canvas channels) they fall back to the older rule: voice and DM channels have a board, voice channels have a call, text has neither, and a thread (any channel with a `parent_message_id`) never has either.
+A canvas that is off answers 403 with `code: "canvas_off"`; a bot that races a toggle can match that code on `ApiError.body`.
+
 `Canvas(bot.client, channel_id)` wraps one channel's Voice Canvas: `await canvas.place(kind, x=, y=, w=, h=, props=)`, `move(object_id, x=, y=)`, `remove(object_ids)`, `clear(before_seq)`, `restore(target_op)`, `reorder(object_id, z_index)`, and `viewport(min_x=, min_y=, max_x=, max_y=)` for a bounded-rectangle read - `bot-canvas-board` is the worked example (a fixed-size sticky-note board).
 `Canvas` was never tied to "the channel a command came from" - `channel_id` is just whatever you pass it, so a bot can take commands in one channel and draw on a different one's canvas without anything special. `bot.canvas(channel_id)` is the convenience form of the same thing: `bot.canvas(channel_id)` is exactly `Canvas(bot.client, channel_id, bot=bot)`, wired for the live gateway signals (`send_cursor`/`send_stroke_preview`) too, without repeating `bot.client`/`bot=bot` at every call site.
 `await canvas.place_many([{kind, x, y, w, h, props?, id?}, ...])` places up to 200 objects in one `POST canvas/objects/batch` and returns their ids; it raises `BatchUnavailable` when the server has no such route (404 or 405) so a bot can fall back to `place`, and an ordinary `ApiError` (429 included) otherwise.
@@ -156,10 +161,10 @@ A leave that itself fails is logged, so the start error is the one the reply nam
 `watch_empty(bot, channel_id, wake, on_empty)` is the loop that stops a player when only the bot is left.
 They take the voice object or session as an argument, so `FakeVoice` and `FakeVoiceSession` work with them unchanged.
 
-`await bot.voice.find_member(user_id)` answers "which voice channel is this person actually in right now", never "which channel did their command come from" - a command typed in a text channel has no voice call of its own, so a voice-aware command needs this rather than joining `ctx.channel_id`.
+`await bot.voice.find_member(user_id)` answers "which call channel (a voice channel, or a canvas channel with its call on) is this person actually in right now", never "which channel did their command come from" - a command typed in a text channel has no voice call of its own, so a voice-aware command needs this rather than joining `ctx.channel_id`.
 It prefers live state: `voice.participant_joined`/`voice.participant_left` (decision 0032, `{channel_id, user_id}`) update an in-memory cache as they arrive, ungated by `channels=` since presence needs tracking across every voice channel the bot can see, not just the ones it watches for commands.
 The cache is dropped on every reconnect, because the frames a down socket missed are not replayed.
-A cache miss falls back to `GET .../voice/roster` on every voice channel the bot can see, fetched concurrently; a match populates the cache so a second lookup for the same person is free. These events only flow at all on a deployment with the LiveKit webhook configured (decision 0032's own caveat); the roster fallback is what keeps `find_member` correct regardless.
+A cache miss falls back to `GET .../voice/roster` on every channel that hosts a call the bot can see, fetched concurrently; a match populates the cache so a second lookup for the same person is free. These events only flow at all on a deployment with the LiveKit webhook configured (decision 0032's own caveat); the roster fallback is what keeps `find_member` correct regardless.
 A member is in at most one call; if roster data somehow shows otherwise (no timestamp travels with it to say which is newer), the last channel checked wins, arbitrarily - the live-event cache is what actually resolves a genuine order between two joins, since the frame that arrived last wins.
 
 ## Config, settings, channel scoping, and durable cursors - all owned by Bot
@@ -197,7 +202,7 @@ The root filesystem is read-only: keep the cursor and any store on `/data` or `/
 ## Where a bot listens, and how it is addressed
 
 `channels=`/`SLIMM_CHANNELS` scopes which channels a bot reads.
-A voice channel's chat is a separate channel with its own id, so a bot scoped to a text channel never sees it; `Bot(listen_voice_chats=True)` (or `SLIMM_LISTEN_VOICE_CHATS=1`) also accepts any voice channel's chat.
+A voice channel's chat is a separate channel with its own id, so a bot scoped to a text channel never sees it; `Bot(listen_voice_chats=True)` (or `SLIMM_LISTEN_VOICE_CHATS=1`) also accepts the chat of any channel that hosts a call (a voice channel, or a canvas channel with its call on).
 The bot still needs `VIEW_CHANNEL` there, and `SEND_MESSAGES` to answer.
 
 Several bots in one channel would all answer `!help`.

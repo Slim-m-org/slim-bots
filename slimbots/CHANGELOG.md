@@ -5,6 +5,13 @@ This project does not yet follow strict semantic versioning - it is pre-1.0, and
 
 ## Unreleased
 
+## 0.27.0
+
+- `Channel` reads the server's two new flags, `canvas_enabled` (the channel has a board now) and `voice_enabled` (the channel has a call), and `parent_message_id`. A server that does not send them leaves each `None`.
+- `Channel.has_canvas` and `Channel.hosts_call` answer "is there a board here" and "can there be a call here" for every kind: threads have neither, a DM has a board but its call is separate, and when a flag is absent the older rule applies (voice and DM have a board, voice has a call). A bot should ask these instead of comparing `kind`; an unknown kind has neither.
+- `bot.voice.find_member` finds a member's call in every channel that `hosts_call`, so it includes a canvas channel with its call on. `listen_voice_chats` hears the chat of every such channel.
+- Works unchanged against a server that sends neither flag.
+
 ## 0.23.0
 
 - A bot can run as a slim-m connector (add-on API level 7): `Bot(connector=True)`, or `SLIMM_CONNECTOR=1`. Its settings are read once from the Dock (`GET /connectors/me`, `PELICAN_URL` reads `pelican_url`) before the environment, and it publishes no `PUT /bots/commands` since its manifest declares the commands. Needs a slim-m server at add-on level 7.

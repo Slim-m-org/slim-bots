@@ -550,13 +550,13 @@ class Bot:
         return None
 
     def _listens_in(self, channel_id: str | None) -> bool:
-        """Whether frames for `channel_id` are ours: scoped in, or a voice channel's chat when that is opted into."""
+        """Whether frames for `channel_id` are ours: scoped in, or the chat of a channel that hosts a call when that is opted into."""
         if self.channels is None or channel_id in self.channels:
             return True
         if not self.listen_voice_chats or self.space is None:
             return False
         channel = self.space.channels.get(channel_id) if channel_id else None
-        return channel is not None and channel.kind == "voice"
+        return channel is not None and channel.hosts_call
 
     async def _accepts_channel(self, channel_id: str | None, kind: str) -> bool:
         """`_listens_in`, plus one rate-limited channel refresh when `channel_id` is unknown; logs a drop at debug."""

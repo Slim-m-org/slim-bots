@@ -237,7 +237,7 @@ class Voice:
 
     async def _find_member_via_roster(self, user_id: str) -> str | None:
         assert self._bot.space is not None and self._bot.client is not None, "find_member needs an open connection"
-        voice_channel_ids = [c.id for c in self._bot.space.channels.values() if c.kind == "voice"]
+        voice_channel_ids = [c.id for c in self._bot.space.channels.values() if c.hosts_call]
         rosters = await asyncio.gather(
             *(self._bot.client.voice_roster(channel_id) for channel_id in voice_channel_ids),
             return_exceptions=True,

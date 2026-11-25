@@ -74,6 +74,10 @@ class Member:
         return f"Member(id={self.id!r}, username={self.username!r})"
 
 
+def _optional_bool(value: Any) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
 class Channel:
     """A slim-m channel; `.restricted` is True when @everyone cannot view it, None when the server did not say."""
 
@@ -84,6 +88,31 @@ class Channel:
         self.topic = data.get("topic")
         self.category_id = data.get("category_id")
         self.restricted: bool | None = data.get("restricted")
+        self.parent_message_id: str | None = data.get("parent_message_id")
+        self.canvas_enabled: bool | None = _optional_bool(data.get("canvas_enabled"))
+        self.voice_enabled: bool | None = _optional_bool(data.get("voice_enabled"))
+
+    @property
+    def is_thread(self) -> bool:
+        return bool(self.parent_message_id)
+
+    @property
+    def has_canvas(self) -> bool:
+        """Whether this channel has a board now; an older server omits the field, and then voice and DM channels have one."""
+        if self.is_thread:
+            return False
+        if self.canvas_enabled is not None:
+            return self.canvas_enabled
+        return self.kind in ("voice", "dm")
+
+    @property
+    def hosts_call(self) -> bool:
+        """Whether this channel hosts a call (a DM call is separate); an older server omits the field, and then voice channels do."""
+        if self.is_thread or self.kind == "dm":
+            return False
+        if self.voice_enabled is not None:
+            return self.voice_enabled
+        return self.kind == "voice"
 
     def __repr__(self) -> str:
         return f"Channel(id={self.id!r}, name={self.name!r})"
